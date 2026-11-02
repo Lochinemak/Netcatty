@@ -121,6 +121,23 @@ hides the features when they are absent):
 The `electron/` directory is untouched; `npm run dev` still runs the Electron
 build so both backends can be compared while the port matures.
 
+## End-to-end tests
+
+`crates/netcatty-e2e` holds tests that run the SSH, SFTP and port-forwarding
+crates against a real OpenSSH server (password and publickey auth, exec,
+interactive shell with resize and exit codes, host-key prompt / trusted /
+changed flows, SFTP browse and edit with non-ASCII names, a 3 MB upload and
+download with progress and `.part` staging, local / dynamic SOCKS5 / remote
+forwards). They are skipped unless `NETCATTY_E2E_SSH_HOST` is set. With
+Docker installed:
+
+```bash
+rust/scripts/e2e-sshd/run.sh
+```
+
+builds a throwaway Alpine sshd container, runs the suite and removes the
+container again. On 2026-11-03 all 10 tests passed against it.
+
 ## Conventions
 
 * Commands are `snake_case`; renderer-facing JSON is camelCase.

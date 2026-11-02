@@ -1,0 +1,20 @@
+[package]
+name = "netcatty-e2e"
+description = "Opt-in end-to-end tests against a real sshd (see tests/README in this crate)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+
+[dev-dependencies]
+netcatty-core = { workspace = true }
+netcatty-ssh = { workspace = true }
+netcatty-sftp = { workspace = true }
+netcatty-forward = { workspace = true }
+tokio = { workspace = true }
+async-trait = { workspace = true }
+tempfile = "3"
+bytes = { workspace = true }

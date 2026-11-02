@@ -10,6 +10,7 @@ use crate::SshCallbacks;
 use russh::client::Handle;
 use std::borrow::Cow;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::Mutex;
 
 /// An authenticated connection to the target host (through any jump hops).
@@ -90,12 +91,23 @@ impl SshConnection {
                 }
             }
         }
+        // `Handle::disconnect` only queues the message; the session task
+        // winds down shortly after. Wait (bounded) so callers can rely on
+        // `is_closed()` once this returns.
+        let deadline = tokio::time::Instant::now() + DISCONNECT_SETTLE_TIMEOUT;
+        while !self.handle.is_closed() && tokio::time::Instant::now() < deadline {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
         match first_err {
             Some(e) => Err(e),
             None => Ok(()),
         }
     }
 }
+
+/// Upper bound on how long [`SshConnection::disconnect`] waits for the
+/// session task to observe the disconnect.
+const DISCONNECT_SETTLE_TIMEOUT: Duration = Duration::from_secs(2);
 
 /// Build the russh client configuration for one hop.
 pub fn build_client_config(hop: &HopOptions) -> russh::client::Config {

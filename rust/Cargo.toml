@@ -8,6 +8,7 @@ members = [
   "crates/netcatty-pty",
   "crates/netcatty-localfs",
   "crates/netcatty-store",
+  "crates/netcatty-e2e",
   "apps/netcatty-desktop",
 ]
 
