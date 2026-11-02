@@ -17,7 +17,9 @@ pub struct AppState<R: Runtime> {
     pub app: AppHandle<R>,
     pub paths: AppPaths,
     pub store: KvStore,
-    pub cipher: CredentialCipher,
+    /// Credential cipher, loaded on first use (see [`AppState::cipher`]) so
+    /// keychain access never sits on the startup path.
+    cipher: std::sync::OnceLock<CredentialCipher>,
     pub sessions: SessionRegistry<R>,
     /// Open SFTP browsers keyed by `sftpId`. Shared with the session
     /// registry so connection release can see SFTP leases.
@@ -64,13 +66,29 @@ impl<R: Runtime> AppState<R> {
     /// Build the state with the credential master key from the OS keychain
     /// (see [`CredentialCipher::load_or_create`]).
     pub fn new(app: AppHandle<R>) -> Self {
-        let cipher = CredentialCipher::load_or_create();
-        Self::with_cipher(app, cipher)
+        Self::build(app, None)
+    }
+
+    /// The credential cipher, loading the master key on first use
+    /// ([`CredentialCipher::load_or_create_for`]: keychain in release
+    /// builds, a file in the data directory in debug builds).
+    pub fn cipher(&self) -> &CredentialCipher {
+        self.cipher.get_or_init(|| {
+            let cipher = CredentialCipher::load_or_create_for(&self.paths.data_dir);
+            if !cipher.available() {
+                tracing::warn!("credential cipher unavailable; secrets will be stored unencrypted");
+            }
+            cipher
+        })
     }
 
     /// Build the state with an explicit credential cipher. Used by the
     /// headless IPC tests, which must not touch the user's keychain.
     pub fn with_cipher(app: AppHandle<R>, cipher: CredentialCipher) -> Self {
+        Self::build(app, Some(cipher))
+    }
+
+    fn build(app: AppHandle<R>, cipher: Option<CredentialCipher>) -> Self {
         let paths = AppPaths::resolve();
         for dir in [
             paths.store_dir(),
@@ -83,8 +101,9 @@ impl<R: Runtime> AppState<R> {
             }
         }
         let store = KvStore::new(paths.store_dir());
-        if !cipher.available() {
-            tracing::warn!("credential cipher unavailable; secrets will be stored unencrypted");
+        let cipher_slot = std::sync::OnceLock::new();
+        if let Some(cipher) = cipher {
+            let _ = cipher_slot.set(cipher);
         }
         let prompts = Arc::new(PromptBroker::new(app.clone()));
         let tunnels = Arc::new(TunnelRegistry::new());
@@ -95,7 +114,7 @@ impl<R: Runtime> AppState<R> {
             app,
             paths,
             store,
-            cipher,
+            cipher: cipher_slot,
             sessions,
             sftp,
             tunnels,

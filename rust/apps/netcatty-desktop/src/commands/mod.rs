@@ -58,6 +58,7 @@ pub fn handler<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + 
 {
     tauri::generate_handler![
         app::app_get_version,
+        app::app_renderer_log,
         app::app_get_temp_dir_path,
         app::app_reveal_in_folder,
         app::system_info,

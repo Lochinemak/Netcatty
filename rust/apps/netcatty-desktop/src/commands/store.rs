@@ -33,7 +33,7 @@ pub async fn store_keys<R: tauri::Runtime>(state: Ctx<'_, R>) -> CmdResult<Vec<S
 
 #[tauri::command]
 pub fn credentials_available<R: tauri::Runtime>(state: Ctx<'_, R>) -> bool {
-    state.cipher.available()
+    state.cipher().available()
 }
 
 #[tauri::command]
@@ -41,7 +41,7 @@ pub fn credentials_encrypt<R: tauri::Runtime>(
     state: Ctx<'_, R>,
     plaintext: String,
 ) -> CmdResult<String> {
-    state.cipher.encrypt(&plaintext)
+    state.cipher().encrypt(&plaintext)
 }
 
 #[tauri::command]
@@ -49,7 +49,7 @@ pub fn credentials_decrypt<R: tauri::Runtime>(
     state: Ctx<'_, R>,
     value: String,
 ) -> CmdResult<String> {
-    state.cipher.decrypt(&value)
+    state.cipher().decrypt(&value)
 }
 
 #[tauri::command]

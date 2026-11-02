@@ -765,6 +765,18 @@ export function createTauriBridge(options: CreateTauriBridgeOptions = {}): Netca
     getSystemInfo: () => invoke<BridgeResult<'getSystemInfo'>>('system_info'),
 
     // -----------------------------------------------------------------------
+    // App lock (not ported yet). The AppLockGate renders nothing until the
+    // runtime state reports `initialized: true`, so an initialized, unlocked
+    // state is required for the UI to appear at all. Mutations are refused.
+    // -----------------------------------------------------------------------
+    getAppLockRuntimeState: async () => unlockedAppLockRuntimeState(),
+    onAppLockRuntimeStateChanged: () => () => {},
+    onAppLockSettingsChanged: () => () => {},
+    setAppLockRuntimeLocked: async () => unlockedAppLockRuntimeState(),
+    reportAppLockActivity: async () => {},
+    requestAppLockUnlock: async () => ({ ok: true }),
+
+    // -----------------------------------------------------------------------
     // Credentials
     // -----------------------------------------------------------------------
     credentialsAvailable: () => invoke<boolean>('credentials_available'),
@@ -823,6 +835,20 @@ export function createTauriBridge(options: CreateTauriBridgeOptions = {}): Netca
 
   return bridge as NetcattyBridge;
 }
+
+/** App lock is not available in the Tauri build: always initialized and unlocked. */
+const unlockedAppLockRuntimeState = (): BridgeResult<'getAppLockRuntimeState'> => {
+  const now = Date.now();
+  return {
+    initialized: true,
+    locked: false,
+    reason: null,
+    version: 0,
+    lastLockedAt: null,
+    lastUnlockedAt: now,
+    lastActivityAt: now,
+  };
+};
 
 const firstPath = (selection: string | string[] | null): string | null => {
   if (Array.isArray(selection)) return selection.length > 0 ? selection[0] : null;

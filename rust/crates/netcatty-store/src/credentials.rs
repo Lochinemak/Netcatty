@@ -12,6 +12,8 @@ pub const ENC_PREFIX_V2: &str = "enc:v2:";
 /// Keychain coordinates of the master key.
 pub const KEYRING_SERVICE: &str = "netcatty";
 pub const KEYRING_USER: &str = "credential-master-key";
+/// File name of the debug-build master key inside the data directory.
+pub const DEV_KEY_FILE_NAME: &str = "credential-master-key";
 
 const KEY_LEN: usize = 32;
 const NONCE_LEN: usize = 12;
@@ -48,6 +50,39 @@ impl CredentialCipher {
             Ok(key) => Self { key: Some(key) },
             Err(reason) => {
                 tracing::warn!(%reason, "credential master key unavailable; credential encryption disabled");
+                Self { key: None }
+            }
+        }
+    }
+
+    /// Load the master key with the strategy appropriate for this build:
+    ///
+    /// * release builds: the OS keychain (see [`Self::load_or_create`]);
+    /// * debug builds: a `0600` file `<data_dir>/credential-master-key`,
+    ///   because every rebuild of an unsigned development binary changes
+    ///   its code signature and macOS would prompt for keychain access on
+    ///   each start. Set `NETCATTY_USE_KEYCHAIN=1` to force the keychain in
+    ///   debug builds (for example to test the keychain path).
+    ///
+    /// The two stores are independent: secrets encrypted by a debug build
+    /// are not readable by a release build and vice versa.
+    pub fn load_or_create_for(data_dir: &std::path::Path) -> Self {
+        let force_keychain = std::env::var("NETCATTY_USE_KEYCHAIN")
+            .map(|v| v == "1")
+            .unwrap_or(false);
+        if cfg!(debug_assertions) && !force_keychain {
+            tracing::info!("debug build: using a file-backed credential master key");
+            return Self::load_or_create_file(&data_dir.join(DEV_KEY_FILE_NAME));
+        }
+        Self::load_or_create()
+    }
+
+    /// Load (or generate and persist) a base64 master key stored in `path`.
+    pub fn load_or_create_file(path: &std::path::Path) -> Self {
+        match load_or_create_file_key(path) {
+            Ok(key) => Self { key: Some(key) },
+            Err(reason) => {
+                tracing::warn!(%reason, path = %path.display(), "file-backed master key unavailable; credential encryption disabled");
                 Self { key: None }
             }
         }
@@ -140,19 +175,7 @@ fn load_or_create_key() -> Result<[u8; KEY_LEN], String> {
     match entry.get_password() {
         Ok(stored) => {
             let stored = Zeroizing::new(stored);
-            let decoded = Zeroizing::new(
-                B64.decode(stored.as_bytes())
-                    .map_err(|_| "stored master key is not valid base64".to_string())?,
-            );
-            if decoded.len() != KEY_LEN {
-                return Err(format!(
-                    "stored master key has {} bytes, expected {KEY_LEN}",
-                    decoded.len()
-                ));
-            }
-            let mut key = [0u8; KEY_LEN];
-            key.copy_from_slice(&decoded);
-            Ok(key)
+            decode_key(stored.as_bytes())
         }
         Err(keyring::Error::NoEntry) => {
             let mut key = [0u8; KEY_LEN];
@@ -169,9 +192,90 @@ fn load_or_create_key() -> Result<[u8; KEY_LEN], String> {
     }
 }
 
+fn decode_key(encoded: &[u8]) -> Result<[u8; KEY_LEN], String> {
+    let decoded = Zeroizing::new(
+        B64.decode(encoded)
+            .map_err(|_| "stored master key is not valid base64".to_string())?,
+    );
+    if decoded.len() != KEY_LEN {
+        return Err(format!(
+            "stored master key has {} bytes, expected {KEY_LEN}",
+            decoded.len()
+        ));
+    }
+    let mut key = [0u8; KEY_LEN];
+    key.copy_from_slice(&decoded);
+    Ok(key)
+}
+
+fn load_or_create_file_key(path: &std::path::Path) -> Result<[u8; KEY_LEN], String> {
+    match std::fs::read(path) {
+        Ok(stored) => {
+            let stored = Zeroizing::new(stored);
+            let trimmed = stored
+                .iter()
+                .copied()
+                .filter(|b| !b.is_ascii_whitespace())
+                .collect::<Vec<u8>>();
+            decode_key(&trimmed)
+        }
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+            let mut key = [0u8; KEY_LEN];
+            fill_random(&mut key)?;
+            let encoded = Zeroizing::new(B64.encode(key));
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent)
+                    .map_err(|e| format!("cannot create {}: {e}", parent.display()))?;
+            }
+            let write = || -> std::io::Result<()> {
+                let mut options = std::fs::OpenOptions::new();
+                options.write(true).create_new(true);
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::OpenOptionsExt;
+                    options.mode(0o600);
+                }
+                use std::io::Write as _;
+                let mut file = options.open(path)?;
+                file.write_all(encoded.as_bytes())?;
+                file.write_all(b"\n")?;
+                file.sync_all()
+            };
+            if let Err(err) = write() {
+                key.zeroize();
+                return Err(format!("failed to write master key file: {err}"));
+            }
+            tracing::info!(path = %path.display(), "generated a new file-backed credential master key");
+            Ok(key)
+        }
+        Err(err) => Err(format!("cannot read master key file: {err}")),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn file_backed_key_round_trips_and_is_stable() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("sub").join("credential-master-key");
+        let a = CredentialCipher::load_or_create_file(&path);
+        assert!(a.available());
+        let enc = a.encrypt("s3cret").unwrap();
+        let b = CredentialCipher::load_or_create_file(&path);
+        assert_eq!(b.decrypt(&enc).unwrap(), "s3cret");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+                0o600
+            );
+        }
+        std::fs::write(&path, "not base64!").unwrap();
+        assert!(!CredentialCipher::load_or_create_file(&path).available());
+    }
 
     fn cipher() -> CredentialCipher {
         let mut key = [0u8; 32];

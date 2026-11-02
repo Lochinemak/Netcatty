@@ -5,5 +5,7 @@
  * Under Electron `isTauri()` is false and this is a no-op.
  */
 import { installTauriBridge } from './installTauriBridge';
+import { installRendererDiagnostics } from './rendererDiagnostics';
 
+installRendererDiagnostics();
 installTauriBridge();

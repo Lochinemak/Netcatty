@@ -33,3 +33,18 @@ pub async fn app_reveal_in_folder<R: tauri::Runtime>(
 pub fn system_info() -> SystemInfo {
     netcatty_localfs::system_info()
 }
+
+/// Renderer diagnostics (uncaught errors, unhandled rejections, console
+/// errors) forwarded by the Tauri bridge adapter so they show up next to the
+/// backend logs. Messages are truncated; nothing is parsed or acted upon.
+#[tauri::command]
+pub fn app_renderer_log(level: String, message: String, source: Option<String>) {
+    const MAX: usize = 4096;
+    let message: String = message.chars().take(MAX).collect();
+    let source = source.unwrap_or_default();
+    match level.as_str() {
+        "error" => tracing::error!(target: "renderer", %source, "{message}"),
+        "warn" => tracing::warn!(target: "renderer", %source, "{message}"),
+        _ => tracing::info!(target: "renderer", %source, "{message}"),
+    }
+}
