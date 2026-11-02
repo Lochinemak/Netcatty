@@ -2,7 +2,7 @@
 
 use super::session::SuccessResult;
 use super::CmdResult;
-use crate::state::AppState;
+use crate::state::Ctx;
 use netcatty_core::ipc::{
     GenerateKeyPairOptions, GenerateKeyPairResult, HostKeyVerifyResponse,
     KeyboardInteractiveResponse, PassphraseResponse,
@@ -11,7 +11,6 @@ use netcatty_core::models::KnownHost;
 use netcatty_core::CoreError;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
-use tauri::State;
 
 #[tauri::command]
 pub fn ssh_generate_key_pair(payload: GenerateKeyPairOptions) -> CmdResult<GenerateKeyPairResult> {
@@ -142,8 +141,8 @@ pub async fn ssh_read_known_hosts() -> CmdResult<Vec<KnownHost>> {
 }
 
 #[tauri::command]
-pub fn ssh_respond_host_key(
-    state: State<'_, AppState>,
+pub fn ssh_respond_host_key<R: tauri::Runtime>(
+    state: Ctx<'_, R>,
     payload: HostKeyVerifyResponse,
 ) -> SuccessResult {
     if state.prompts.resolve_host_key(payload) {
@@ -154,8 +153,8 @@ pub fn ssh_respond_host_key(
 }
 
 #[tauri::command]
-pub fn ssh_respond_keyboard_interactive(
-    state: State<'_, AppState>,
+pub fn ssh_respond_keyboard_interactive<R: tauri::Runtime>(
+    state: Ctx<'_, R>,
     payload: KeyboardInteractiveResponse,
 ) -> SuccessResult {
     if state.prompts.resolve_keyboard_interactive(payload) {
@@ -166,8 +165,8 @@ pub fn ssh_respond_keyboard_interactive(
 }
 
 #[tauri::command]
-pub fn ssh_respond_passphrase(
-    state: State<'_, AppState>,
+pub fn ssh_respond_passphrase<R: tauri::Runtime>(
+    state: Ctx<'_, R>,
     payload: PassphraseResponse,
 ) -> SuccessResult {
     if state.prompts.resolve_passphrase(payload) {

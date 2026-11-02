@@ -152,8 +152,7 @@ async fn wrong_password_is_auth_failed() {
         Arc::new(UnattendedCallbacks),
     )
     .await
-    .err()
-    .expect("must fail");
+    .expect_err("must fail");
     assert!(
         matches!(err, netcatty_ssh::SshError::AuthFailed(_)),
         "{err:?}"
@@ -367,8 +366,7 @@ async fn host_key_prompt_then_trusted_then_changed() {
         reject.clone(),
     )
     .await
-    .err()
-    .expect("changed key rejected");
+    .expect_err("changed key rejected");
     assert!(reject
         .seen
         .lock()
@@ -433,8 +431,7 @@ async fn sftp_browse_and_edit() {
     let err = sftp
         .delete(&renamed, Some(FileEntryType::Directory), None)
         .await
-        .err()
-        .expect("stale");
+        .expect_err("stale");
     assert!(
         matches!(err, netcatty_sftp::SftpError::Stale { .. }),
         "{err:?}"

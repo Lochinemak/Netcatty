@@ -4,7 +4,7 @@ use super::session::SuccessResult;
 use super::CmdResult;
 use crate::connect;
 use crate::events;
-use crate::state::AppState;
+use crate::state::{AppState, Ctx};
 use netcatty_core::ipc::{
     events as ev, PortForwardOptions, PortForwardSnapshot, PortForwardStartResult,
     PortForwardTunnelInfo,
@@ -12,7 +12,7 @@ use netcatty_core::ipc::{
 use netcatty_core::models::PortForwardingStatus;
 use netcatty_forward::{TunnelEvent, TunnelSpec};
 use serde::Serialize;
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Runtime};
 use tokio::sync::broadcast;
 
 #[derive(Debug, Clone, Serialize)]
@@ -24,7 +24,10 @@ pub struct TunnelStatusResult {
 }
 
 /// Forward registry events to the renderer for the lifetime of the app.
-pub fn spawn_tunnel_event_forwarder(app: AppHandle, mut rx: broadcast::Receiver<TunnelEvent>) {
+pub fn spawn_tunnel_event_forwarder<R: Runtime>(
+    app: AppHandle<R>,
+    mut rx: broadcast::Receiver<TunnelEvent>,
+) {
     tauri::async_runtime::spawn(async move {
         loop {
             match rx.recv().await {
@@ -62,8 +65,8 @@ pub fn spec_from(payload: &PortForwardOptions) -> TunnelSpec {
 /// `singleChannelSsh != true`), then activate. Status transitions are
 /// published as events; this resolves once the tunnel is active or failed.
 #[tauri::command]
-pub async fn portforward_start(
-    state: State<'_, AppState>,
+pub async fn portforward_start<R: tauri::Runtime>(
+    state: Ctx<'_, R>,
     payload: PortForwardOptions,
 ) -> CmdResult<PortForwardStartResult> {
     if payload.tunnel_id.trim().is_empty() {
@@ -153,7 +156,7 @@ pub async fn portforward_start(
 }
 
 /// Release the private connection of a stopped tunnel, if any.
-async fn release_tunnel_connection(state: &AppState, tunnel_id: &str) {
+async fn release_tunnel_connection<R: Runtime>(state: &AppState<R>, tunnel_id: &str) {
     state
         .prompts
         .cancel_session_with_reason(tunnel_id, "tunnel-stopped");
@@ -163,8 +166,8 @@ async fn release_tunnel_connection(state: &AppState, tunnel_id: &str) {
 }
 
 #[tauri::command]
-pub async fn portforward_stop(
-    state: State<'_, AppState>,
+pub async fn portforward_stop<R: tauri::Runtime>(
+    state: Ctx<'_, R>,
     tunnel_id: String,
 ) -> CmdResult<SuccessResult> {
     let result = state.tunnels.stop(&tunnel_id).await;
@@ -177,8 +180,8 @@ pub async fn portforward_stop(
 }
 
 #[tauri::command]
-pub async fn portforward_stop_by_rule(
-    state: State<'_, AppState>,
+pub async fn portforward_stop_by_rule<R: tauri::Runtime>(
+    state: Ctx<'_, R>,
     rule_id: String,
 ) -> CmdResult<SuccessResult> {
     let tunnel_id = state
@@ -197,7 +200,9 @@ pub async fn portforward_stop_by_rule(
 }
 
 #[tauri::command]
-pub async fn portforward_stop_all(state: State<'_, AppState>) -> CmdResult<SuccessResult> {
+pub async fn portforward_stop_all<R: tauri::Runtime>(
+    state: Ctx<'_, R>,
+) -> CmdResult<SuccessResult> {
     state.tunnels.stop_all().await;
     let ids: Vec<String> = state
         .tunnel_connections
@@ -211,8 +216,8 @@ pub async fn portforward_stop_all(state: State<'_, AppState>) -> CmdResult<Succe
 }
 
 #[tauri::command]
-pub fn portforward_status(
-    state: State<'_, AppState>,
+pub fn portforward_status<R: tauri::Runtime>(
+    state: Ctx<'_, R>,
     tunnel_id: String,
 ) -> CmdResult<TunnelStatusResult> {
     Ok(match state.tunnels.status(&tunnel_id) {
@@ -225,12 +230,12 @@ pub fn portforward_status(
 }
 
 #[tauri::command]
-pub fn portforward_list(state: State<'_, AppState>) -> Vec<PortForwardTunnelInfo> {
+pub fn portforward_list<R: tauri::Runtime>(state: Ctx<'_, R>) -> Vec<PortForwardTunnelInfo> {
     state.tunnels.list()
 }
 
 #[tauri::command]
-pub fn portforward_snapshot(state: State<'_, AppState>) -> PortForwardSnapshot {
+pub fn portforward_snapshot<R: tauri::Runtime>(state: Ctx<'_, R>) -> PortForwardSnapshot {
     state.tunnels.snapshot()
 }
 

@@ -50,11 +50,12 @@ npm run build:plugin-runtime-deps   # once; builds the @netcatty/plugin-* worksp
 npm run tauri:dev               # starts Vite on :5173 and the Tauri app
 ```
 
-Status of the first run (2026-11-03): `npm run tauri:dev` compiles, Vite
-starts and the native window opens; the renderer failed to load until the
-plugin workspace packages were built (second command above). Interactive
-verification of a local shell and an SSH login inside the Tauri window is
-still pending.
+Status (2026-11-03): `npm run tauri:dev` compiles, Vite starts, the native
+window opens and the renderer connects to Vite HMR (it needs the plugin
+workspace packages built first, second command above). Backend behaviour is
+covered by the headless IPC tests and the sshd end-to-end suite below;
+clicking through the UI inside the Tauri window is the remaining manual
+check.
 
 Other commands:
 
@@ -120,6 +121,21 @@ hides the features when they are absent):
 
 The `electron/` directory is untouched; `npm run dev` still runs the Electron
 build so both backends can be compared while the port matures.
+
+## Headless IPC tests
+
+`apps/netcatty-desktop/tests/ipc_smoke.rs` drives the real command dispatch,
+managed state and event emission through `tauri::test`'s mock runtime (no
+window): local shell start → write → `netcatty:data` → resize → close →
+exactly one `netcatty:exit`, the store and credential commands, local file
+commands including the raw-body / raw-response binary path, and shell
+discovery. The crate is generic over `tauri::Runtime` for this reason;
+commands take `Ctx<'_, R>` (a thin `State<AppState<R>>` extractor).
+
+Note for packaging: `CredentialCipher::load_or_create` runs synchronously in
+the Tauri `setup` hook and talks to the OS keychain; unsigned development
+binaries trigger a keychain prompt on macOS, which delays window creation
+until the user answers.
 
 ## End-to-end tests
 

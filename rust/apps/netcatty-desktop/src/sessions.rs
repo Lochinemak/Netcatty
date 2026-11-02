@@ -28,7 +28,7 @@ use netcatty_ssh::shell::ShellEvent;
 use netcatty_ssh::{ShellSession, SshConnection};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use tauri::AppHandle;
+use tauri::{AppHandle, Runtime};
 use tokio::sync::mpsc::error::TryRecvError;
 use tokio::sync::{mpsc, Mutex, Notify};
 
@@ -77,8 +77,8 @@ pub struct SessionFlags {
 pub type SftpMap = Arc<dashmap::DashMap<String, Arc<SftpClient>>>;
 
 /// State shared by the registry handle and every pump task.
-pub(crate) struct Shared {
-    pub app: AppHandle,
+pub(crate) struct Shared<R: Runtime> {
+    pub app: AppHandle<R>,
     pub sessions: dashmap::DashMap<String, Arc<Mutex<SessionEntry>>>,
     pub flags: dashmap::DashMap<String, Arc<SessionFlags>>,
     /// Session id → its SSH connection (lock-free view for transport reuse).
@@ -87,10 +87,19 @@ pub(crate) struct Shared {
     pub sftp: SftpMap,
 }
 
-#[derive(Clone)]
-pub struct SessionRegistry {
-    pub app: AppHandle,
-    pub(crate) shared: Arc<Shared>,
+pub struct SessionRegistry<R: Runtime> {
+    pub app: AppHandle<R>,
+    pub(crate) shared: Arc<Shared<R>>,
+}
+
+// Manual impl: `#[derive(Clone)]` would require `R: Clone`.
+impl<R: Runtime> Clone for SessionRegistry<R> {
+    fn clone(&self) -> Self {
+        Self {
+            app: self.app.clone(),
+            shared: self.shared.clone(),
+        }
+    }
 }
 
 /// Unified backend event.
@@ -153,8 +162,8 @@ fn not_found(session_id: &str) -> CoreError {
     CoreError::not_found(format!("session {session_id} not found"))
 }
 
-impl SessionRegistry {
-    pub fn new(app: AppHandle, sftp: SftpMap) -> Self {
+impl<R: Runtime> SessionRegistry<R> {
+    pub fn new(app: AppHandle<R>, sftp: SftpMap) -> Self {
         Self {
             app: app.clone(),
             shared: Arc::new(Shared {
@@ -324,7 +333,7 @@ impl SessionRegistry {
     }
 }
 
-impl Shared {
+impl<R: Runtime> Shared<R> {
     fn connection_in_use(&self, conn: &Arc<SshConnection>) -> bool {
         self.connections
             .iter()
@@ -371,8 +380,8 @@ impl Shared {
 }
 
 /// Deliver decoded text: emit immediately, or buffer while paused.
-fn deliver(
-    app: &AppHandle,
+fn deliver<R: Runtime>(
+    app: &AppHandle<R>,
     session_id: &str,
     flags: &SessionFlags,
     pending: &mut String,
@@ -407,8 +416,8 @@ fn deliver(
     );
 }
 
-async fn pump(
-    shared: Arc<Shared>,
+async fn pump<R: Runtime>(
+    shared: Arc<Shared<R>>,
     session_id: String,
     mut source: Source,
     mut decoder: StreamDecoder,

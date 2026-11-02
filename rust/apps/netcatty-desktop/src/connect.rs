@@ -9,6 +9,7 @@ use netcatty_core::ipc::{events as ev, AuthFailedEvent, SshSessionOptions};
 use netcatty_core::{CoreError, CoreResult};
 use netcatty_ssh::{ConnectOptions, SshCallbacks, SshConnection, SshError};
 use std::sync::Arc;
+use tauri::Runtime;
 
 pub struct Acquired {
     pub connection: Arc<SshConnection>,
@@ -46,8 +47,8 @@ pub fn endpoint_matches(conn: &SshConnection, payload: &SshSessionOptions) -> bo
 ///   same endpoint (SFTP browsers and tunnels do this; terminals do not).
 /// * Otherwise dial with prompt callbacks bound to `prompt_session_id`. An
 ///   authentication failure emits `netcatty:auth:failed` before returning.
-pub async fn acquire(
-    state: &AppState,
+pub async fn acquire<R: Runtime>(
+    state: &AppState<R>,
     payload: &SshSessionOptions,
     prompt_session_id: &str,
     allow_endpoint_reuse: bool,
@@ -103,8 +104,8 @@ pub async fn acquire(
 }
 
 /// Prompt callbacks bound to `session_id` for this payload.
-pub fn callbacks_for(
-    state: &AppState,
+pub fn callbacks_for<R: Runtime>(
+    state: &AppState<R>,
     payload: &SshSessionOptions,
     session_id: &str,
 ) -> Arc<dyn SshCallbacks> {
@@ -118,8 +119,8 @@ pub fn callbacks_for(
 }
 
 /// Dial a fresh connection; emits `netcatty:auth:failed` on `AuthFailed`.
-pub async fn dial(
-    state: &AppState,
+pub async fn dial<R: Runtime>(
+    state: &AppState<R>,
     payload: &SshSessionOptions,
     session_id: &str,
     callbacks: Arc<dyn SshCallbacks>,

@@ -2,13 +2,12 @@
 
 use super::{raw_body, require_header, CmdResult};
 use crate::events;
-use crate::state::AppState;
+use crate::state::Ctx;
 use netcatty_core::ipc::{events as ev, LocalTreeEntry, LocalTreeProgressEvent};
 use netcatty_core::models::{FileEntryType, RemoteFile, StatResult};
 use netcatty_core::CoreError;
 use netcatty_localfs::TreeLimits;
 use serde::Deserialize;
-use tauri::State;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
@@ -91,8 +90,8 @@ impl From<TreeLimitsPayload> for TreeLimits {
 /// `netcatty:local:tree-progress` keyed by `scanId`. Cancel with
 /// `local_cancel_tree_scan`.
 #[tauri::command]
-pub async fn local_list_tree(
-    state: State<'_, AppState>,
+pub async fn local_list_tree<R: tauri::Runtime>(
+    state: Ctx<'_, R>,
     scan_id: String,
     path: String,
     limits: Option<TreeLimitsPayload>,
@@ -138,7 +137,10 @@ pub async fn local_list_tree(
 }
 
 #[tauri::command]
-pub async fn local_cancel_tree_scan(state: State<'_, AppState>, scan_id: String) -> CmdResult<()> {
+pub async fn local_cancel_tree_scan<R: tauri::Runtime>(
+    state: Ctx<'_, R>,
+    scan_id: String,
+) -> CmdResult<()> {
     if let Some(token) = state.tree_scans.get(&scan_id) {
         token.cancel();
     }

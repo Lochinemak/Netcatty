@@ -3,7 +3,7 @@
 use super::CmdResult;
 use crate::connect;
 use crate::sessions::{line_delay_ms, split_line_writes, SessionBackend, SessionEntry};
-use crate::state::AppState;
+use crate::state::Ctx;
 use base64::Engine;
 use netcatty_core::ipc::{
     DiscoveredShell, ExecCommandOptions, ExecResult, LocalSessionOptions, PathValidation,
@@ -16,7 +16,6 @@ use netcatty_ssh::{SshCallbacks, UnattendedCallbacks};
 use serde::Serialize;
 use std::sync::Arc;
 use std::time::Duration;
-use tauri::State;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -102,8 +101,8 @@ pub fn software_from_banner(banner: &str) -> String {
 /// Start an interactive SSH shell. Resolves with the session id once the
 /// shell channel is open; connection progress / prompts arrive as events.
 #[tauri::command]
-pub async fn session_start_ssh(
-    state: State<'_, AppState>,
+pub async fn session_start_ssh<R: tauri::Runtime>(
+    state: Ctx<'_, R>,
     payload: SshSessionOptions,
 ) -> CmdResult<StartSessionResult> {
     connect::validate(&payload)?;
@@ -184,8 +183,8 @@ pub async fn session_start_ssh(
 /// Connect + authenticate + disconnect, reporting errors like a real start.
 /// Cancellable with `session_cancel_test_connection`.
 #[tauri::command]
-pub async fn session_test_connection(
-    state: State<'_, AppState>,
+pub async fn session_test_connection<R: tauri::Runtime>(
+    state: Ctx<'_, R>,
     payload: SshSessionOptions,
 ) -> CmdResult<StartSessionResult> {
     connect::validate(&payload)?;
@@ -235,8 +234,8 @@ pub async fn session_test_connection(
 }
 
 #[tauri::command]
-pub async fn session_cancel_test_connection(
-    state: State<'_, AppState>,
+pub async fn session_cancel_test_connection<R: tauri::Runtime>(
+    state: Ctx<'_, R>,
     session_id: String,
 ) -> CmdResult<SuccessResult> {
     state
@@ -252,8 +251,8 @@ pub async fn session_cancel_test_connection(
 }
 
 #[tauri::command]
-pub async fn session_start_local(
-    state: State<'_, AppState>,
+pub async fn session_start_local<R: tauri::Runtime>(
+    state: Ctx<'_, R>,
     payload: LocalSessionOptions,
 ) -> CmdResult<StartSessionResult> {
     let session_id = session_id_or_new(payload.session_id.as_ref());
@@ -291,8 +290,8 @@ pub async fn session_start_local(
 /// line by line (the command returns immediately; writes continue in the
 /// background).
 #[tauri::command]
-pub async fn session_write(
-    state: State<'_, AppState>,
+pub async fn session_write<R: tauri::Runtime>(
+    state: Ctx<'_, R>,
     payload: WriteToSessionPayload,
 ) -> CmdResult<()> {
     match plan_write(&payload)? {
@@ -328,7 +327,10 @@ pub async fn session_write(
 }
 
 #[tauri::command]
-pub async fn session_resize(state: State<'_, AppState>, payload: ResizePayload) -> CmdResult<()> {
+pub async fn session_resize<R: tauri::Runtime>(
+    state: Ctx<'_, R>,
+    payload: ResizePayload,
+) -> CmdResult<()> {
     state
         .sessions
         .resize(&payload.session_id, payload.cols, payload.rows)
@@ -337,7 +339,10 @@ pub async fn session_resize(state: State<'_, AppState>, payload: ResizePayload) 
 
 /// Send an interrupt (Ctrl-C) to the session's foreground process.
 #[tauri::command]
-pub async fn session_interrupt(state: State<'_, AppState>, session_id: String) -> CmdResult<()> {
+pub async fn session_interrupt<R: tauri::Runtime>(
+    state: Ctx<'_, R>,
+    session_id: String,
+) -> CmdResult<()> {
     state
         .sessions
         .write(&session_id, bytes::Bytes::from_static(b"\x03"))
@@ -347,8 +352,8 @@ pub async fn session_interrupt(state: State<'_, AppState>, session_id: String) -
 /// Renderer back-pressure hint: pauses the output pump (output is buffered,
 /// bounded) until resumed.
 #[tauri::command]
-pub async fn session_set_flow_paused(
-    state: State<'_, AppState>,
+pub async fn session_set_flow_paused<R: tauri::Runtime>(
+    state: Ctx<'_, R>,
     session_id: String,
     paused: bool,
 ) -> CmdResult<()> {
@@ -356,8 +361,8 @@ pub async fn session_set_flow_paused(
 }
 
 #[tauri::command]
-pub async fn session_ack_flow(
-    state: State<'_, AppState>,
+pub async fn session_ack_flow<R: tauri::Runtime>(
+    state: Ctx<'_, R>,
     session_id: String,
     bytes: u64,
 ) -> CmdResult<()> {
@@ -366,7 +371,10 @@ pub async fn session_ack_flow(
 }
 
 #[tauri::command]
-pub async fn session_close(state: State<'_, AppState>, session_id: String) -> CmdResult<()> {
+pub async fn session_close<R: tauri::Runtime>(
+    state: Ctx<'_, R>,
+    session_id: String,
+) -> CmdResult<()> {
     state.prompts.cancel_session(&session_id);
     state.sessions.close(&session_id).await
 }
@@ -375,8 +383,8 @@ pub async fn session_close(state: State<'_, AppState>, session_id: String) -> Cm
 /// else on a fresh connection (unattended unless
 /// `enableKeyboardInteractive`), which is closed afterwards.
 #[tauri::command]
-pub async fn session_exec(
-    state: State<'_, AppState>,
+pub async fn session_exec<R: tauri::Runtime>(
+    state: Ctx<'_, R>,
     payload: ExecCommandOptions,
 ) -> CmdResult<ExecResult> {
     if payload.command.trim().is_empty() {
@@ -429,7 +437,10 @@ pub async fn session_exec(
 /// login home directory is reported; `success: false` when even that is
 /// unavailable. See the "Known gaps" note in `rust/docs/ipc-contract.md`.
 #[tauri::command]
-pub async fn session_pwd(state: State<'_, AppState>, session_id: String) -> CmdResult<PwdResult> {
+pub async fn session_pwd<R: tauri::Runtime>(
+    state: Ctx<'_, R>,
+    session_id: String,
+) -> CmdResult<PwdResult> {
     let Some(entry) = state.sessions.get(&session_id) else {
         return Ok(PwdResult::fail("Session not found or not connected"));
     };
@@ -469,8 +480,8 @@ async fn remote_home_dir(connection: &netcatty_ssh::SshConnection) -> PwdResult 
 }
 
 #[tauri::command]
-pub async fn session_remote_info(
-    state: State<'_, AppState>,
+pub async fn session_remote_info<R: tauri::Runtime>(
+    state: Ctx<'_, R>,
     session_id: String,
 ) -> CmdResult<RemoteInfoResult> {
     let Some(connection) = state.sessions.connection_of(&session_id) else {

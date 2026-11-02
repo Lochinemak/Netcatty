@@ -19,7 +19,7 @@ use netcatty_ssh::{HostKeyDecision, HostKeyInfo, SshCallbacks};
 use serde::Serialize;
 use std::sync::Arc;
 use std::time::Duration;
-use tauri::AppHandle;
+use tauri::{AppHandle, Runtime};
 use tokio::sync::oneshot;
 
 pub const PROMPT_TIMEOUT: Duration = Duration::from_secs(300);
@@ -44,8 +44,8 @@ pub enum PromptKind {
     Passphrase,
 }
 
-pub struct PromptBroker {
-    pub app: AppHandle,
+pub struct PromptBroker<R: Runtime> {
+    pub app: AppHandle<R>,
     pub(crate) host_key: dashmap::DashMap<String, oneshot::Sender<HostKeyVerifyResponse>>,
     pub(crate) keyboard_interactive:
         dashmap::DashMap<String, oneshot::Sender<KeyboardInteractiveResponse>>,
@@ -62,8 +62,8 @@ enum Outcome<T> {
     TimedOut,
 }
 
-impl PromptBroker {
-    pub fn new(app: AppHandle) -> Self {
+impl<R: Runtime> PromptBroker<R> {
+    pub fn new(app: AppHandle<R>) -> Self {
         Self {
             app,
             host_key: dashmap::DashMap::new(),
@@ -197,8 +197,8 @@ impl PromptBroker {
     }
 }
 
-pub struct SessionCallbacks {
-    pub broker: Arc<PromptBroker>,
+pub struct SessionCallbacks<R: Runtime> {
+    pub broker: Arc<PromptBroker<R>>,
     pub session_id: String,
     pub hostname: String,
     pub host_id: Option<String>,
@@ -207,7 +207,7 @@ pub struct SessionCallbacks {
 }
 
 #[async_trait::async_trait]
-impl SshCallbacks for SessionCallbacks {
+impl<R: Runtime> SshCallbacks for SessionCallbacks<R> {
     async fn verify_host_key(&self, info: HostKeyInfo) -> HostKeyDecision {
         let broker = &self.broker;
         let (request_id, rx) =

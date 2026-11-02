@@ -4,7 +4,7 @@ use super::session::SuccessResult;
 use super::{header_str, raw_body, require_header, CmdResult};
 use crate::connect;
 use crate::events;
-use crate::state::AppState;
+use crate::state::{AppState, Ctx};
 use netcatty_core::ipc::{
     events as ev, EndpointType, OpenSftpResult, SftpConnectionProgress, SshSessionOptions,
     StreamTransferOptions, StreamTransferResult, TransferEvent, TransferEventType,
@@ -19,7 +19,7 @@ use netcatty_ssh::SshConnection;
 use serde::Serialize;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Runtime};
 use tokio::sync::{mpsc, oneshot};
 
 #[derive(Debug, Clone, Serialize)]
@@ -35,7 +35,13 @@ pub struct HomeDirResult {
 /// Minimum interval between two `progress` events of one transfer (~10/s).
 pub const PROGRESS_INTERVAL: Duration = Duration::from_millis(100);
 
-fn progress(app: &AppHandle, session_id: &str, label: &str, status: &str, detail: Option<String>) {
+fn progress<R: Runtime>(
+    app: &AppHandle<R>,
+    session_id: &str,
+    label: &str,
+    status: &str,
+    detail: Option<String>,
+) {
     events::emit(
         app,
         ev::SFTP_CONNECTION_PROGRESS,
@@ -72,8 +78,8 @@ fn label_for(payload: &SshSessionOptions) -> String {
 }
 
 /// Open the SFTP subsystem on `connection` and register the client.
-async fn open_on_connection(
-    state: &AppState,
+async fn open_on_connection<R: Runtime>(
+    state: &AppState<R>,
     connection: Arc<SshConnection>,
     reused: bool,
     encoding: SftpFilenameEncoding,
@@ -107,8 +113,8 @@ async fn open_on_connection(
     })
 }
 
-async fn open_inner(
-    state: &AppState,
+async fn open_inner<R: Runtime>(
+    state: &AppState<R>,
     payload: &SshSessionOptions,
     fallback_session_id: Option<String>,
 ) -> CmdResult<OpenSftpResult> {
@@ -149,8 +155,8 @@ async fn open_inner(
 /// `payload.sourceSessionId` (or any live session to the same endpoint) when
 /// `reuseTransport != false`.
 #[tauri::command]
-pub async fn sftp_open(
-    state: State<'_, AppState>,
+pub async fn sftp_open<R: tauri::Runtime>(
+    state: Ctx<'_, R>,
     payload: SshSessionOptions,
 ) -> CmdResult<OpenSftpResult> {
     open_inner(&state, &payload, None).await
@@ -159,8 +165,8 @@ pub async fn sftp_open(
 /// Open an SFTP browser on the connection of an existing terminal session.
 /// Falls back to a regular open with `payload` when the session is gone.
 #[tauri::command]
-pub async fn sftp_open_for_session(
-    state: State<'_, AppState>,
+pub async fn sftp_open_for_session<R: tauri::Runtime>(
+    state: Ctx<'_, R>,
     session_id: String,
     payload: Option<SshSessionOptions>,
 ) -> CmdResult<OpenSftpResult> {
@@ -190,8 +196,8 @@ pub async fn sftp_open_for_session(
 }
 
 #[tauri::command]
-pub async fn sftp_list(
-    state: State<'_, AppState>,
+pub async fn sftp_list<R: tauri::Runtime>(
+    state: Ctx<'_, R>,
     sftp_id: String,
     path: String,
     encoding: Option<SftpFilenameEncoding>,
@@ -200,8 +206,8 @@ pub async fn sftp_list(
 }
 
 #[tauri::command]
-pub async fn sftp_realpath(
-    state: State<'_, AppState>,
+pub async fn sftp_realpath<R: tauri::Runtime>(
+    state: Ctx<'_, R>,
     sftp_id: String,
     path: String,
     encoding: Option<SftpFilenameEncoding>,
@@ -214,8 +220,8 @@ pub async fn sftp_realpath(
 
 /// Read as UTF-8 text (lossy).
 #[tauri::command]
-pub async fn sftp_read(
-    state: State<'_, AppState>,
+pub async fn sftp_read<R: tauri::Runtime>(
+    state: Ctx<'_, R>,
     sftp_id: String,
     path: String,
     encoding: Option<SftpFilenameEncoding>,
@@ -229,8 +235,8 @@ pub async fn sftp_read(
 
 /// Read raw bytes; returned as an `ArrayBuffer` to the renderer.
 #[tauri::command]
-pub async fn sftp_read_binary(
-    state: State<'_, AppState>,
+pub async fn sftp_read_binary<R: tauri::Runtime>(
+    state: Ctx<'_, R>,
     sftp_id: String,
     path: String,
     encoding: Option<SftpFilenameEncoding>,
@@ -243,8 +249,8 @@ pub async fn sftp_read_binary(
 }
 
 #[tauri::command]
-pub async fn sftp_write(
-    state: State<'_, AppState>,
+pub async fn sftp_write<R: tauri::Runtime>(
+    state: Ctx<'_, R>,
     sftp_id: String,
     path: String,
     content: String,
@@ -259,8 +265,8 @@ pub async fn sftp_write(
 /// Binary write: the renderer invokes with a raw `ArrayBuffer` body and
 /// passes `sftpId`, `path`, `encoding` as request headers.
 #[tauri::command]
-pub async fn sftp_write_binary(
-    state: State<'_, AppState>,
+pub async fn sftp_write_binary<R: tauri::Runtime>(
+    state: Ctx<'_, R>,
     request: tauri::ipc::Request<'_>,
 ) -> CmdResult<()> {
     let body = raw_body(&request)?;
@@ -275,8 +281,8 @@ pub async fn sftp_write_binary(
 }
 
 #[tauri::command]
-pub async fn sftp_mkdir(
-    state: State<'_, AppState>,
+pub async fn sftp_mkdir<R: tauri::Runtime>(
+    state: Ctx<'_, R>,
     sftp_id: String,
     path: String,
     encoding: Option<SftpFilenameEncoding>,
@@ -285,8 +291,8 @@ pub async fn sftp_mkdir(
 }
 
 #[tauri::command]
-pub async fn sftp_delete(
-    state: State<'_, AppState>,
+pub async fn sftp_delete<R: tauri::Runtime>(
+    state: Ctx<'_, R>,
     sftp_id: String,
     path: String,
     encoding: Option<SftpFilenameEncoding>,
@@ -299,8 +305,8 @@ pub async fn sftp_delete(
 }
 
 #[tauri::command]
-pub async fn sftp_rename(
-    state: State<'_, AppState>,
+pub async fn sftp_rename<R: tauri::Runtime>(
+    state: Ctx<'_, R>,
     sftp_id: String,
     old_path: String,
     new_path: String,
@@ -313,8 +319,8 @@ pub async fn sftp_rename(
 }
 
 #[tauri::command]
-pub async fn sftp_stat(
-    state: State<'_, AppState>,
+pub async fn sftp_stat<R: tauri::Runtime>(
+    state: Ctx<'_, R>,
     sftp_id: String,
     path: String,
     encoding: Option<SftpFilenameEncoding>,
@@ -323,8 +329,8 @@ pub async fn sftp_stat(
 }
 
 #[tauri::command]
-pub async fn sftp_lstat(
-    state: State<'_, AppState>,
+pub async fn sftp_lstat<R: tauri::Runtime>(
+    state: Ctx<'_, R>,
     sftp_id: String,
     path: String,
     encoding: Option<SftpFilenameEncoding>,
@@ -333,8 +339,8 @@ pub async fn sftp_lstat(
 }
 
 #[tauri::command]
-pub async fn sftp_chmod(
-    state: State<'_, AppState>,
+pub async fn sftp_chmod<R: tauri::Runtime>(
+    state: Ctx<'_, R>,
     sftp_id: String,
     path: String,
     mode: String,
@@ -347,8 +353,8 @@ pub async fn sftp_chmod(
 }
 
 #[tauri::command]
-pub async fn sftp_extract(
-    state: State<'_, AppState>,
+pub async fn sftp_extract<R: tauri::Runtime>(
+    state: Ctx<'_, R>,
     sftp_id: String,
     path: String,
     encoding: Option<SftpFilenameEncoding>,
@@ -361,8 +367,8 @@ pub async fn sftp_extract(
 }
 
 #[tauri::command]
-pub async fn sftp_home_dir(
-    state: State<'_, AppState>,
+pub async fn sftp_home_dir<R: tauri::Runtime>(
+    state: Ctx<'_, R>,
     sftp_id: String,
     encoding: Option<SftpFilenameEncoding>,
 ) -> CmdResult<HomeDirResult> {
@@ -391,7 +397,10 @@ pub async fn sftp_home_dir(
 /// Close a browser. Idempotent. The underlying SSH connection is
 /// disconnected only when no terminal session or other browser uses it.
 #[tauri::command]
-pub async fn sftp_close(state: State<'_, AppState>, sftp_id: String) -> CmdResult<SuccessResult> {
+pub async fn sftp_close<R: tauri::Runtime>(
+    state: Ctx<'_, R>,
+    sftp_id: String,
+) -> CmdResult<SuccessResult> {
     let Some((_, client)) = state.sftp.remove(&sftp_id) else {
         return Ok(SuccessResult::ok());
     };
@@ -516,8 +525,8 @@ pub fn outcome_event(
     (event, result)
 }
 
-fn endpoint(
-    state: &AppState,
+fn endpoint<R: Runtime>(
+    state: &AppState<R>,
     kind: EndpointType,
     sftp_id: Option<&String>,
     field: &str,
@@ -536,8 +545,8 @@ fn endpoint(
 /// Start a streaming transfer; resolves when it completes, fails, pauses or
 /// is cancelled. Progress is pushed on `netcatty:sftp:global-transfer`.
 #[tauri::command]
-pub async fn transfer_start(
-    state: State<'_, AppState>,
+pub async fn transfer_start<R: tauri::Runtime>(
+    state: Ctx<'_, R>,
     payload: StreamTransferOptions,
 ) -> CmdResult<StreamTransferResult> {
     if payload.transfer_id.trim().is_empty() {
@@ -620,7 +629,10 @@ pub async fn transfer_start(
 }
 
 #[tauri::command]
-pub async fn transfer_cancel(state: State<'_, AppState>, transfer_id: String) -> CmdResult<()> {
+pub async fn transfer_cancel<R: tauri::Runtime>(
+    state: Ctx<'_, R>,
+    transfer_id: String,
+) -> CmdResult<()> {
     if let Some(handle) = state.transfers.get(&transfer_id) {
         handle.cancel();
     }
@@ -628,8 +640,8 @@ pub async fn transfer_cancel(state: State<'_, AppState>, transfer_id: String) ->
 }
 
 #[tauri::command]
-pub async fn transfer_pause(
-    state: State<'_, AppState>,
+pub async fn transfer_pause<R: tauri::Runtime>(
+    state: Ctx<'_, R>,
     transfer_id: String,
 ) -> CmdResult<SuccessResult> {
     Ok(match state.transfers.get(&transfer_id) {

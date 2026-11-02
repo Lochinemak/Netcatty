@@ -7,22 +7,23 @@ use netcatty_sftp::{SftpClient, TransferHandle};
 use netcatty_ssh::SshConnection;
 use netcatty_store::{AppPaths, CredentialCipher, KvStore};
 use std::sync::Arc;
-use tauri::AppHandle;
+use tauri::ipc::{CommandArg, CommandItem, InvokeError};
+use tauri::{AppHandle, Runtime, State};
 use tokio_util::sync::CancellationToken;
 
 /// Everything the commands need. Cheap to clone via the `tauri::State`
 /// wrapper; internal collections are concurrent.
-pub struct AppState {
-    pub app: AppHandle,
+pub struct AppState<R: Runtime> {
+    pub app: AppHandle<R>,
     pub paths: AppPaths,
     pub store: KvStore,
     pub cipher: CredentialCipher,
-    pub sessions: SessionRegistry,
+    pub sessions: SessionRegistry<R>,
     /// Open SFTP browsers keyed by `sftpId`. Shared with the session
     /// registry so connection release can see SFTP leases.
     pub sftp: SftpMap,
     pub tunnels: Arc<TunnelRegistry>,
-    pub prompts: Arc<PromptBroker>,
+    pub prompts: Arc<PromptBroker<R>>,
     /// Running streaming transfers keyed by `transferId`.
     pub transfers: dashmap::DashMap<String, TransferHandle>,
     /// Cancellation tokens of running `local_list_tree` scans keyed by `scanId`.
@@ -34,8 +35,42 @@ pub struct AppState {
     pub tunnel_connections: dashmap::DashMap<String, Arc<SshConnection>>,
 }
 
-impl AppState {
-    pub fn new(app: AppHandle) -> Self {
+/// Command argument giving access to the managed [`AppState`].
+///
+/// Commands are generic over the runtime `R` so they can be exercised with
+/// `tauri::test::MockRuntime`. `tauri::State<'_, AppState<R>>` cannot be
+/// used for that directly: Tauri's `CommandArg<'de, R> for State<'r, T>`
+/// impl does not relate `T` to the invoke's `R`, so `R` would never be
+/// inferred. This newtype's impl ties both together.
+pub struct Ctx<'r, R: Runtime>(pub State<'r, AppState<R>>);
+
+impl<'de, 'r, R: Runtime> CommandArg<'de, R> for Ctx<'r, R>
+where
+    'de: 'r,
+{
+    fn from_command(command: CommandItem<'de, R>) -> Result<Self, InvokeError> {
+        State::<'r, AppState<R>>::from_command(command).map(Ctx)
+    }
+}
+
+impl<R: Runtime> std::ops::Deref for Ctx<'_, R> {
+    type Target = AppState<R>;
+    fn deref(&self) -> &AppState<R> {
+        self.0.inner()
+    }
+}
+
+impl<R: Runtime> AppState<R> {
+    /// Build the state with the credential master key from the OS keychain
+    /// (see [`CredentialCipher::load_or_create`]).
+    pub fn new(app: AppHandle<R>) -> Self {
+        let cipher = CredentialCipher::load_or_create();
+        Self::with_cipher(app, cipher)
+    }
+
+    /// Build the state with an explicit credential cipher. Used by the
+    /// headless IPC tests, which must not touch the user's keychain.
+    pub fn with_cipher(app: AppHandle<R>, cipher: CredentialCipher) -> Self {
         let paths = AppPaths::resolve();
         for dir in [
             paths.store_dir(),
@@ -48,7 +83,6 @@ impl AppState {
             }
         }
         let store = KvStore::new(paths.store_dir());
-        let cipher = CredentialCipher::load_or_create();
         if !cipher.available() {
             tracing::warn!("credential cipher unavailable; secrets will be stored unencrypted");
         }
