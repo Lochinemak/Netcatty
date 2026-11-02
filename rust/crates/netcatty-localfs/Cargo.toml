@@ -1,0 +1,17 @@
+[package]
+name = "netcatty-localfs"
+description = "Local filesystem operations for the file browser and transfers"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+netcatty-core = { workspace = true }
+tokio = { workspace = true }
+tokio-util = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+dirs = { workspace = true }
+hostname = { workspace = true }

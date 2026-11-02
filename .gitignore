@@ -78,6 +78,8 @@
 !public/**
 !resources/
 !resources/**
+!rust/
+!rust/**
 !scripts/
 !scripts/**
 !skills/
@@ -117,6 +119,9 @@ coverage
 /electron/bridges/windowsHelloHelper/build/
 /release
 /out
+/rust/target/
+/rust/apps/*/gen/
+/rust/apps/*/target/
 /public/monaco
 
 # Editor directories and files

@@ -21,6 +21,12 @@
   "scripts": {
     "dev": "npm run fetch:mosh:dev && npm run fetch:et:dev && npm run lint && concurrently -k \"vite --strictPort\" \"npm:dev:electron\"",
     "dev:electron": "wait-on http-get://localhost:5173 && cross-env VITE_DEV_SERVER_URL=http://localhost:5173 node electron/launch.cjs",
+    "dev:renderer": "vite --strictPort",
+    "build:renderer": "npm run build:plugin-packages && vite build",
+    "tauri:dev": "cd rust/apps/netcatty-desktop && npx --yes @tauri-apps/cli@^2 dev",
+    "tauri:build": "cd rust/apps/netcatty-desktop && npx --yes @tauri-apps/cli@^2 build",
+    "tauri:check": "cd rust && cargo check --workspace",
+    "tauri:test": "cd rust && cargo test --workspace",
     "clean:vite": "node scripts/clean-vite-cache.cjs",
     "dev:clean": "npm run clean:vite && npm run dev",
     "prebuild": "node scripts/copy-monaco.cjs",

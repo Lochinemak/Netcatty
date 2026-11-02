@@ -1,0 +1,224 @@
+# Netcatty Rust backend — IPC contract
+
+This document is the single source of truth for how the React renderer talks
+to the Rust (Tauri 2) backend. The Rust side implements the commands and
+events listed here; the renderer-side adapter (`infrastructure/tauri/`)
+implements the existing `NetcattyBridge` interface
+(`types/global/netcatty-bridge-*.d.ts`) on top of them so the rest of the
+renderer does not change.
+
+## Transport
+
+* Commands: `window.__TAURI__.core.invoke(name, args)` (`withGlobalTauri`).
+  Argument names are camelCase on the JS side and snake_case in Rust
+  (Tauri converts automatically: `sftpId` ↔ `sftp_id`).
+* Complex inputs are passed as one `payload` object whose shape is the
+  corresponding `netcatty_core::ipc` struct (camelCase JSON).
+* Events: `window.__TAURI__.event.listen(name, ({ payload }) => ...)`.
+  Event names keep the Electron channel names (see
+  `netcatty_core::ipc::events`).
+* Errors: every failing command rejects with
+  `{ code: ErrorCode, message: string }` (`netcatty_core::CoreError`).
+  `ErrorCode` ∈ `INVALID_ARGUMENT | NOT_FOUND | AUTH_FAILED | HOST_KEY_REJECTED |
+  NETWORK | TIMEOUT | CANCELLED | IO | UNSUPPORTED | INTERNAL`.
+* Binary data:
+  * **Responses**: commands marked *(binary)* return `tauri::ipc::Response`
+    → the renderer receives an `ArrayBuffer`.
+  * **Requests**: commands marked *(raw body)* are invoked with an
+    `ArrayBuffer`/`Uint8Array` as the args value and metadata in the
+    `headers` option, e.g.
+    `invoke("local_write_file", bytes, { headers: { path } })`.
+    Header values are strings; non-ASCII paths are percent-encoded with
+    `encodeURIComponent` and decoded in Rust.
+
+## Sessions and terminal
+
+| Command | Args | Returns | Notes |
+| --- | --- | --- | --- |
+| `session_start_ssh` | `payload: SshSessionOptions` | `{ sessionId }` | Resolves once the shell channel is open. `sessionId` from payload is honored, else generated. Reuses the connection of `payload.sourceSessionId` when alive and `reuseTransport !== false`. |
+| `session_test_connection` | `payload: SshSessionOptions` | `{ sessionId }` | Connect + auth + disconnect. Prompts fire like a real start. |
+| `session_cancel_test_connection` | `sessionId` | `{ success, error? }` | |
+| `session_start_local` | `payload: LocalSessionOptions` | `{ sessionId }` | |
+| `session_write` | `payload: WriteToSessionPayload` | `void` | `data` is UTF-8 text, or base64 when `binary`. `lineDelayMs` applies between lines of automated multi-line writes. |
+| `session_resize` | `payload: { sessionId, cols, rows }` | `void` | |
+| `session_interrupt` | `sessionId` | `void` | Sends `0x03`. |
+| `session_set_flow_paused` | `sessionId, paused` | `void` | Pauses the output pump. |
+| `session_ack_flow` | `sessionId, bytes` | `void` | Accepted for compatibility; no-op. |
+| `session_close` | `sessionId` | `void` | Emits `netcatty:exit` with `reason: "closed"`. Idempotent. |
+| `session_exec` | `payload: ExecCommandOptions` | `ExecResult { stdout, stderr, code }` | Uses the connection of `payload.sessionId` when alive, else dials. `timeout` ms. |
+| `session_pwd` | `sessionId` | `{ success, cwd?, error? }` | |
+| `session_remote_info` | `sessionId` | `{ success, serverBanner?, software?, error? }` | `software` = text after `SSH-2.0-`. |
+| `local_get_default_shell` | — | `string` | |
+| `local_discover_shells` | — | `DiscoveredShell[]` | |
+| `local_validate_path` | `path, kind?` | `{ exists, isFile, isDirectory }` | |
+
+Events:
+
+| Event | Payload |
+| --- | --- |
+| `netcatty:data` | `{ sessionId, data: string }` — output decoded with the session charset (`utf-8` default, `gb18030`, `gbk`, `big5`, `shift_jis`, `euc-kr`, `latin1`). Streaming decoder: multi-byte sequences split across chunks are handled. |
+| `netcatty:exit` | `SessionExitEvent { sessionId, exitCode?, signal?, error?, reason, remoteClosedWithoutExitStatus? }` |
+| `netcatty:auth:failed` | `{ sessionId, error, hostname }` emitted before the start command rejects with `AUTH_FAILED`. |
+| `netcatty:chain:progress` | `ChainProgressEvent` per jump hop. |
+
+## SSH prompts (host key, keyboard-interactive, passphrase)
+
+Rust emits a request event and waits (5 min) for the matching response
+command. Unanswered requests fail the connection with `CANCELLED`.
+
+| Event → Response command | Request payload | Response payload |
+| --- | --- | --- |
+| `netcatty:host-key:verify` → `ssh_respond_host_key` | `HostKeyVerifyRequest { requestId, sessionId, hostname, port, status: "unknown"\|"changed", keyType, fingerprint, publicKey, knownHostId?, knownFingerprint? }` | `payload: { requestId, accept, addToKnownHosts }` |
+| `netcatty:keyboard-interactive` → `ssh_respond_keyboard_interactive` | `KeyboardInteractiveRequest { requestId, sessionId, hostId?, name, instructions, prompts: [{prompt, echo}], hostname, savedPassword?, allowSavePassword?, totpUri? }` | `payload: { requestId, responses: string[], cancelled }` |
+| `netcatty:keyboard-interactive-cancelled` | `{ requestId, sessionId?, reason? }` | — |
+| `netcatty:passphrase-request` → `ssh_respond_passphrase` | `PassphraseRequest { requestId, keyPath, keyName, hostname?, passphraseInvalid?, sessionId? }` | `payload: { requestId, passphrase?, cancelled, skip }` |
+| `netcatty:passphrase-timeout` / `-cancelled` | `{ requestId, reason? }` | — |
+
+Response commands return `{ success, error? }`.
+
+When the user accepts with `addToKnownHosts`, the renderer persists the key
+in its vault (same as Electron); Rust only reports the decision.
+
+Other SSH utilities:
+
+| Command | Args | Returns |
+| --- | --- | --- |
+| `ssh_generate_key_pair` | `payload: { type, bits?, comment?, passphrase? }` | `GenerateKeyPairResult` |
+| `ssh_check_agent` | `payload?: { identityAgent? }` | `{ running, startupType, error }` |
+| `ssh_get_default_keys` | — | `[{ name, path }]` |
+| `ssh_read_known_hosts` | — | `KnownHost[]` parsed from `~/.ssh/known_hosts` |
+
+## SFTP
+
+All `sftp_*` commands take `sftpId` first. `encoding?` is
+`"auto" | "utf-8" | "gb18030"`.
+
+| Command | Args | Returns |
+| --- | --- | --- |
+| `sftp_open` | `payload: SshSessionOptions` | `{ sftpId, homeDir?, reusedConnection? }` |
+| `sftp_open_for_session` | `sessionId, payload?` | same |
+| `sftp_list` | `sftpId, path, encoding?` | `RemoteFile[]` |
+| `sftp_realpath` | `sftpId, path, encoding?` | `string` |
+| `sftp_read` | `sftpId, path, encoding?` | `string` (UTF-8 lossy) |
+| `sftp_read_binary` *(binary)* | `sftpId, path, encoding?` | `ArrayBuffer` |
+| `sftp_write` | `sftpId, path, content: string, encoding?` | `void` |
+| `sftp_write_binary` *(raw body)* | headers `sftpId, path, encoding?` | `void` |
+| `sftp_mkdir` | `sftpId, path, encoding?` | `void` |
+| `sftp_delete` | `sftpId, path, encoding?, expectedType?` | `void` |
+| `sftp_rename` | `sftpId, oldPath, newPath, encoding?` | `void` |
+| `sftp_stat` | `sftpId, path, encoding?` | `StatResult` |
+| `sftp_lstat` | `sftpId, path, encoding?` | `StatResult \| null` |
+| `sftp_chmod` | `sftpId, path, mode, encoding?` | `void` |
+| `sftp_extract` | `sftpId, path, encoding?` | `{ success }` |
+| `sftp_home_dir` | `sftpId, encoding?` | `{ success, homeDir?, error? }` |
+| `sftp_close` | `sftpId` | `{ success }` |
+
+Events: `netcatty:sftp:connection-progress` → `{ sessionId, label, status, detail? }`.
+
+### Transfers
+
+| Command | Args | Returns |
+| --- | --- | --- |
+| `transfer_start` | `payload: StreamTransferOptions` | `StreamTransferResult` (resolves at completion / failure / cancel / pause) |
+| `transfer_cancel` | `transferId` | `void` |
+| `transfer_pause` | `transferId` | `{ success, error? }` |
+
+Event `netcatty:sftp:global-transfer` → `TransferEvent` (`type` ∈ `queued,
+started, progress, pausing, paused, resumed, cancelled, completed, failed`),
+progress throttled to ~10/s per transfer.
+
+## Port forwarding
+
+| Command | Args | Returns |
+| --- | --- | --- |
+| `portforward_start` | `payload: PortForwardOptions` | `PortForwardStartResult { tunnelId, success, reused?, status?, error? }` |
+| `portforward_stop` | `tunnelId` | `{ success, error? }` |
+| `portforward_stop_by_rule` | `ruleId` | `{ success }` |
+| `portforward_stop_all` | — | `{ success }` |
+| `portforward_status` | `tunnelId` | `{ status, error? }` |
+| `portforward_list` | — | `PortForwardTunnelInfo[]` |
+| `portforward_snapshot` | — | `PortForwardSnapshot { epoch, revision, tunnels }` |
+
+Events: `netcatty:portforward:status` → `PortForwardStatusEvent`;
+`netcatty:portforward:runtime` → `PortForwardRuntimeEvent` (`kind` ∈
+`upsert | remove | reset`).
+
+## Local filesystem
+
+| Command | Args | Returns |
+| --- | --- | --- |
+| `local_list_dir` | `path` | `RemoteFile[]` |
+| `local_read_file` *(binary)* | `path, maxBytes?` | `ArrayBuffer` (last `maxBytes` bytes when given) |
+| `local_write_file` *(raw body)* | header `path` | `void` |
+| `local_delete` | `path, expectedType?` | `void` |
+| `local_rename` | `oldPath, newPath` | `void` |
+| `local_mkdir` | `path` | `void` |
+| `local_stat` / `local_lstat` | `path` | `StatResult` |
+| `local_realpath` | `path` | `string` |
+| `local_extract` | `path` | `void` |
+| `local_list_tree` | `scanId, path, limits?` | `LocalTreeEntry[]`; progress on `netcatty:local:tree-progress` → `LocalTreeProgressEvent` |
+| `local_cancel_tree_scan` | `scanId` | `void` |
+| `local_home_dir` | — | `string` |
+| `local_list_drives` | — | `string[]` |
+| `system_info` | — | `{ username, hostname }` |
+
+## Store, credentials, backups
+
+| Command | Args | Returns |
+| --- | --- | --- |
+| `store_get` | `key` | `string \| null` |
+| `store_set` | `key, value` | `void` |
+| `store_remove` | `key` | `void` |
+| `store_keys` | — | `string[]` |
+| `credentials_available` | — | `boolean` |
+| `credentials_encrypt` | `plaintext` | `string` (`enc:v2:...`) |
+| `credentials_decrypt` | `value` | `string` |
+| `vault_backup_create` | `payload: string, reason?` | `BackupInfo` |
+| `vault_backup_list` | — | `BackupInfo[]` |
+| `vault_backup_read` | `fileName` | `string` |
+| `vault_backup_trim` / `vault_backup_clear` | — | `number` |
+
+## App
+
+| Command | Args | Returns |
+| --- | --- | --- |
+| `app_get_version` | — | `string` |
+| `app_get_temp_dir_path` | — | `string` |
+| `app_reveal_in_folder` | `path` | `void` |
+
+Dialogs, clipboard and opening URLs use the Tauri plugins directly from the
+adapter (`window.__TAURI__.dialog`, `.clipboardManager`, `.opener`).
+
+## Mapping `NetcattyBridge` → commands (adapter cheat-sheet)
+
+| Bridge method | Command / plugin |
+| --- | --- |
+| `startSSHSession(o)` | `session_start_ssh` → `.sessionId` |
+| `testConnection(o)` / `cancelTestConnection(id)` | `session_test_connection` / `session_cancel_test_connection` |
+| `startLocalSession(o)` | `session_start_local` → `.sessionId` |
+| `writeToSession(id, data, opts)` | `session_write` (fire-and-forget) |
+| `resizeSession`, `interruptSession`, `setSessionFlowPaused`, `ackSessionFlow`, `closeSession` | `session_resize`, `session_interrupt`, `session_set_flow_paused`, `session_ack_flow`, `session_close` |
+| `onSessionData(id, cb)` / `onSessionExit(id, cb)` | listen `netcatty:data` / `netcatty:exit`, filter by `sessionId`; return unlisten |
+| `execCommand(o)` | `session_exec` |
+| `getSessionPwd`, `getSessionRemoteInfo` | `session_pwd`, `session_remote_info` |
+| `generateKeyPair`, `checkSshAgent`, `getDefaultKeys`, `readKnownHosts` | `ssh_*` |
+| `onHostKeyVerification` / `respondHostKeyVerification` | listen `netcatty:host-key:verify` / `ssh_respond_host_key` |
+| `onKeyboardInteractive` / `respondKeyboardInteractive` | listen / `ssh_respond_keyboard_interactive` |
+| `onPassphraseRequest` / `respondPassphrase` / `respondPassphraseSkip` | listen / `ssh_respond_passphrase` (`skip: true`) |
+| `openSftp(o)` → `string` | `sftp_open` → `.sftpId` |
+| `openSftpForSession(id, o)` | `sftp_open_for_session` → `.sftpId` |
+| `listSftp` … `getSftpHomeDir` | `sftp_*` |
+| `startStreamTransfer`, `cancelTransfer`, `pauseTransfer` | `transfer_*` |
+| `onGlobalSftpTransferEvent` | listen `netcatty:sftp:global-transfer` |
+| `startPortForward(o)` etc. | `portforward_*` |
+| `onPortForwardStatus(cb)` | listen `netcatty:portforward:status` |
+| `listLocalDir` … `listDrives`, `getSystemInfo` | `local_*`, `system_info` |
+| `credentialsAvailable/Encrypt/Decrypt` | `credentials_*` |
+| `readClipboardText/writeClipboardText` | clipboard-manager plugin |
+| `selectDirectory/selectFile/showSaveDialog` | dialog plugin |
+| `openExternal` | opener plugin |
+
+Bridge methods that have no Rust counterpart in this version (AI, plugins,
+MCP, Mosh/ET, FIDO, cloud sync, tray, auto-update, session logs, file watch,
+system manager) are left `undefined` on the adapter; the renderer already
+treats them as optional.

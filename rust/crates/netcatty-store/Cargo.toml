@@ -1,0 +1,24 @@
+[package]
+name = "netcatty-store"
+description = "Vault / settings persistence, backups and OS-keychain backed credential encryption"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+netcatty-core = { workspace = true }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+dirs = { workspace = true }
+keyring = { workspace = true }
+aes-gcm = { workspace = true }
+base64 = { workspace = true }
+rand = { workspace = true }
+sha2 = { workspace = true }
+zeroize = { workspace = true }
+chrono = { workspace = true }
+parking_lot = { workspace = true }

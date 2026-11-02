@@ -1,0 +1,40 @@
+[package]
+name = "netcatty-desktop"
+description = "Netcatty desktop app (Tauri 2) — Rust backend replacing the Electron main process"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[lib]
+name = "netcatty_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.7", features = [] }
+
+[dependencies]
+netcatty-core = { workspace = true }
+netcatty-ssh = { workspace = true }
+netcatty-sftp = { workspace = true }
+netcatty-forward = { workspace = true }
+netcatty-pty = { workspace = true }
+netcatty-localfs = { workspace = true }
+netcatty-store = { workspace = true }
+tauri = { version = "2.12", features = [] }
+tauri-plugin-shell = "2.6"
+tauri-plugin-dialog = "2.8"
+tauri-plugin-opener = "2.7"
+tauri-plugin-clipboard-manager = "2.5"
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+parking_lot = { workspace = true }
+dashmap = { workspace = true }
+base64 = { workspace = true }
+futures = { workspace = true }
+bytes = { workspace = true }
+async-trait = { workspace = true }

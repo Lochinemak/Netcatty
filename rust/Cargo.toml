@@ -1,0 +1,76 @@
+[workspace]
+resolver = "2"
+members = [
+  "crates/netcatty-core",
+  "crates/netcatty-ssh",
+  "crates/netcatty-sftp",
+  "crates/netcatty-forward",
+  "crates/netcatty-pty",
+  "crates/netcatty-localfs",
+  "crates/netcatty-store",
+  "apps/netcatty-desktop",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+license = "GPL-3.0-or-later"
+repository = "https://github.com/binaricat/Netcatty"
+authors = ["binaricat <support@netcatty.com>"]
+
+[workspace.dependencies]
+netcatty-core = { path = "crates/netcatty-core" }
+netcatty-ssh = { path = "crates/netcatty-ssh" }
+netcatty-sftp = { path = "crates/netcatty-sftp" }
+netcatty-forward = { path = "crates/netcatty-forward" }
+netcatty-pty = { path = "crates/netcatty-pty" }
+netcatty-localfs = { path = "crates/netcatty-localfs" }
+netcatty-store = { path = "crates/netcatty-store" }
+
+# async runtime
+tokio = { version = "1.54", features = ["full"] }
+tokio-util = { version = "0.7", features = ["codec", "io"] }
+futures = "0.3"
+async-trait = "0.1"
+
+# serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# ssh
+russh = "0.65"
+russh-sftp = "3.0"
+ssh-key = { version = "0.6", features = ["ed25519", "rsa", "ecdsa", "p256", "p384", "p521", "encryption", "std", "alloc"] }
+
+# pty / serial
+portable-pty = "0.9"
+
+# misc
+thiserror = "2.0"
+anyhow = "1.0"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+uuid = { version = "1.29", features = ["v4"] }
+chrono = { version = "0.4", features = ["serde"] }
+base64 = "0.23"
+rand = "0.10"
+sha2 = "0.11"
+hex = "0.4"
+bytes = "1.12"
+parking_lot = "0.13"
+dashmap = "6.2"
+regex = "1.13"
+dirs = "7.0"
+url = "2.5"
+hostname = "0.4"
+zeroize = { version = "1.9", features = ["derive"] }
+keyring = { version = "4.2", features = ["apple-native-keyring-store", "windows-native-keyring-store", "linux-keyutils-keyring-store"] }
+aes-gcm = "0.11"
+totp-rs = { version = "6.0", features = ["otpauth"] }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true
+opt-level = 3

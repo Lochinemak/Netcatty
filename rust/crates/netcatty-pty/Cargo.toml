@@ -1,0 +1,18 @@
+[package]
+name = "netcatty-pty"
+description = "Local terminal sessions (portable-pty) and shell discovery"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+netcatty-core = { workspace = true }
+portable-pty = { workspace = true }
+tokio = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+bytes = { workspace = true }
+parking_lot = { workspace = true }
+dirs = { workspace = true }
