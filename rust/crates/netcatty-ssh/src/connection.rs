@@ -36,6 +36,17 @@ pub struct SshConnection {
     pub host_key_decisions: Vec<(HostKeyInfo, HostKeyDecision)>,
 }
 
+impl std::fmt::Debug for SshConnection {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SshConnection")
+            .field("target", &self.describe())
+            .field("jump_hops", &self.jump_handles.len())
+            .field("server_banner", &self.server_banner)
+            .field("closed", &self.is_closed())
+            .finish_non_exhaustive()
+    }
+}
+
 impl SshConnection {
     /// Short description for logs: `user@host:port`.
     pub fn describe(&self) -> String {
