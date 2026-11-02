@@ -46,8 +46,15 @@ command line tools).
 
 ```bash
 npm install                     # once; renderer dependencies
+npm run build:plugin-runtime-deps   # once; builds the @netcatty/plugin-* workspace packages Vite imports
 npm run tauri:dev               # starts Vite on :5173 and the Tauri app
 ```
+
+Status of the first run (2026-11-03): `npm run tauri:dev` compiles, Vite
+starts and the native window opens; the renderer failed to load until the
+plugin workspace packages were built (second command above). Interactive
+verification of a local shell and an SSH login inside the Tauri window is
+still pending.
 
 Other commands:
 
