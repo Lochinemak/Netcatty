@@ -38,3 +38,8 @@ base64 = { workspace = true }
 futures = { workspace = true }
 bytes = { workspace = true }
 async-trait = { workspace = true }
+tokio-util = { workspace = true }
+russh = { workspace = true }
+dirs = { workspace = true }
+encoding_rs = "0.8"
+percent-encoding = "2.3"

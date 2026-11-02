@@ -680,9 +680,20 @@ pub struct PortForwardSnapshot {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", tag = "kind")]
 pub enum PortForwardRuntimeEvent {
-    Upsert { epoch: u64, revision: u64, tunnel: PortForwardTunnelInfo },
-    Remove { epoch: u64, revision: u64, tunnel_id: String },
-    Reset { epoch: u64, revision: u64 },
+    Upsert {
+        epoch: u64,
+        revision: u64,
+        tunnel: PortForwardTunnelInfo,
+    },
+    Remove {
+        epoch: u64,
+        revision: u64,
+        tunnel_id: String,
+    },
+    Reset {
+        epoch: u64,
+        revision: u64,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -899,7 +910,10 @@ mod tests {
         let opts: SshSessionOptions = serde_json::from_str(json).unwrap();
         assert_eq!(opts.port(), 2222);
         assert_eq!(opts.jump_hosts.as_ref().unwrap()[0].port, 22);
-        assert_eq!(opts.extra.get("sshDebugLogEnabled"), Some(&serde_json::Value::Bool(true)));
+        assert_eq!(
+            opts.extra.get("sshDebugLogEnabled"),
+            Some(&serde_json::Value::Bool(true))
+        );
     }
 
     #[test]

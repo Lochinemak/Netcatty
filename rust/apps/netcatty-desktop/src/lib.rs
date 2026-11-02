@@ -11,6 +11,8 @@
 //!   [`netcatty_core::ipc::events`].
 
 pub mod commands;
+pub mod connect;
+pub mod decoder;
 pub mod events;
 pub mod prompts;
 pub mod sessions;
@@ -28,6 +30,9 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .setup(|app| {
+            // `AppState::new` also subscribes to the tunnel registry and
+            // forwards its events to the renderer; directory creation
+            // failures are logged, never fatal.
             let state = state::AppState::new(app.handle().clone());
             app.manage(state);
             tracing::info!("netcatty-desktop started");
@@ -42,5 +47,8 @@ fn init_tracing() {
     use tracing_subscriber::EnvFilter;
     let filter = EnvFilter::try_from_env("NETCATTY_LOG")
         .unwrap_or_else(|_| EnvFilter::new("info,russh=warn,tauri=warn"));
-    let _ = tracing_subscriber::fmt().with_env_filter(filter).with_target(false).try_init();
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter(filter)
+        .with_target(false)
+        .try_init();
 }

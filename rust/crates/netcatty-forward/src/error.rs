@@ -30,8 +30,12 @@ impl From<ForwardError> for CoreError {
             ForwardError::RemoteForwardRejected => ErrorCode::Network,
             ForwardError::InvalidArgument(_) => ErrorCode::InvalidArgument,
             ForwardError::Cancelled => ErrorCode::Cancelled,
-            ForwardError::Ssh(e) => return CoreError::from(netcatty_ssh::SshError::Channel(e.to_string())),
-            ForwardError::Io(e) => return CoreError::from(std::io::Error::new(e.kind(), e.to_string())),
+            ForwardError::Ssh(e) => {
+                return CoreError::from(netcatty_ssh::SshError::Channel(e.to_string()))
+            }
+            ForwardError::Io(e) => {
+                return CoreError::from(std::io::Error::new(e.kind(), e.to_string()))
+            }
         };
         CoreError::new(code, err.to_string())
     }

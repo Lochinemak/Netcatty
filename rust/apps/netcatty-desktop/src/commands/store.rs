@@ -41,26 +41,40 @@ pub fn credentials_decrypt(state: State<'_, AppState>, value: String) -> CmdResu
 }
 
 #[tauri::command]
-pub async fn vault_backup_create(state: State<'_, AppState>, payload: String, reason: Option<String>) -> CmdResult<BackupInfo> {
-    netcatty_store::backups::BackupStore::new(state.paths.backups_dir()).create(&payload, reason.as_deref()).await
+pub async fn vault_backup_create(
+    state: State<'_, AppState>,
+    payload: String,
+    reason: Option<String>,
+) -> CmdResult<BackupInfo> {
+    netcatty_store::backups::BackupStore::new(state.paths.backups_dir())
+        .create(&payload, reason.as_deref())
+        .await
 }
 
 #[tauri::command]
 pub async fn vault_backup_list(state: State<'_, AppState>) -> CmdResult<Vec<BackupInfo>> {
-    netcatty_store::backups::BackupStore::new(state.paths.backups_dir()).list().await
+    netcatty_store::backups::BackupStore::new(state.paths.backups_dir())
+        .list()
+        .await
 }
 
 #[tauri::command]
 pub async fn vault_backup_read(state: State<'_, AppState>, file_name: String) -> CmdResult<String> {
-    netcatty_store::backups::BackupStore::new(state.paths.backups_dir()).read(&file_name).await
+    netcatty_store::backups::BackupStore::new(state.paths.backups_dir())
+        .read(&file_name)
+        .await
 }
 
 #[tauri::command]
 pub async fn vault_backup_trim(state: State<'_, AppState>) -> CmdResult<usize> {
-    netcatty_store::backups::BackupStore::new(state.paths.backups_dir()).trim().await
+    netcatty_store::backups::BackupStore::new(state.paths.backups_dir())
+        .trim()
+        .await
 }
 
 #[tauri::command]
 pub async fn vault_backup_clear(state: State<'_, AppState>) -> CmdResult<usize> {
-    netcatty_store::backups::BackupStore::new(state.paths.backups_dir()).clear().await
+    netcatty_store::backups::BackupStore::new(state.paths.backups_dir())
+        .clear()
+        .await
 }

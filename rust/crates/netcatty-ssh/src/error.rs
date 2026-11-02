@@ -45,7 +45,9 @@ impl From<SshError> for CoreError {
             SshError::Cancelled(_) => ErrorCode::Cancelled,
             SshError::Channel(_) | SshError::Russh(_) => ErrorCode::Network,
             SshError::Key(_) => ErrorCode::InvalidArgument,
-            SshError::Io(e) => return CoreError::from(std::io::Error::new(e.kind(), e.to_string())),
+            SshError::Io(e) => {
+                return CoreError::from(std::io::Error::new(e.kind(), e.to_string()))
+            }
         };
         CoreError::new(code, err.to_string())
     }

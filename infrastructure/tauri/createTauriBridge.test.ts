@@ -1,0 +1,469 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+
+import { createTauriBridge, encodeByteStringBase64, knownHostsToText } from './createTauriBridge';
+import { EventHub, SessionDataBacklog, TauriBridgeError, normalizeTauriError } from './tauriApi';
+
+type Listener = (event: { event: string; id: number; payload: unknown }) => void;
+
+interface InvokeRecord {
+  cmd: string;
+  args: unknown;
+  options: unknown;
+}
+
+/**
+ * Minimal `window.__TAURI__` stand-in: records every invoke, lets a test
+ * choose the response per command and emit events to registered listeners.
+ */
+const createFakeTauri = () => {
+  const invokes: InvokeRecord[] = [];
+  const responses = new Map<string, (args: unknown, options: unknown) => unknown>();
+  const listeners = new Map<string, Set<Listener>>();
+  let listenCalls = 0;
+
+  const tauri: NetcattyTauriGlobal = {
+    core: {
+      invoke: async <T>(cmd: string, args?: unknown, options?: unknown): Promise<T> => {
+        invokes.push({ cmd, args, options });
+        const responder = responses.get(cmd);
+        if (!responder) return undefined as T;
+        return responder(args, options) as T;
+      },
+    },
+    event: {
+      listen: async <T>(event: string, handler: (event: { event: string; id: number; payload: T }) => void) => {
+        listenCalls += 1;
+        let set = listeners.get(event);
+        if (!set) {
+          set = new Set();
+          listeners.set(event, set);
+        }
+        const listener = handler as Listener;
+        set.add(listener);
+        return () => {
+          set?.delete(listener);
+        };
+      },
+    },
+  };
+
+  const emit = (event: string, payload: unknown) => {
+    for (const listener of Array.from(listeners.get(event) ?? [])) {
+      listener({ event, id: 1, payload });
+    }
+  };
+
+  return {
+    tauri,
+    invokes,
+    emit,
+    respond: (cmd: string, fn: (args: unknown, options: unknown) => unknown) => responses.set(cmd, fn),
+    listenerCount: (event: string) => listeners.get(event)?.size ?? 0,
+    get listenCalls() {
+      return listenCalls;
+    },
+  };
+};
+
+const installWindow = (tauri: NetcattyTauriGlobal) => {
+  Object.defineProperty(globalThis, 'window', {
+    configurable: true,
+    value: { __TAURI__: tauri, __TAURI_INTERNALS__: {} },
+  });
+};
+
+const flush = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+const setup = () => {
+  const fake = createFakeTauri();
+  installWindow(fake.tauri);
+  const bridge = createTauriBridge();
+  return { fake, bridge };
+};
+
+const lastInvoke = (fake: ReturnType<typeof createFakeTauri>, cmd: string): InvokeRecord => {
+  const record = [...fake.invokes].reverse().find((entry) => entry.cmd === cmd);
+  assert.ok(record, `expected an invoke of ${cmd}`);
+  return record;
+};
+
+test('startSSHSession sends the options as payload and unwraps sessionId', async () => {
+  const { fake, bridge } = setup();
+  fake.respond('session_start_ssh', () => ({ sessionId: 'sess-42' }));
+
+  const sessionId = await bridge.startSSHSession({ hostname: 'example.com', username: 'root', port: 2222 });
+
+  assert.equal(sessionId, 'sess-42');
+  const record = lastInvoke(fake, 'session_start_ssh');
+  assert.deepEqual(record.args, { payload: { hostname: 'example.com', username: 'root', port: 2222 } });
+  // Session events were subscribed eagerly before the start command ran.
+  assert.equal(fake.listenerCount('netcatty:data'), 1);
+  assert.equal(fake.listenerCount('netcatty:exit'), 1);
+});
+
+test('writeToSession base64-encodes binary writes and forwards the write flags', async () => {
+  const { fake, bridge } = setup();
+  const bytes = String.fromCharCode(0x1b, 0x5b, 0xff, 0x00);
+
+  bridge.writeToSession('s1', bytes, { binary: true, automated: true, sensitive: true, pasteRequestId: 'p1', lineDelayMs: 25 });
+  bridge.writeToSession('s1', 'ls\n');
+  await flush();
+
+  const writes = fake.invokes.filter((entry) => entry.cmd === 'session_write');
+  assert.equal(writes.length, 2);
+  assert.deepEqual(writes[0].args, {
+    payload: {
+      sessionId: 's1',
+      data: Buffer.from([0x1b, 0x5b, 0xff, 0x00]).toString('base64'),
+      binary: true,
+      automated: true,
+      sensitive: true,
+      pasteRequestId: 'p1',
+      lineDelayMs: 25,
+    },
+  });
+  assert.deepEqual(writes[1].args, {
+    payload: {
+      sessionId: 's1',
+      data: 'ls\n',
+      binary: false,
+      automated: false,
+      sensitive: false,
+      pasteRequestId: undefined,
+      lineDelayMs: undefined,
+    },
+  });
+  assert.equal(encodeByteStringBase64(bytes), Buffer.from([0x1b, 0x5b, 0xff, 0x00]).toString('base64'));
+});
+
+test('onSessionData filters by session, replays the backlog once and stops after unsubscribe', async () => {
+  const { fake, bridge } = setup();
+  await flush();
+
+  // Output before any listener is parked in the backlog.
+  fake.emit('netcatty:data', { sessionId: 'a', data: 'early-a ' });
+  fake.emit('netcatty:data', { sessionId: 'b', data: 'early-b ' });
+
+  const receivedA: string[] = [];
+  const receivedPlain: string[] = [];
+  const unsubscribeA = bridge.onSessionData('a', (data) => receivedA.push(data), { replayBacklog: true });
+  const unsubscribePlain = bridge.onSessionData('a', (data) => receivedPlain.push(data));
+
+  assert.deepEqual(receivedA, ['early-a ']);
+  assert.deepEqual(receivedPlain, [], 'non-replay listeners do not get the backlog');
+
+  fake.emit('netcatty:data', { sessionId: 'a', data: 'live-a' });
+  fake.emit('netcatty:data', { sessionId: 'b', data: 'live-b' });
+  assert.deepEqual(receivedA, ['early-a ', 'live-a']);
+  assert.deepEqual(receivedPlain, ['live-a']);
+
+  // A second replay subscriber does not see data that was already delivered.
+  const late: string[] = [];
+  const unsubscribeLate = bridge.onSessionData('a', (data) => late.push(data), { replayBacklog: true });
+  assert.deepEqual(late, []);
+
+  unsubscribeA();
+  unsubscribePlain();
+  unsubscribeLate();
+  fake.emit('netcatty:data', { sessionId: 'a', data: 'after-unsubscribe' });
+  assert.deepEqual(receivedA, ['early-a ', 'live-a']);
+  assert.deepEqual(receivedPlain, ['live-a']);
+
+  // Session b's backlog is still waiting for its first display listener.
+  const receivedB: string[] = [];
+  bridge.onSessionData('b', (data) => receivedB.push(data), { replayBacklog: true });
+  assert.deepEqual(receivedB, ['early-b live-b']);
+});
+
+test('onSessionExit delivers the exit payload for its session only and clears the backlog', async () => {
+  const { fake, bridge } = setup();
+  await flush();
+
+  const exits: unknown[] = [];
+  const unsubscribe = bridge.onSessionExit('a', (evt) => exits.push(evt));
+  fake.emit('netcatty:data', { sessionId: 'a', data: 'pending' });
+  fake.emit('netcatty:exit', { sessionId: 'b', reason: 'closed', exitCode: 0 });
+  fake.emit('netcatty:exit', { sessionId: 'a', reason: 'exited', exitCode: 1, remoteClosedWithoutExitStatus: false });
+
+  assert.deepEqual(exits, [{
+    exitCode: 1,
+    signal: undefined,
+    exitSignal: undefined,
+    error: undefined,
+    reason: 'exited',
+    remoteClosedWithoutExitStatus: false,
+  }]);
+
+  const replayed: string[] = [];
+  bridge.onSessionData('a', (data) => replayed.push(data), { replayBacklog: true });
+  assert.deepEqual(replayed, [], 'backlog is dropped on exit');
+
+  unsubscribe();
+  fake.emit('netcatty:exit', { sessionId: 'a', reason: 'closed' });
+  assert.equal(exits.length, 1);
+});
+
+test('readSftpBinary passes the ArrayBuffer through untouched', async () => {
+  const { fake, bridge } = setup();
+  const buffer = new Uint8Array([1, 2, 3, 4]).buffer;
+  fake.respond('sftp_read_binary', () => buffer);
+
+  const result = await bridge.readSftpBinary!('sftp-1', '/tmp/é.bin', 'utf-8');
+
+  assert.equal(result, buffer);
+  assert.deepEqual(lastInvoke(fake, 'sftp_read_binary').args, { sftpId: 'sftp-1', path: '/tmp/é.bin', encoding: 'utf-8' });
+});
+
+test('writeLocalFile sends the raw bytes with a percent-encoded path header', async () => {
+  const { fake, bridge } = setup();
+  const bytes = new Uint8Array([104, 105]).buffer;
+
+  await bridge.writeLocalFile!('/tmp/ünï code/file.txt', bytes);
+
+  const record = lastInvoke(fake, 'local_write_file');
+  assert.equal(record.args, bytes);
+  assert.deepEqual(record.options, { headers: { path: encodeURIComponent('/tmp/ünï code/file.txt') } });
+});
+
+test('writeSftpBinary sends sftpId/path/encoding headers and omits undefined ones', async () => {
+  const { fake, bridge } = setup();
+  const bytes = new Uint8Array([1]).buffer;
+
+  await bridge.writeSftpBinary!('sftp-9', '/remote/日本.txt', bytes);
+
+  const record = lastInvoke(fake, 'sftp_write_binary');
+  assert.equal(record.args, bytes);
+  assert.deepEqual(record.options, {
+    headers: { sftpId: 'sftp-9', path: encodeURIComponent('/remote/日本.txt') },
+  });
+});
+
+test('respondHostKeyVerification sends { requestId, accept, addToKnownHosts }', async () => {
+  const { fake, bridge } = setup();
+  fake.respond('ssh_respond_host_key', () => ({ success: true }));
+
+  const result = await bridge.respondHostKeyVerification!('req-1', true, true);
+  assert.deepEqual(result, { success: true });
+  assert.deepEqual(lastInvoke(fake, 'ssh_respond_host_key').args, {
+    payload: { requestId: 'req-1', accept: true, addToKnownHosts: true },
+  });
+
+  await bridge.respondHostKeyVerification!('req-2', false);
+  assert.deepEqual(lastInvoke(fake, 'ssh_respond_host_key').args, {
+    payload: { requestId: 'req-2', accept: false, addToKnownHosts: false },
+  });
+});
+
+test('passphrase responses distinguish answer, cancel and skip', async () => {
+  const { fake, bridge } = setup();
+
+  await bridge.respondPassphrase!('r1', 'secret');
+  assert.deepEqual(lastInvoke(fake, 'ssh_respond_passphrase').args, {
+    payload: { requestId: 'r1', passphrase: 'secret', cancelled: false, skip: false },
+  });
+  await bridge.respondPassphrase!('r2', '', true);
+  assert.deepEqual(lastInvoke(fake, 'ssh_respond_passphrase').args, {
+    payload: { requestId: 'r2', passphrase: undefined, cancelled: true, skip: false },
+  });
+  await bridge.respondPassphraseSkip!('r3');
+  assert.deepEqual(lastInvoke(fake, 'ssh_respond_passphrase').args, {
+    payload: { requestId: 'r3', cancelled: false, skip: true },
+  });
+});
+
+test('global prompt events are delivered once per subscriber and unsubscribe stops delivery', async () => {
+  const { fake, bridge } = setup();
+  const seen: unknown[] = [];
+  const unsubscribe = bridge.onHostKeyVerification!((request) => seen.push(request));
+  bridge.onKeyboardInteractive!(() => undefined);
+  await flush();
+
+  const request = { requestId: 'hk-1', sessionId: 's', hostname: 'h', port: 22, status: 'unknown', keyType: 'ssh-ed25519', fingerprint: 'abc' };
+  fake.emit('netcatty:host-key:verify', request);
+  assert.deepEqual(seen, [request]);
+  // One Tauri listener per event name, regardless of subscriber count.
+  assert.equal(fake.listenerCount('netcatty:host-key:verify'), 1);
+
+  unsubscribe();
+  fake.emit('netcatty:host-key:verify', { ...request, requestId: 'hk-2' });
+  assert.equal(seen.length, 1);
+});
+
+test('port forwarding maps wire shapes to the renderer contract', async () => {
+  const { fake, bridge } = setup();
+  fake.respond('portforward_snapshot', () => ({
+    epoch: 7,
+    revision: 3,
+    tunnels: [{ tunnelId: 't1', ruleId: 'r1', type: 'local', status: 'active', localPort: 8080, bindAddress: '127.0.0.1', hostname: 'h', updatedAt: 1000 }],
+  }));
+  fake.respond('portforward_status', () => ({ status: 'unknown' }));
+  fake.respond('portforward_stop', () => ({ success: true }));
+
+  assert.deepEqual(await bridge.getPortForwardSnapshot!(), {
+    epoch: '7',
+    revision: 3,
+    records: [{ ruleId: 'r1', tunnelId: 't1', phase: 'active', error: undefined, revision: 3, updatedAt: 1000 }],
+  });
+  assert.deepEqual(await bridge.getPortForwardStatus!('t1'), { tunnelId: 't1', status: 'inactive', error: undefined });
+  assert.deepEqual(await bridge.stopPortForward!('t1'), { tunnelId: 't1', success: true, error: undefined });
+
+  const statuses: Array<[string, string | undefined]> = [];
+  const runtime: unknown[] = [];
+  bridge.onPortForwardStatus!('t1', (status, error) => statuses.push([status, error]));
+  bridge.onPortForwardRuntime!((event) => runtime.push(event));
+  await flush();
+  fake.emit('netcatty:portforward:status', { tunnelId: 't2', status: 'active', epoch: 1, revision: 1 });
+  fake.emit('netcatty:portforward:status', { tunnelId: 't1', status: 'error', error: 'boom', epoch: 1, revision: 2 });
+  fake.emit('netcatty:portforward:runtime', { kind: 'remove', epoch: 1, revision: 3, tunnelId: 't1' });
+  assert.deepEqual(statuses, [['error', 'boom']]);
+  assert.deepEqual(runtime, [{ epoch: '1', revision: 3, kind: 'remove', tunnelId: 't1' }]);
+});
+
+test('listLocalTree streams progress and entries for its own scanId only', async () => {
+  const { fake, bridge } = setup();
+  const entries = [{ localPath: '/a/x', relativePath: 'x', type: 'file', size: 1, lastModified: 1 }];
+  fake.respond('local_list_tree', (args) => {
+    const scanId = (args as { scanId: string }).scanId;
+    fake.emit('netcatty:local:tree-progress', { scanId: 'other', fileCount: 99, directoryCount: 0, entryCount: 99, entries });
+    fake.emit('netcatty:local:tree-progress', { scanId, fileCount: 1, directoryCount: 0, entryCount: 1, entries });
+    fake.emit('netcatty:local:tree-progress', { scanId, fileCount: 1, directoryCount: 0, entryCount: 1, entries: [], done: true });
+    return entries;
+  });
+
+  const progress: unknown[] = [];
+  const streamed: unknown[] = [];
+  const result = await bridge.listLocalTree!('/a', {
+    scanId: 'scan-1',
+    onProgress: (stats) => progress.push(stats),
+    onEntries: (batch) => streamed.push(batch),
+    limits: { maxEntries: 10 },
+  });
+
+  assert.deepEqual(result, entries);
+  assert.deepEqual(lastInvoke(fake, 'local_list_tree').args, { scanId: 'scan-1', path: '/a', limits: { maxEntries: 10 } });
+  assert.deepEqual(progress, [
+    { fileCount: 1, directoryCount: 0, entryCount: 1 },
+    { fileCount: 1, directoryCount: 0, entryCount: 1 },
+  ]);
+  assert.deepEqual(streamed, [entries]);
+});
+
+test('rejected invokes surface as TauriBridgeError carrying the backend code', async () => {
+  const { fake, bridge } = setup();
+  fake.respond('sftp_list', () => {
+    throw { code: 'NOT_FOUND', message: 'no such directory' };
+  });
+
+  await assert.rejects(bridge.listSftp('s', '/missing'), (error: unknown) => {
+    assert.ok(error instanceof TauriBridgeError);
+    assert.equal(error.code, 'NOT_FOUND');
+    assert.equal(error.message, 'no such directory');
+    return true;
+  });
+  assert.equal(normalizeTauriError('plain string').code, 'INTERNAL');
+  assert.equal(normalizeTauriError(new Error('x')).message, 'x');
+});
+
+test('plugin-backed methods are undefined when the plugin is not registered', () => {
+  const fake = createFakeTauri();
+  installWindow(fake.tauri);
+  const bridge = createTauriBridge();
+  assert.equal(bridge.selectDirectory, undefined);
+  assert.equal(bridge.readClipboardText, undefined);
+  assert.equal(bridge.openExternal, undefined);
+  // No Rust counterpart: stays undefined rather than faking success.
+  assert.equal(bridge.startMoshSession, undefined);
+  assert.equal(bridge.checkForUpdate, undefined);
+});
+
+test('dialog, clipboard and opener plugins are wired through the global API', async () => {
+  const fake = createFakeTauri();
+  const calls: unknown[] = [];
+  fake.tauri.dialog = {
+    open: async (opts) => {
+      calls.push(['open', opts]);
+      return opts?.directory ? '/picked/dir' : ['/picked/file'];
+    },
+    save: async (opts) => {
+      calls.push(['save', opts]);
+      return null;
+    },
+  };
+  fake.tauri.clipboardManager = {
+    readText: async () => 'clip',
+    writeText: async (text) => {
+      calls.push(['write', text]);
+    },
+  };
+  fake.tauri.opener = {
+    openUrl: async (url) => {
+      calls.push(['url', url]);
+    },
+    openPath: async () => {
+      throw new Error('no handler');
+    },
+  };
+  installWindow(fake.tauri);
+  const bridge = createTauriBridge();
+
+  assert.equal(await bridge.selectDirectory!('Pick', '/home'), '/picked/dir');
+  assert.equal(await bridge.selectFile!('Pick file'), '/picked/file');
+  assert.equal(await bridge.showSaveDialog!('/home/out.txt', [{ name: 'Text', extensions: ['txt'] }]), null);
+  assert.equal(await bridge.readClipboardText!(), 'clip');
+  assert.equal(await bridge.writeClipboardText!('hello'), true);
+  await bridge.openExternal!('https://example.com');
+  assert.deepEqual(await bridge.openWithSystemDefault!('/x'), { success: false, error: 'no handler' });
+  assert.deepEqual(calls, [
+    ['open', { directory: true, multiple: false, title: 'Pick', defaultPath: '/home' }],
+    ['open', { multiple: false, title: 'Pick file', defaultPath: undefined, filters: undefined }],
+    ['save', { defaultPath: '/home/out.txt', filters: [{ name: 'Text', extensions: ['txt'] }] }],
+    ['write', 'hello'],
+    ['url', 'https://example.com'],
+  ]);
+});
+
+test('readKnownHosts rebuilds known_hosts text from parsed entries', async () => {
+  const { fake, bridge } = setup();
+  fake.respond('ssh_read_known_hosts', () => [
+    { id: '1', hostname: 'example.com', port: 22, keyType: 'ssh-ed25519', publicKey: 'AAAA1' },
+    { id: '2', hostname: '10.0.0.1', port: 2222, keyType: 'ssh-rsa', publicKey: 'ssh-rsa AAAA2' },
+  ]);
+  assert.equal(await bridge.readKnownHosts!(), 'example.com ssh-ed25519 AAAA1\n[10.0.0.1]:2222 ssh-rsa AAAA2');
+  assert.equal(knownHostsToText([]), '');
+
+  fake.respond('ssh_read_known_hosts', () => []);
+  assert.equal(await bridge.readKnownHosts!(), null);
+});
+
+test('SessionDataBacklog keeps only the newest bytes up to its limit', () => {
+  const backlog = new SessionDataBacklog(5);
+  backlog.append('s', 'abc');
+  backlog.append('s', 'defg');
+  assert.equal(backlog.size('s'), 5);
+  assert.equal(backlog.take('s'), 'cdefg');
+  assert.equal(backlog.take('s'), '');
+});
+
+test('EventHub subscribes once per event and keeps delivering after a throwing listener', async () => {
+  const fake = createFakeTauri();
+  const errors: unknown[] = [];
+  const hub = new EventHub({
+    listen: (event, cb) => fake.tauri.event!.listen!(event, (evt) => cb(evt.payload as never)),
+    onError: (_message, error) => errors.push(error),
+  });
+  const seen: unknown[] = [];
+  hub.subscribe('x', () => {
+    throw new Error('listener failed');
+  });
+  const off = hub.subscribe('x', (payload) => seen.push(payload));
+  await hub.ensure('x');
+  assert.equal(fake.listenCalls, 1);
+
+  fake.emit('x', 1);
+  assert.deepEqual(seen, [1]);
+  assert.equal(errors.length, 1);
+  off();
+  fake.emit('x', 2);
+  assert.deepEqual(seen, [1]);
+});

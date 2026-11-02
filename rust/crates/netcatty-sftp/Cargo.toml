@@ -20,3 +20,4 @@ thiserror = { workspace = true }
 tracing = { workspace = true }
 bytes = { workspace = true }
 parking_lot = { workspace = true }
+encoding_rs = "0.8"

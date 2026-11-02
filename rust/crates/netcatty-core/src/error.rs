@@ -43,7 +43,10 @@ pub struct CoreError {
 
 impl CoreError {
     pub fn new(code: ErrorCode, message: impl Into<String>) -> Self {
-        Self { code, message: message.into() }
+        Self {
+            code,
+            message: message.into(),
+        }
     }
     pub fn invalid(message: impl Into<String>) -> Self {
         Self::new(ErrorCode::InvalidArgument, message)

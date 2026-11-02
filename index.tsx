@@ -1,3 +1,5 @@
+// Must stay the first import: installs window.netcatty when running under Tauri.
+import './infrastructure/tauri/bootstrap';
 import { StrictMode, Suspense, lazy } from 'react';
 import ReactDOM from 'react-dom/client';
 import '@fontsource/mona-sans/400.css';

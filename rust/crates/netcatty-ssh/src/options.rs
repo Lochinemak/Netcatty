@@ -1,7 +1,9 @@
 //! Connection options, normalized from the renderer payload.
 
 use netcatty_core::ipc::{JumpHost, SshSessionOptions};
-use netcatty_core::models::{HostAlgorithmOverrides, HostAuthMethod, HostTotpConfig, KnownHost, ProxyConfig};
+use netcatty_core::models::{
+    HostAlgorithmOverrides, HostAuthMethod, HostTotpConfig, KnownHost, ProxyConfig,
+};
 use std::time::Duration;
 
 /// Default TCP connect timeout (matches the Electron bridge).
@@ -107,7 +109,10 @@ impl From<&SshSessionOptions> for HopOptions {
             algorithm_overrides: o.algorithm_overrides.clone(),
             keepalive_interval: secs(o.keepalive_interval),
             keepalive_count_max: o.keepalive_count_max.unwrap_or(3),
-            tcp_connect_timeout: millis_or(o.ssh_tcp_connect_timeout_ms, DEFAULT_TCP_CONNECT_TIMEOUT),
+            tcp_connect_timeout: millis_or(
+                o.ssh_tcp_connect_timeout_ms,
+                DEFAULT_TCP_CONNECT_TIMEOUT,
+            ),
             auth_ready_timeout: millis_or(o.ssh_auth_ready_timeout_ms, DEFAULT_AUTH_READY_TIMEOUT),
         }
     }
@@ -148,7 +153,10 @@ impl HopOptions {
                 .or_else(|| target.algorithm_overrides.clone()),
             keepalive_interval: secs(j.keepalive_interval).or(target.keepalive_interval),
             keepalive_count_max: j.keepalive_count_max.unwrap_or(target.keepalive_count_max),
-            tcp_connect_timeout: millis_or(j.ssh_tcp_connect_timeout_ms, target.tcp_connect_timeout),
+            tcp_connect_timeout: millis_or(
+                j.ssh_tcp_connect_timeout_ms,
+                target.tcp_connect_timeout,
+            ),
             auth_ready_timeout: millis_or(j.ssh_auth_ready_timeout_ms, target.auth_ready_timeout),
         }
     }
@@ -190,7 +198,10 @@ mod tests {
         assert_eq!(c.jump_hosts.len(), 1);
         assert_eq!(c.jump_hosts[0].port, 2200);
         assert!(c.jump_hosts[0].legacy_algorithms);
-        assert_eq!(c.jump_hosts[0].keepalive_interval, Some(Duration::from_secs(15)));
+        assert_eq!(
+            c.jump_hosts[0].keepalive_interval,
+            Some(Duration::from_secs(15))
+        );
         assert_eq!(c.target.tcp_connect_timeout, DEFAULT_TCP_CONNECT_TIMEOUT);
     }
 }

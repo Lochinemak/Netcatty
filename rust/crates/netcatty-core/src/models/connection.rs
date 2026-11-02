@@ -85,9 +85,10 @@ pub struct EnvVar {
 
 /// Built-in protocols. Plugin protocols (`plugin:<id>`) are carried as the
 /// `Other` variant so unknown values never fail deserialization.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum HostProtocol {
+    #[default]
     Ssh,
     Telnet,
     Mosh,
@@ -96,12 +97,6 @@ pub enum HostProtocol {
     Serial,
     #[serde(untagged)]
     Other(String),
-}
-
-impl Default for HostProtocol {
-    fn default() -> Self {
-        HostProtocol::Ssh
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -435,26 +430,40 @@ mod tests {
         let json = r#"{"id":"h1","label":"Box","hostname":"example.com","username":"root","tags":[],"os":"linux","fontSize":14,"iconId":"server","sftpEncoding":"gb18030"}"#;
         let host: Host = serde_json::from_str(json).unwrap();
         assert_eq!(host.ssh_port(), 22);
-        assert_eq!(host.sftp_encoding, Some(super::super::sftp::SftpFilenameEncoding::Gb18030));
+        assert_eq!(
+            host.sftp_encoding,
+            Some(super::super::sftp::SftpFilenameEncoding::Gb18030)
+        );
         assert_eq!(host.extra.get("fontSize"), Some(&Value::from(14)));
         let back = serde_json::to_value(&host).unwrap();
         assert_eq!(back["iconId"], "server");
         assert_eq!(back["fontSize"], 14);
-        assert!(back.get("password").is_none(), "None fields must be omitted");
+        assert!(
+            back.get("password").is_none(),
+            "None fields must be omitted"
+        );
     }
 
     #[test]
     fn plugin_protocol_is_preserved() {
-        let host: Host =
-            serde_json::from_str(r#"{"id":"x","protocol":"plugin:acme.db"}"#).unwrap();
-        assert_eq!(host.protocol, Some(HostProtocol::Other("plugin:acme.db".into())));
+        let host: Host = serde_json::from_str(r#"{"id":"x","protocol":"plugin:acme.db"}"#).unwrap();
+        assert_eq!(
+            host.protocol,
+            Some(HostProtocol::Other("plugin:acme.db".into()))
+        );
         let back = serde_json::to_string(&host).unwrap();
         assert!(back.contains("\"protocol\":\"plugin:acme.db\""));
     }
 
     #[test]
     fn key_type_names_match_ts() {
-        assert_eq!(serde_json::to_string(&KeyType::Ed25519Sk).unwrap(), "\"ED25519-SK\"");
-        assert_eq!(serde_json::to_string(&SerialFlowControl::RtsCts).unwrap(), "\"rts/cts\"");
+        assert_eq!(
+            serde_json::to_string(&KeyType::Ed25519Sk).unwrap(),
+            "\"ED25519-SK\""
+        );
+        assert_eq!(
+            serde_json::to_string(&SerialFlowControl::RtsCts).unwrap(),
+            "\"rts/cts\""
+        );
     }
 }

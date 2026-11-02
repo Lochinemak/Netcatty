@@ -73,7 +73,10 @@ mod tests {
         };
         assert!(kh.matches("example.com", 2222));
         assert!(!kh.matches("example.com", 22));
-        let bracket = KnownHost { hostname: "[example.com]:2222".into(), ..kh.clone() };
+        let bracket = KnownHost {
+            hostname: "[example.com]:2222".into(),
+            ..kh.clone()
+        };
         assert!(bracket.matches("example.com", 2222));
     }
 }

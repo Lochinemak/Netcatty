@@ -40,6 +40,57 @@ const devContentSecurityPolicyPlugin = () => ({
 });
 
 /**
+ * Tauri CLI sets TAURI_ENV_PLATFORM for beforeDevCommand / beforeBuildCommand.
+ * Everything below only kicks in then, so the Electron build is untouched.
+ */
+const isTauriEnv = Boolean(process.env.TAURI_ENV_PLATFORM);
+
+// Tauri's IPC and asset protocols (custom schemes on macOS/Linux, http://*.localhost on Windows).
+const tauriCspAdditions: Record<string, string[]> = {
+  'default-src': ['tauri:', 'asset:', 'http://asset.localhost'],
+  'connect-src': ['ipc:', 'http://ipc.localhost', 'tauri:', 'asset:', 'http://asset.localhost'],
+  'img-src': ['asset:', 'http://asset.localhost'],
+  'font-src': ['asset:', 'http://asset.localhost'],
+};
+
+/** Append sources to the named directives of a CSP string, keeping everything else verbatim. */
+const addTauriCspSources = (csp: string, additions: Record<string, string[]> = tauriCspAdditions): string => {
+  const directives = csp
+    .split(';')
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .map((part) => {
+      const [name, ...sources] = part.split(/\s+/);
+      return { name, sources };
+    });
+  for (const [name, extra] of Object.entries(additions)) {
+    const directive = directives.find((entry) => entry.name === name);
+    if (!directive) continue;
+    for (const source of extra) {
+      if (!directive.sources.includes(source)) directive.sources.push(source);
+    }
+  }
+  return directives.map(({ name, sources }) => [name, ...sources].join(' ')).join('; ');
+};
+
+/**
+ * Runs in both `serve` and `build` (after the dev CSP plugin) and only under
+ * Tauri: widens the <meta> CSP so invoke/listen and asset:// loads are allowed.
+ */
+const tauriContentSecurityPolicyPlugin = (): Plugin => ({
+  name: 'tauri-content-security-policy',
+  transformIndexHtml: {
+    order: 'post',
+    handler(html: string) {
+      return html.replace(
+        /(<meta\s+http-equiv="Content-Security-Policy"\s+content=")([^"]*)(")/,
+        (_match, open: string, csp: string, close: string) => `${open}${addTauriCspSources(csp)}${close}`,
+      );
+    },
+  },
+});
+
+/**
  * Stale pre-bundles return 504 after git pull / npm install. Vite retries the
  * module once optimize finishes — do not full-reload the Electron window.
  * Opening the lazy AI panel pulls `ai` / streamdown; a 504 there used to flash
@@ -68,6 +119,8 @@ const warnOnOutdatedOptimizeDep = (): Plugin => ({
 export default defineConfig(() => {
     return {
       base: "./",
+      // Keep the Tauri CLI's own output visible; expose TAURI_ENV_* to the renderer.
+      ...(isTauriEnv ? { clearScreen: false, envPrefix: ['VITE_', 'TAURI_ENV_*'] } : {}),
       server: {
         port: 5173,
         host: 'localhost',
@@ -125,7 +178,14 @@ export default defineConfig(() => {
           },
         },
       },
-      plugins: [suppressMonacoSourcemapWarning(), devContentSecurityPolicyPlugin(), warnOnOutdatedOptimizeDep(), tailwindcss(), react()],
+      plugins: [
+        suppressMonacoSourcemapWarning(),
+        devContentSecurityPolicyPlugin(),
+        ...(isTauriEnv ? [tauriContentSecurityPolicyPlugin()] : []),
+        warnOnOutdatedOptimizeDep(),
+        tailwindcss(),
+        react(),
+      ],
       optimizeDeps: {
         include: [
           // Keep the renderer alias pre-bundled so dev serves ESM instead of raw CommonJS.

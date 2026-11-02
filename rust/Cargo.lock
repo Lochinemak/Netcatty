@@ -3298,6 +3298,8 @@ dependencies = [
  "base64 0.23.1",
  "bytes",
  "dashmap",
+ "dirs",
+ "encoding_rs",
  "futures",
  "netcatty-core",
  "netcatty-forward",
@@ -3307,6 +3309,8 @@ dependencies = [
  "netcatty-ssh",
  "netcatty-store",
  "parking_lot 0.13.0",
+ "percent-encoding",
+ "russh",
  "serde",
  "serde_json",
  "tauri",
@@ -3317,6 +3321,7 @@ dependencies = [
  "tauri-plugin-shell",
  "thiserror 2.0.21",
  "tokio",
+ "tokio-util",
  "tracing",
  "tracing-subscriber",
 ]
@@ -3344,9 +3349,13 @@ name = "netcatty-localfs"
 version = "0.1.0"
 dependencies = [
  "dirs",
+ "futures",
  "hostname",
+ "libc",
  "netcatty-core",
  "serde",
+ "serde_json",
+ "tempfile",
  "thiserror 2.0.21",
  "tokio",
  "tokio-util",
@@ -3359,10 +3368,12 @@ version = "0.1.0"
 dependencies = [
  "bytes",
  "dirs",
+ "libc",
  "netcatty-core",
  "parking_lot 0.13.0",
  "portable-pty",
  "serde",
+ "tempfile",
  "thiserror 2.0.21",
  "tokio",
  "tracing",
@@ -3373,6 +3384,7 @@ name = "netcatty-sftp"
 version = "0.1.0"
 dependencies = [
  "bytes",
+ "encoding_rs",
  "futures",
  "netcatty-core",
  "netcatty-ssh",
@@ -3428,6 +3440,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.11.1",
+ "tempfile",
  "thiserror 2.0.21",
  "tokio",
  "tracing",

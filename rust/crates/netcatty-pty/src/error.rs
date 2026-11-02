@@ -22,7 +22,9 @@ impl From<PtyError> for CoreError {
             PtyError::Open(_) | PtyError::Spawn { .. } => ErrorCode::Io,
             PtyError::Closed => ErrorCode::NotFound,
             PtyError::InvalidArgument(_) => ErrorCode::InvalidArgument,
-            PtyError::Io(e) => return CoreError::from(std::io::Error::new(e.kind(), e.to_string())),
+            PtyError::Io(e) => {
+                return CoreError::from(std::io::Error::new(e.kind(), e.to_string()))
+            }
         };
         CoreError::new(code, err.to_string())
     }

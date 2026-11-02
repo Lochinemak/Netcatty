@@ -97,7 +97,10 @@ mod tests {
 
     #[test]
     fn encoding_names() {
-        assert_eq!(serde_json::to_string(&SftpFilenameEncoding::Utf8).unwrap(), "\"utf-8\"");
+        assert_eq!(
+            serde_json::to_string(&SftpFilenameEncoding::Utf8).unwrap(),
+            "\"utf-8\""
+        );
         assert_eq!(
             serde_json::from_str::<SftpFilenameEncoding>("\"gb18030\"").unwrap(),
             SftpFilenameEncoding::Gb18030

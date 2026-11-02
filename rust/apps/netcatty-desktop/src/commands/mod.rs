@@ -21,6 +21,39 @@ use netcatty_core::CoreError;
 /// Alias used by every command.
 pub type CmdResult<T> = Result<T, CoreError>;
 
+/// Read a string header of a raw-body invoke. Header values are strings the
+/// renderer percent-encodes with `encodeURIComponent` (see the contract), so
+/// they are percent-decoded here. Header names are matched case-insensitively.
+pub(crate) fn header_str(headers: &tauri::http::HeaderMap, name: &str) -> Option<String> {
+    headers
+        .get(name)
+        .and_then(|v| v.to_str().ok())
+        .map(percent_decode)
+}
+
+/// Required header variant of [`header_str`].
+pub(crate) fn require_header(headers: &tauri::http::HeaderMap, name: &str) -> CmdResult<String> {
+    header_str(headers, name).ok_or_else(|| CoreError::invalid(format!("missing `{name}` header")))
+}
+
+/// Percent-decode a header value (`encodeURIComponent` on the JS side).
+pub(crate) fn percent_decode(value: &str) -> String {
+    percent_encoding::percent_decode_str(value)
+        .decode_utf8_lossy()
+        .into_owned()
+}
+
+/// Raw body of a `tauri::ipc::Request`, or `INVALID_ARGUMENT` when the
+/// renderer sent JSON instead of an `ArrayBuffer`.
+pub(crate) fn raw_body<'a>(request: &'a tauri::ipc::Request<'_>) -> CmdResult<&'a [u8]> {
+    match request.body() {
+        tauri::ipc::InvokeBody::Raw(bytes) => Ok(bytes.as_slice()),
+        tauri::ipc::InvokeBody::Json(_) => {
+            Err(CoreError::invalid("expected a raw binary request body"))
+        }
+    }
+}
+
 pub fn handler() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync + 'static {
     tauri::generate_handler![
         app::app_get_version,
@@ -104,4 +137,36 @@ pub fn handler() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Syn
         store::vault_backup_trim,
         store::vault_backup_clear,
     ]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn percent_decoding_matches_encode_uri_component() {
+        assert_eq!(
+            percent_decode("%2Ftmp%2F%E4%B8%AD%E6%96%87.txt"),
+            "/tmp/中文.txt"
+        );
+        assert_eq!(percent_decode("plain-path_1.txt"), "plain-path_1.txt");
+        // `+` is not a space for encodeURIComponent.
+        assert_eq!(percent_decode("a+b%20c"), "a+b c");
+        // Invalid sequences are passed through lossily rather than failing.
+        assert_eq!(percent_decode("%ZZ"), "%ZZ");
+    }
+
+    #[test]
+    fn header_lookup_is_case_insensitive_and_decoded() {
+        let mut headers = tauri::http::HeaderMap::new();
+        headers.insert("sftpid", tauri::http::HeaderValue::from_static("abc"));
+        headers.insert(
+            "path",
+            tauri::http::HeaderValue::from_static("%2Fsrv%2Fdata"),
+        );
+        assert_eq!(header_str(&headers, "sftpId").as_deref(), Some("abc"));
+        assert_eq!(header_str(&headers, "path").as_deref(), Some("/srv/data"));
+        assert!(header_str(&headers, "encoding").is_none());
+        assert!(require_header(&headers, "encoding").is_err());
+    }
 }

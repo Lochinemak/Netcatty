@@ -52,7 +52,10 @@ mod tests {
         let v = serde_json::to_value(&f).unwrap();
         assert!(v["linkTarget"].is_null());
         assert!(v.get("linkTarget").is_some());
-        let plain = RemoteFile { link_target: None, ..f };
+        let plain = RemoteFile {
+            link_target: None,
+            ..f
+        };
         let v = serde_json::to_value(&plain).unwrap();
         assert!(v.get("linkTarget").is_none());
     }

@@ -21,6 +21,7 @@
 //! The public surface below is the contract the other crates compile
 //! against; keep signatures stable and extend rather than change.
 
+pub mod algorithms;
 pub mod auth;
 pub mod connection;
 pub mod error;
@@ -29,17 +30,20 @@ pub mod handler;
 pub mod keygen;
 pub mod known_hosts;
 pub mod options;
+pub mod prompting;
 pub mod proxy;
 pub mod shell;
 
-pub use connection::{connect, SshConnection};
+pub use auth::{totp_code, totp_code_at, AuthOutcome, KeySourceKind};
+pub use connection::{build_client_config, connect, SshConnection};
 pub use error::{SshError, SshResult};
 pub use exec::ExecOutput;
 pub use handler::ClientHandler;
-pub use keygen::generate_key_pair;
+pub use handler::{ChannelExit, HandlerChannels, HandlerShared};
+pub use keygen::{default_key_files, generate_key_pair};
 pub use known_hosts::{fingerprint_sha256, HostKeyDecision, HostKeyInfo};
 pub use options::{ConnectOptions, HopOptions};
-pub use shell::ShellSession;
+pub use shell::{ShellEvent, ShellOptions, ShellSession};
 
 use async_trait::async_trait;
 use netcatty_core::ipc::KeyboardInteractivePrompt;
