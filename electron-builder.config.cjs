@@ -349,7 +349,10 @@ module.exports = {
     publish: [
         {
             provider: 'github',
-            owner: 'binaricat',
+            // Fork: electron-updater reads this (via app-update.yml) to find
+            // releases. Must point at the fork, or installed builds would be
+            // "updated" back to upstream binaricat/Netcatty.
+            owner: 'Lochinemak',
             repo: 'Netcatty',
             releaseType: 'release'
         }

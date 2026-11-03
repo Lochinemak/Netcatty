@@ -12,8 +12,11 @@ import { netcattyBridge } from "./netcattyBridge";
 // Part 1: GitHub API Version Check
 // ================================
 
-const GITHUB_API_URL = 'https://api.github.com/repos/binaricat/Netcatty/releases/latest';
-const RELEASES_PAGE_URL = 'https://github.com/binaricat/Netcatty/releases';
+// Fork: check the fork's own releases. `releases/latest` ignores pre-releases,
+// and fork builds are tagged `vX.Y.Z-<suffix>.N` (pre-release), so list the
+// most recent releases and take the first published, non-draft one instead.
+const GITHUB_API_URL = 'https://api.github.com/repos/Lochinemak/Netcatty/releases?per_page=5';
+const RELEASES_PAGE_URL = 'https://github.com/Lochinemak/Netcatty/releases';
 
 export interface ReleaseInfo {
   version: string;       // e.g. "1.0.0" (without 'v' prefix)
@@ -38,35 +41,72 @@ export interface UpdateCheckResult {
   error?: string;
 }
 
-/**
- * Parse version string to comparable array
- * e.g. "1.2.3" -> [1, 2, 3]
- */
-function parseVersion(version: string): number[] {
-  // Remove 'v' prefix if present
-  const clean = version.replace(/^v/i, '');
-  return clean.split('.').map((part) => {
-    const num = parseInt(part, 10);
-    return isNaN(num) ? 0 : num;
-  });
+interface ParsedVersion {
+  numbers: number[];
+  prerelease: string[];
 }
 
 /**
- * Compare two version strings
+ * Parse version string into numeric parts and prerelease identifiers
+ * e.g. "1.2.3" -> { numbers: [1, 2, 3], prerelease: [] }
+ *      "1.2.3-loch.2" -> { numbers: [1, 2, 3], prerelease: ["loch", "2"] }
+ */
+function parseVersion(version: string): ParsedVersion {
+  // Remove 'v' prefix and any build metadata (+sha) if present
+  const clean = version.replace(/^v/i, '').split('+')[0];
+  const dash = clean.indexOf('-');
+  const core = dash === -1 ? clean : clean.slice(0, dash);
+  const prerelease = dash === -1 ? [] : clean.slice(dash + 1).split('.').filter(Boolean);
+  const numbers = core.split('.').map((part) => {
+    const num = parseInt(part, 10);
+    return isNaN(num) ? 0 : num;
+  });
+  return { numbers, prerelease };
+}
+
+/**
+ * Compare prerelease identifier lists per semver: a version without a
+ * prerelease is newer than one with; numeric identifiers compare as numbers
+ * and sort before alphanumeric ones; a longer list wins when all shared
+ * identifiers are equal.
+ */
+function comparePrerelease(a: string[], b: string[]): number {
+  if (a.length === 0 && b.length === 0) return 0;
+  if (a.length === 0) return 1;
+  if (b.length === 0) return -1;
+
+  const len = Math.min(a.length, b.length);
+  for (let i = 0; i < len; i++) {
+    const idA = a[i];
+    const idB = b[i];
+    if (idA === idB) continue;
+    const numA = /^\d+$/.test(idA) ? Number(idA) : null;
+    const numB = /^\d+$/.test(idB) ? Number(idB) : null;
+    if (numA !== null && numB !== null) return numA > numB ? 1 : -1;
+    if (numA !== null) return -1;
+    if (numB !== null) return 1;
+    return idA > idB ? 1 : -1;
+  }
+  if (a.length === b.length) return 0;
+  return a.length > b.length ? 1 : -1;
+}
+
+/**
+ * Compare two version strings (semver-aware, including prerelease suffixes)
  * Returns: 1 if a > b, -1 if a < b, 0 if equal
  */
 export function compareVersions(a: string, b: string): number {
-  const partsA = parseVersion(a);
-  const partsB = parseVersion(b);
-  const maxLen = Math.max(partsA.length, partsB.length);
+  const parsedA = parseVersion(a);
+  const parsedB = parseVersion(b);
+  const maxLen = Math.max(parsedA.numbers.length, parsedB.numbers.length);
 
   for (let i = 0; i < maxLen; i++) {
-    const numA = partsA[i] ?? 0;
-    const numB = partsB[i] ?? 0;
+    const numA = parsedA.numbers[i] ?? 0;
+    const numB = parsedB.numbers[i] ?? 0;
     if (numA > numB) return 1;
     if (numA < numB) return -1;
   }
-  return 0;
+  return comparePrerelease(parsedA.prerelease, parsedB.prerelease);
 }
 
 /**
@@ -83,7 +123,13 @@ export async function checkForUpdates(currentVersion: string): Promise<UpdateChe
       throw new Error(`GitHub API returned ${response.status}`);
     }
 
-    const data = await response.json();
+    const releases = await response.json();
+    const data = Array.isArray(releases)
+      ? releases.find((r: { draft?: boolean; tag_name?: string }) => !r.draft && r.tag_name)
+      : releases;
+    if (!data) {
+      throw new Error('No published releases found');
+    }
     const latestVersion = (data.tag_name as string).replace(/^v/i, '');
 
     const latestRelease: ReleaseInfo = {
