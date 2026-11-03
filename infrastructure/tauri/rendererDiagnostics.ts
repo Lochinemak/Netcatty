@@ -50,6 +50,7 @@ export function installRendererDiagnostics(): boolean {
     report('error', args.map(describe).join(' '), 'console.error');
   };
 
-  report('info', `renderer booted (${window.location.href})`, 'bootstrap');
+  const tauriKeys = Object.keys((window as unknown as { __TAURI__?: object }).__TAURI__ ?? {}).join(',');
+  report('info', `renderer booted (${window.location.href}) tauri=[${tauriKeys}]`, 'bootstrap');
   return true;
 }

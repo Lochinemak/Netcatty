@@ -18,6 +18,7 @@ import {
   invoke,
   invokeBinary,
 } from './tauriApi';
+import { cancelStagedUpload, stageUploadFile } from './uploadStaging';
 
 // ---------------------------------------------------------------------------
 // Contract constants (see `netcatty_core::ipc::events`)
@@ -775,6 +776,16 @@ export function createTauriBridge(options: CreateTauriBridgeOptions = {}): Netca
     setAppLockRuntimeLocked: async () => unlockedAppLockRuntimeState(),
     reportAppLockActivity: async () => {},
     requestAppLockUnlock: async () => ({ ok: true }),
+
+    // -----------------------------------------------------------------------
+    // Temp files / upload staging. The webview has no local path for a
+    // dropped or picked File, so its bytes are streamed into the Rust temp
+    // directory first (see uploadStaging.ts); `getPathForFile` stays
+    // undefined on purpose so callers take the staging path.
+    // -----------------------------------------------------------------------
+    stageUploadFile: (file, transferId) => stageUploadFile(file, transferId),
+    cancelStagedUploadFile: async (transferId) => cancelStagedUpload(transferId),
+    deleteTempFile: (filePath) => invoke<BridgeResult<'deleteTempFile'>>('temp_delete_file', { filePath }),
 
     // -----------------------------------------------------------------------
     // Credentials

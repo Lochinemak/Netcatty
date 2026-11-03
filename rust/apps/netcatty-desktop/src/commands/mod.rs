@@ -15,6 +15,7 @@ pub mod session;
 pub mod sftp;
 pub mod ssh;
 pub mod store;
+pub mod temp;
 
 use netcatty_core::CoreError;
 
@@ -59,6 +60,9 @@ pub fn handler<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + 
     tauri::generate_handler![
         app::app_get_version,
         app::app_renderer_log,
+        temp::temp_upload_begin,
+        temp::temp_upload_chunk,
+        temp::temp_delete_file,
         app::app_get_temp_dir_path,
         app::app_reveal_in_folder,
         app::system_info,

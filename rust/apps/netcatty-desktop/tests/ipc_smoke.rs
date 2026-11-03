@@ -436,3 +436,69 @@ fn discover_shells_and_system_info() {
     let version = ok(invoke(&h.webview, "app_get_version", json!({})));
     assert!(version.as_str().is_some_and(|v| !v.is_empty()));
 }
+
+#[test]
+fn temp_upload_staging_round_trip() {
+    let h = build_app();
+    let temp_dir = ok(invoke(&h.webview, "app_get_temp_dir_path", json!({})));
+    let temp_dir = std::path::PathBuf::from(temp_dir.as_str().unwrap());
+
+    let path = ok(invoke(
+        &h.webview,
+        "temp_upload_begin",
+        json!({ "transferId": "t-1/x", "fileName": "report 中.zip" }),
+    ));
+    let path = path.as_str().unwrap().to_string();
+    assert!(std::path::Path::new(&path).starts_with(&temp_dir), "{path}");
+    assert!(
+        path.ends_with(".transfer_t-1_x_report 中.zip.part"),
+        "{path}"
+    );
+
+    let encoded = percent_encode_for_test(&path);
+    let len = ok(invoke_raw(
+        &h.webview,
+        "temp_upload_chunk",
+        b"hello ".to_vec(),
+        &[("path", &encoded)],
+    ));
+    assert_eq!(len, 6);
+    let len = ok(invoke_raw(
+        &h.webview,
+        "temp_upload_chunk",
+        b"world".to_vec(),
+        &[("path", &encoded)],
+    ));
+    assert_eq!(len, 11);
+    assert_eq!(std::fs::read(&path).unwrap(), b"hello world");
+
+    // A second begin with the same id is refused (file exists).
+    let err = invoke(
+        &h.webview,
+        "temp_upload_begin",
+        json!({ "transferId": "t-1/x", "fileName": "report 中.zip" }),
+    )
+    .unwrap_err();
+    assert_eq!(err["code"], "INVALID_ARGUMENT", "{err}");
+
+    // Deleting outside the temp dir is refused; inside succeeds and is idempotent.
+    let outside = ok(invoke(
+        &h.webview,
+        "temp_delete_file",
+        json!({ "filePath": "/etc/hosts" }),
+    ));
+    assert_eq!(outside["success"], false);
+    let inside = ok(invoke(
+        &h.webview,
+        "temp_delete_file",
+        json!({ "filePath": path }),
+    ));
+    assert_eq!(inside["success"], true);
+    assert!(!std::path::Path::new(&path).exists());
+    let again = ok(invoke(
+        &h.webview,
+        "temp_delete_file",
+        json!({ "filePath": path }),
+    ));
+    assert_eq!(again["success"], true);
+}

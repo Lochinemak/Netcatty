@@ -36,7 +36,7 @@ export function isTauri(): boolean {
   return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 }
 
-function getTauriGlobal(): NetcattyTauriGlobal {
+export function getTauriGlobal(): NetcattyTauriGlobal {
   const tauri = typeof window !== 'undefined' ? window.__TAURI__ : undefined;
   if (!tauri) {
     throw new TauriBridgeError('UNSUPPORTED', 'Tauri global API (window.__TAURI__) is unavailable');

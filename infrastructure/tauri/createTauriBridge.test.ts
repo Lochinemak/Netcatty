@@ -467,3 +467,41 @@ test('EventHub subscribes once per event and keeps delivering after a throwing l
   fake.emit('x', 2);
   assert.deepEqual(seen, [1]);
 });
+
+test('stageUploadFile streams the file into the temp dir in chunks and returns the staged path', async () => {
+  const { fake, bridge } = setup();
+  const chunks: Array<{ bytes: Uint8Array; headers: Record<string, string> }> = [];
+  fake.respond('temp_upload_begin', (args) => {
+    const { transferId, fileName } = args as { transferId: string; fileName: string };
+    assert.ok(transferId.startsWith('xfer-1-'));
+    assert.equal(fileName, 'photo.png');
+    return '/tmp/netcatty/.transfer_xfer-1_photo.png.part';
+  });
+  fake.respond('temp_upload_chunk', (args, options) => {
+    const bytes = args as Uint8Array;
+    chunks.push({ bytes: new Uint8Array(bytes), headers: (options as { headers: Record<string, string> }).headers });
+    return chunks.reduce((n, c) => n + c.bytes.byteLength, 0);
+  });
+
+  const file = new File([new Uint8Array([1, 2, 3, 4, 5])], 'photo.png');
+  const path = await bridge.stageUploadFile!(file, 'xfer-1');
+
+  assert.equal(path, '/tmp/netcatty/.transfer_xfer-1_photo.png.part');
+  assert.equal(chunks.length, 1);
+  assert.deepEqual(Array.from(chunks[0].bytes), [1, 2, 3, 4, 5]);
+  assert.equal(chunks[0].headers.path, encodeURIComponent(path));
+  assert.equal(fake.invokes.some((i) => i.cmd === 'temp_delete_file'), false);
+});
+
+test('stageUploadFile deletes the staged file when a chunk fails', async () => {
+  const { fake, bridge } = setup();
+  fake.respond('temp_upload_begin', () => '/tmp/netcatty/.transfer_x_f.part');
+  fake.respond('temp_upload_chunk', () => {
+    throw new Error('disk full');
+  });
+
+  await assert.rejects(bridge.stageUploadFile!(new File(['abc'], 'f'), 'x'), /disk full/);
+  const del = lastInvoke(fake, 'temp_delete_file');
+  assert.deepEqual(del.args, { filePath: '/tmp/netcatty/.transfer_x_f.part' });
+  assert.deepEqual(await bridge.cancelStagedUploadFile!('x'), { success: false });
+});
