@@ -365,13 +365,23 @@ test('rejected invokes surface as TauriBridgeError carrying the backend code', a
   assert.equal(normalizeTauriError(new Error('x')).message, 'x');
 });
 
-test('plugin-backed methods are undefined when the plugin is not registered', () => {
+test('plugin-backed methods go through invoke("plugin:…") when no plugin global exists', async () => {
   const fake = createFakeTauri();
   installWindow(fake.tauri);
   const bridge = createTauriBridge();
-  assert.equal(bridge.selectDirectory, undefined);
-  assert.equal(bridge.readClipboardText, undefined);
-  assert.equal(bridge.openExternal, undefined);
+  fake.respond('plugin:dialog|open', (args) => ((args as { options: { directory?: boolean } }).options.directory ? '/picked/dir' : ['/picked/file']));
+  fake.respond('plugin:clipboard-manager|read_text', () => 'from-pasteboard');
+
+  assert.equal(await bridge.selectDirectory!('Pick', '/start'), '/picked/dir');
+  assert.deepEqual(lastInvoke(fake, 'plugin:dialog|open').args, {
+    options: { directory: true, multiple: false, title: 'Pick', defaultPath: '/start' },
+  });
+  assert.equal(await bridge.selectFile!(), '/picked/file');
+  assert.equal(await bridge.readClipboardText!(), 'from-pasteboard');
+  assert.equal(await bridge.writeClipboardText!('copied'), true);
+  assert.deepEqual(lastInvoke(fake, 'plugin:clipboard-manager|write_text').args, { text: 'copied', label: undefined });
+  await bridge.openExternal!('https://example.com');
+  assert.deepEqual(lastInvoke(fake, 'plugin:opener|open_url').args, { url: 'https://example.com', with: undefined });
   // No Rust counterpart: stays undefined rather than faking success.
   assert.equal(bridge.startMoshSession, undefined);
   assert.equal(bridge.checkForUpdate, undefined);

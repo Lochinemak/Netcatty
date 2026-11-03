@@ -18,6 +18,7 @@ import {
   invoke,
   invokeBinary,
 } from './tauriApi';
+import { pluginClipboard, pluginDialog, pluginOpener } from './plugins';
 import { cancelStagedUpload, stageUploadFile } from './uploadStaging';
 
 // ---------------------------------------------------------------------------
@@ -425,9 +426,11 @@ export function createTauriBridge(options: CreateTauriBridgeOptions = {}): Netca
     if (payload?.sessionId === sessionId) cb(payload);
   });
 
-  const dialog = plugins.dialog;
-  const clipboard = plugins.clipboardManager;
-  const opener = plugins.opener;
+  // Plugin globals are optional overrides (tests); by default the plugins are
+  // reached through `invoke("plugin:…")`, which is always available.
+  const dialog: NonNullable<NetcattyTauriGlobal['dialog']> = plugins.dialog ?? pluginDialog;
+  const clipboard: NonNullable<NetcattyTauriGlobal['clipboardManager']> = plugins.clipboardManager ?? pluginClipboard;
+  const opener: NonNullable<NetcattyTauriGlobal['opener']> = plugins.opener ?? pluginOpener;
 
   const openerResult = async (run: () => Promise<void>): Promise<{ success: boolean; error?: string }> => {
     try {

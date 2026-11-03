@@ -6,20 +6,20 @@
  * uses the Web Clipboard API directly. Inside WKWebView that API is either
  * missing or rejects with `NotAllowedError` outside a trusted user gesture,
  * so copying from the terminal silently did nothing. The plugin talks to the
- * system pasteboard without those restrictions.
+ * system pasteboard without those restrictions. The plugin is reached via
+ * `invoke("plugin:clipboard-manager|…")` (see plugins.ts).
  */
-import { getTauriGlobal, isTauri } from './tauriApi';
+import { pluginClipboard } from './plugins';
+import { isTauri } from './tauriApi';
 
 let installed = false;
 
 export function installClipboardPolyfill(): boolean {
   if (installed || typeof window === 'undefined' || !isTauri()) return false;
-  const plugin = getTauriGlobal().clipboardManager;
-  if (!plugin?.writeText || !plugin.readText) return false;
   installed = true;
 
-  const writeText = (text: string): Promise<void> => plugin.writeText!(String(text ?? ''));
-  const readText = (): Promise<string> => plugin.readText!();
+  const writeText = (text: string): Promise<void> => pluginClipboard.writeText(String(text ?? ''));
+  const readText = (): Promise<string> => pluginClipboard.readText();
 
   const existing = navigator.clipboard as Clipboard | undefined;
   if (existing) {
