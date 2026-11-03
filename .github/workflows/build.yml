@@ -323,15 +323,45 @@ jobs:
           echo "Setting version to ${VERSION}"
           npm pkg set version="${VERSION}"
 
+      - name: Configure macOS code signing & notarization
+        if: matrix.name == 'macos'
+        shell: bash
+        env:
+          MAC_CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
+          MAC_CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
+          MAC_APPLE_ID: ${{ secrets.APPLE_ID }}
+          MAC_APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          MAC_APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          # Export signing/notarization variables only when the secret is set.
+          # Forks and PRs from forks have none; an *empty* CSC_LINK is not
+          # "unset" to electron-builder's macOS packager, which resolves "" to
+          # the project directory and fails with "<projectDir> not a file".
+          export_if_set() {
+            local name="$1" value="$2"
+            if [[ -z "$value" ]]; then
+              return 0
+            fi
+            local delim="EOF_${RANDOM}${RANDOM}"
+            printf '%s<<%s\n%s\n%s\n' "$name" "$delim" "$value" "$delim" >> "$GITHUB_ENV"
+          }
+          if [[ -n "$MAC_CSC_LINK" ]]; then
+            export_if_set CSC_LINK "$MAC_CSC_LINK"
+            export_if_set CSC_KEY_PASSWORD "$MAC_CSC_KEY_PASSWORD"
+            export_if_set APPLE_ID "$MAC_APPLE_ID"
+            export_if_set APPLE_APP_SPECIFIC_PASSWORD "$MAC_APPLE_APP_SPECIFIC_PASSWORD"
+            export_if_set APPLE_TEAM_ID "$MAC_APPLE_TEAM_ID"
+            echo "macOS signing certificate configured."
+          else
+            # No certificate: skip identity lookup so the build is explicitly
+            # unsigned (afterPack ad-hoc signs the bundle so it still launches).
+            echo "CSC_IDENTITY_AUTO_DISCOVERY=false" >> "$GITHUB_ENV"
+            echo "::notice::MAC_CSC_LINK is not set; building an unsigned, un-notarized macOS app."
+          fi
+
       - name: Build package
         env:
           ELECTRON_BUILDER_PUBLISH: "never"
-          # macOS code signing & notarization (only for macOS builds)
-          CSC_LINK: ${{ matrix.name == 'macos' && secrets.MAC_CSC_LINK || '' }}
-          CSC_KEY_PASSWORD: ${{ matrix.name == 'macos' && secrets.MAC_CSC_KEY_PASSWORD || '' }}
-          APPLE_ID: ${{ matrix.name == 'macos' && secrets.APPLE_ID || '' }}
-          APPLE_APP_SPECIFIC_PASSWORD: ${{ matrix.name == 'macos' && secrets.APPLE_APP_SPECIFIC_PASSWORD || '' }}
-          APPLE_TEAM_ID: ${{ matrix.name == 'macos' && secrets.APPLE_TEAM_ID || '' }}
         run: npm run ${{ matrix.pack_script }}
 
       - name: Test packaged SSH cipher negotiation
