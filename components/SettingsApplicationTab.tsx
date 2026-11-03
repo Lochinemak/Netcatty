@@ -16,7 +16,10 @@ type AppInfo = {
   platform?: string;
 };
 
-const REPO_URL = "https://github.com/binaricat/Netcatty";
+// Fork repository: issue reports and release downloads go here.
+const REPO_URL = "https://github.com/Lochinemak/Netcatty";
+// Upstream project: community discussions still live there.
+const UPSTREAM_REPO_URL = "https://github.com/binaricat/Netcatty";
 const BUG_REPORT_TEMPLATE = "bug_report.yml";
 
 const mapIssuePlatform = (platform?: string) => {
@@ -165,7 +168,7 @@ export default function SettingsApplicationTab({ updateState, checkNow, openRele
 
   const issueUrl = useMemo(() => buildIssueUrl(appInfo), [appInfo]);
   const releasesUrl = `${REPO_URL}/releases`;
-  const discussionsUrl = `${REPO_URL}/discussions`;
+  const discussionsUrl = `${UPSTREAM_REPO_URL}/discussions`;
 
   return (
     <SettingsTabContent value="application">

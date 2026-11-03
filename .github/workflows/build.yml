@@ -111,6 +111,10 @@ env:
   MOSH_BIN_RELEASE: ${{ github.event.inputs.mosh_bin_release || vars.MOSH_BIN_RELEASE || '' }}
   BUNDLE_MOSH: ${{ (startsWith(github.ref, 'refs/tags/v') && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish_release))) || (github.event_name == 'workflow_dispatch' && inputs.mosh_bin_release != '') }}
   ET_BIN_RELEASE: ${{ github.event.inputs.et_bin_release || vars.ET_BIN_RELEASE || '' }}
+  # Bundled et binaries always come from upstream's binary repo, even when this
+  # workflow runs in a fork (the scripts otherwise derive the owner from
+  # GITHUB_REPOSITORY and would look for <fork-owner>/Netcatty-et-bin).
+  ET_BIN_OWNER: binaricat
   BUNDLE_ET: ${{ (startsWith(github.ref, 'refs/tags/v') && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish_release))) || (github.event_name == 'workflow_dispatch' && inputs.et_bin_release != '') }}
   STRICT_VERSION_REF_RE: '^refs/tags/v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-((0|[1-9][0-9]*|[A-Za-z][0-9A-Za-z-]*|[0-9A-Za-z][0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)(\.(0|[1-9][0-9]*|[A-Za-z][0-9A-Za-z-]*|[0-9A-Za-z][0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*))*))?$'
 
@@ -902,14 +906,17 @@ jobs:
             artifacts/*.blockmap
           generate_release_notes: true
           fail_on_unmatched_files: false
-          token: ${{ secrets.RELEASE_TOKEN }}
+          # Forks have no RELEASE_TOKEN; the job already has contents: write,
+          # so the default token is enough to create the release there.
+          token: ${{ secrets.RELEASE_TOKEN || github.token }}
 
   update-nix-release:
     name: update Nix release metadata
     runs-on: ubuntu-latest
     needs: release
     if: |
-      startsWith(github.ref, 'refs/tags/v')
+      github.repository_owner == 'binaricat'
+      && startsWith(github.ref, 'refs/tags/v')
       && !contains(github.ref_name, '-')
       && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish_release))
     permissions:
@@ -1074,8 +1081,10 @@ jobs:
     # refuses to replace a newer Cask version.
     # Only stable release tags update the Cask. Prerelease tags
     # (e.g. v1.2.0-rc.1) are skipped so brew users stay on stable.
+    # Only the upstream repository owns the tap; forks skip this job.
     if: |
-      startsWith(github.ref, 'refs/tags/v')
+      github.repository_owner == 'binaricat'
+      && startsWith(github.ref, 'refs/tags/v')
       && !contains(github.ref_name, '-')
       && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish_release))
     steps:
