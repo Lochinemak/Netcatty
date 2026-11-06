@@ -21,6 +21,7 @@ netcatty-forward = { workspace = true }
 netcatty-pty = { workspace = true }
 netcatty-localfs = { workspace = true }
 netcatty-store = { workspace = true }
+netcatty-rdesktop = { workspace = true }
 tauri = { version = "2.12", features = [] }
 tauri-plugin-shell = "2.6"
 tauri-plugin-dialog = "2.8"

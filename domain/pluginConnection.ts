@@ -20,6 +20,8 @@ const BUILT_IN_HOST_PROTOCOLS = new Set<BuiltInHostProtocol>([
   'et',
   'local',
   'serial',
+  'vnc',
+  'rdp',
 ]);
 
 export const pluginProtocolForProvider = (providerId: string): HostProtocol => `plugin:${providerId}`;
@@ -152,6 +154,7 @@ export function stripBuiltInConnectionFieldsForPluginHost(host: Host): Host {
     telnetUsername: _telnetUsername,
     telnetPassword: _telnetPassword,
     serialConfig: _serialConfig,
+    rdpDomain: _rdpDomain,
     sftpSudo: _sftpSudo,
     legacyAlgorithms: _legacyAlgorithms,
     skipEcdsaHostKey: _skipEcdsaHostKey,

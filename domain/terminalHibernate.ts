@@ -1,4 +1,5 @@
 import type { TerminalSession, TerminalSettings } from "./models/terminal";
+import { isRemoteDesktopProtocol } from "./remoteDesktop";
 
 /** Compile-time kill switch for terminal hibernate (Settings > Terminal still controls user default). */
 export const TERMINAL_HIBERNATE_ENABLED = true;
@@ -40,7 +41,9 @@ export function resolveTerminalHibernateEnabledForProtocol(
   settings: Pick<TerminalSettings, "hibernateHiddenTabs"> | null | undefined,
   protocol: string | null | undefined,
 ): boolean {
-  return protocol !== "local" && resolveTerminalHibernateEnabled(settings);
+  return protocol !== "local"
+    && !isRemoteDesktopProtocol(protocol)
+    && resolveTerminalHibernateEnabled(settings);
 }
 
 /** Hidden connected and ended remote terminals can both release their xterm runtime. */

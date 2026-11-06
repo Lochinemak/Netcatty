@@ -2,6 +2,7 @@ import { publishTerminalSelectionTarget } from "../infrastructure/plugins/termin
 import { usePluginTerminalSelection } from "../application/state/usePluginTerminalSelection";
 import { clearTerminalBroadcastUserInput, markTerminalBroadcastUserInput } from "./terminal/runtime/terminalPacedBroadcast";
 import { shouldBroadcastDuringSensitivePrompt } from "../domain/terminalBroadcast";
+import { isRemoteDesktopProtocol } from "../domain/remoteDesktop";
 import { STORAGE_KEY_TERMINAL_BROADCAST_PASSWORD_BYPASS } from "../infrastructure/config/storageKeys";
 import { createTerminalReflowReadingPosition } from "./terminal/terminalReflowReadingPosition";
 import { resolveHostOs } from '../domain/host';
@@ -4112,6 +4113,9 @@ const TerminalComponent: React.FC<TerminalProps> = ({
         sessionStarters.startMosh(term);
       } else if (effectiveTerminalProtocol === 'et') {
         sessionStarters.startEt(term);
+      } else if (isRemoteDesktopProtocol(effectiveTerminalProtocol)) {
+        // VNC / RDP never run in a terminal (see RemoteDesktopPane).
+        return;
       } else {
         sessionStarters.startSSH(term);
       }

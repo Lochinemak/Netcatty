@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { createTauriBridge, encodeByteStringBase64, knownHostsToText } from './createTauriBridge';
+import { FlowPauseCoordinator, createTauriBridge, encodeByteStringBase64, knownHostsToText } from './createTauriBridge';
 import { EventHub, SessionDataBacklog, TauriBridgeError, normalizeTauriError } from './tauriApi';
 
 type Listener = (event: { event: string; id: number; payload: unknown }) => void;
@@ -514,4 +514,164 @@ test('stageUploadFile deletes the staged file when a chunk fails', async () => {
   const del = lastInvoke(fake, 'temp_delete_file');
   assert.deepEqual(del.args, { filePath: '/tmp/netcatty/.transfer_x_f.part' });
   assert.deepEqual(await bridge.cancelStagedUploadFile!('x'), { success: false });
+});
+
+// ---------------------------------------------------------------------------
+// Remote desktop (VNC / RDP)
+// ---------------------------------------------------------------------------
+
+/** `window.__TAURI__.core.Channel` stand-in that remembers its instances. */
+const installFakeChannel = (fake: ReturnType<typeof createFakeTauri>) => {
+  const channels: Array<{ onmessage: (message: unknown) => void }> = [];
+  class FakeChannel {
+    onmessage: (message: unknown) => void = () => {};
+    constructor() {
+      channels.push(this);
+    }
+  }
+  fake.tauri.core!.Channel = FakeChannel as unknown as NonNullable<NetcattyTauriGlobal['core']>['Channel'];
+  return channels;
+};
+
+test('startRemoteDesktopSession passes a channel and decodes its JSON and binary messages', async () => {
+  const { fake, bridge } = setup();
+  const channels = installFakeChannel(fake);
+  fake.respond('rdesktop_connect', () => ({ sessionId: 'rd-1' }));
+  const events: unknown[] = [];
+
+  const sessionId = await bridge.startRemoteDesktopSession!(
+    { protocol: 'vnc', hostname: 'desk.example.test', port: 5901, password: 'pw' },
+    (event) => events.push(event),
+  );
+
+  assert.equal(sessionId, 'rd-1');
+  assert.equal(channels.length, 1);
+  const record = lastInvoke(fake, 'rdesktop_connect');
+  const args = record.args as { payload: unknown; onEvent: unknown };
+  assert.deepEqual(args.payload, { protocol: 'vnc', hostname: 'desk.example.test', port: 5901, password: 'pw' });
+  assert.equal(args.onEvent, channels[0], 'the channel travels as the top-level onEvent argument');
+
+  channels[0].onmessage({ type: 'connected', width: 2, height: 1 });
+  // [1][x=3][y=4][w=2][h=1] + two RGBA pixels.
+  const frame = new Uint8Array([1, 3, 0, 4, 0, 2, 0, 1, 0, 10, 20, 30, 255, 40, 50, 60, 255]);
+  channels[0].onmessage(frame.buffer);
+  // [2][srcX=1][srcY=2][dstX=3][dstY=4][w=5][h=6]
+  channels[0].onmessage(new Uint8Array([2, 1, 0, 2, 0, 3, 0, 4, 0, 5, 0, 6, 0]).buffer);
+  // Malformed and unknown messages are dropped instead of reaching the view.
+  channels[0].onmessage(new Uint8Array([1, 0, 0]).buffer);
+  channels[0].onmessage({ type: 'mystery' });
+  channels[0].onmessage({ type: 'closed', error: 'gone' });
+
+  assert.equal(events.length, 4);
+  assert.deepEqual(events[0], { type: 'connected', width: 2, height: 1 });
+  const decoded = events[1] as { type: string; x: number; y: number; width: number; height: number; rgba: Uint8ClampedArray };
+  assert.deepEqual(
+    { type: decoded.type, x: decoded.x, y: decoded.y, width: decoded.width, height: decoded.height },
+    { type: 'frame', x: 3, y: 4, width: 2, height: 1 },
+  );
+  assert.deepEqual(Array.from(decoded.rgba), [10, 20, 30, 255, 40, 50, 60, 255]);
+  assert.deepEqual(events[2], { type: 'copyRect', srcX: 1, srcY: 2, dstX: 3, dstY: 4, width: 5, height: 6 });
+  assert.deepEqual(events[3], { type: 'closed', error: 'gone' });
+});
+
+test('remote desktop input is batched into one invoke and close is forwarded', async () => {
+  const { fake, bridge } = setup();
+
+  bridge.sendRemoteDesktopInput!('rd-1', []);
+  assert.equal(fake.invokes.some((entry) => entry.cmd === 'rdesktop_input'), false, 'an empty batch is not sent');
+
+  bridge.sendRemoteDesktopInput!('rd-1', [
+    { type: 'pointer', x: 5, y: 6, buttons: 1 },
+    { type: 'key', down: true, keysym: 0x61, scancode: 0x1e },
+  ]);
+  assert.deepEqual(lastInvoke(fake, 'rdesktop_input').args, {
+    payload: {
+      sessionId: 'rd-1',
+      events: [
+        { type: 'pointer', x: 5, y: 6, buttons: 1 },
+        { type: 'key', down: true, keysym: 0x61, scancode: 0x1e },
+      ],
+    },
+  });
+
+  await bridge.closeRemoteDesktopSession!('rd-1');
+  assert.deepEqual(lastInvoke(fake, 'rdesktop_close').args, { sessionId: 'rd-1' });
+});
+
+test('startRemoteDesktopSession reports an unsupported runtime when channels are missing', async () => {
+  const { bridge } = setup();
+  await assert.rejects(
+    bridge.startRemoteDesktopSession!({ protocol: 'rdp', hostname: 'h' }, () => {}),
+    (error: unknown) => error instanceof TauriBridgeError && error.code === 'UNSUPPORTED',
+  );
+});
+
+// ---------------------------------------------------------------------------
+// Output flow pause leases
+// ---------------------------------------------------------------------------
+
+const flowPauseCalls = (fake: ReturnType<typeof createFakeTauri>) => fake.invokes
+  .filter((entry) => entry.cmd === 'session_set_flow_paused')
+  .map((entry) => (entry.args as { sessionId: string; paused: boolean }).paused);
+
+test('a flow pause lease pauses the output pump and resumes it on release', async () => {
+  const { fake, bridge } = setup();
+
+  const acquired = await bridge.acquireSessionFlowPauseLease!('s1');
+  assert.equal(acquired.success, true);
+  assert.ok(acquired.leaseId);
+  assert.deepEqual(flowPauseCalls(fake), [true]);
+  assert.deepEqual(await bridge.waitSessionFlowPauseLease!('s1', acquired.leaseId!), { success: true });
+  assert.equal((await bridge.waitSessionFlowPauseLease!('s1', 'nope')).success, false);
+
+  // A second lease does not pause again, and the pump stays paused until the last one is back.
+  const second = await bridge.acquireSessionFlowPauseLease!('s1');
+  await bridge.releaseSessionFlowPauseLease!('s1', acquired.leaseId!);
+  assert.deepEqual(flowPauseCalls(fake), [true]);
+  await bridge.releaseSessionFlowPauseLease!('s1', second.leaseId!);
+  assert.deepEqual(flowPauseCalls(fake), [true, false]);
+
+  // Releasing twice is harmless.
+  assert.deepEqual(await bridge.releaseSessionFlowPauseLease!('s1', second.leaseId!), { success: true });
+  assert.deepEqual(flowPauseCalls(fake), [true, false]);
+});
+
+test('a lease never resumes output the renderer paused itself, and keepPaused leaves the pump alone', async () => {
+  const { fake, bridge } = setup();
+
+  // Renderer backpressure pauses first; the lease on top changes nothing on the backend.
+  bridge.setSessionFlowPaused('s1', true);
+  const lease = await bridge.acquireSessionFlowPauseLease!('s1');
+  await bridge.releaseSessionFlowPauseLease!('s1', lease.leaseId!);
+  assert.deepEqual(flowPauseCalls(fake), [true], 'still paused: backpressure has not cleared');
+  bridge.setSessionFlowPaused('s1', false);
+  assert.deepEqual(flowPauseCalls(fake), [true, false]);
+
+  // keepPaused: the session is being replaced, so its pump must not be resumed.
+  const kept = await bridge.acquireSessionFlowPauseLease!('s2');
+  await bridge.releaseSessionFlowPauseLease!('s2', kept.leaseId!, { keepPaused: true });
+  assert.deepEqual(
+    fake.invokes
+      .filter((entry) => entry.cmd === 'session_set_flow_paused' && (entry.args as { sessionId: string }).sessionId === 's2')
+      .map((entry) => (entry.args as { paused: boolean }).paused),
+    [true],
+  );
+});
+
+test('a failed pause reports the error and leaves no lease behind', async () => {
+  let fail = true;
+  const calls: boolean[] = [];
+  const coordinator = new FlowPauseCoordinator(async (_sessionId, paused) => {
+    calls.push(paused);
+    if (fail) throw new Error('session gone');
+  });
+
+  await assert.rejects(coordinator.acquire('s1'), /session gone/);
+  // The failed attempt must not make the next one think the pump is already paused.
+  fail = false;
+  const leaseId = await coordinator.acquire('s1');
+  assert.equal(coordinator.holds('s1', leaseId), true);
+  assert.deepEqual(calls, [true, true]);
+  await coordinator.release('s1', leaseId, false);
+  assert.deepEqual(calls, [true, true, false]);
 });

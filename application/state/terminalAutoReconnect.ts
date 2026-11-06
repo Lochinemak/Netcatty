@@ -4,7 +4,7 @@ import type { TerminalSessionExitEvent } from "./resolveTerminalSessionExitInten
 export const TERMINAL_AUTO_RECONNECT_DELAY_MS = 5000;
 
 type AutoReconnectHost = {
-  protocol?: "ssh" | "telnet" | "local" | "serial" | "mosh" | "et";
+  protocol?: "ssh" | "telnet" | "local" | "serial" | "mosh" | "et" | "vnc" | "rdp";
   hostname?: string;
   moshEnabled?: boolean;
   etEnabled?: boolean;

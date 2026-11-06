@@ -502,3 +502,73 @@ fn temp_upload_staging_round_trip() {
     ));
     assert_eq!(again["success"], true);
 }
+
+#[test]
+fn remote_desktop_commands() {
+    let h = build_app();
+    // A channel argument crosses the IPC boundary as `__CHANNEL__:<id>`.
+    let channel = "__CHANNEL__:7";
+
+    let err = invoke(
+        &h.webview,
+        "rdesktop_connect",
+        json!({ "payload": { "protocol": "ssh", "hostname": "127.0.0.1" }, "onEvent": channel }),
+    )
+    .expect_err("only vnc and rdp are remote desktop protocols");
+    assert_eq!(err["code"], "INVALID_ARGUMENT", "error payload: {err}");
+
+    let err = invoke(
+        &h.webview,
+        "rdesktop_connect",
+        json!({ "payload": { "protocol": "vnc", "hostname": " " }, "onEvent": channel }),
+    )
+    .expect_err("hostname is required");
+    assert_eq!(err["code"], "INVALID_ARGUMENT");
+
+    // Port 1 refuses the connection: the command still resolves, the failure
+    // is reported on the channel and the session unregisters itself.
+    let started = ok(invoke(
+        &h.webview,
+        "rdesktop_connect",
+        json!({
+            "payload": { "sessionId": "rd-1", "protocol": "vnc", "hostname": "127.0.0.1", "port": 1 },
+            "onEvent": channel,
+        }),
+    ));
+    assert_eq!(started["sessionId"], "rd-1");
+
+    // Input and close for a finished or unknown session are accepted.
+    ok(invoke(
+        &h.webview,
+        "rdesktop_input",
+        json!({ "payload": { "sessionId": "rd-1", "events": [
+            { "type": "pointer", "x": 1, "y": 2, "buttons": 0 },
+            { "type": "key", "down": true, "keysym": 97, "scancode": 30 },
+        ] } }),
+    ));
+    ok(invoke(
+        &h.webview,
+        "rdesktop_close",
+        json!({ "sessionId": "rd-1" }),
+    ));
+    ok(invoke(
+        &h.webview,
+        "rdesktop_close",
+        json!({ "sessionId": "nope" }),
+    ));
+
+    // Once the refused session has unregistered, its id can be used again.
+    let reusable = (0..100).any(|_| {
+        std::thread::sleep(Duration::from_millis(50));
+        invoke(
+            &h.webview,
+            "rdesktop_connect",
+            json!({
+                "payload": { "sessionId": "rd-1", "protocol": "vnc", "hostname": "127.0.0.1", "port": 1 },
+                "onEvent": channel,
+            }),
+        )
+        .is_ok()
+    });
+    assert!(reusable, "a finished session must free its id");
+}

@@ -97,7 +97,7 @@ test('plugin importer rejects unknown host protocols instead of persisting an un
     value: {
       label: 'Unsupported transport',
       hostname: 'host.test',
-      protocol: 'rdp',
+      protocol: 'x11',
     },
   } }]);
   assert.deepEqual(result.hosts, []);

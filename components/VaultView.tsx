@@ -157,6 +157,7 @@ import {
 } from "./ui/tooltip";
 import { Badge } from "./ui/badge";
 import { HotkeyScheme, KeyBinding } from "../domain/models";
+import { createRemoteDesktopHost, type RemoteDesktopProtocol } from "../domain/remoteDesktop";
 import { VaultViewLayout } from "./vault/VaultViewLayout";
 import { useVaultHostCollections } from "./vault/useVaultHostCollections";
 import { useVaultImportHandlers } from "../application/state/useVaultImportHandlers";
@@ -702,6 +703,19 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
     setNewHostGroupPath(null);
     setIsLocalShellHostPanelOpen(true);
   }, []);
+
+  // "VNC host" / "RDP host" entries under the New Host menu. The draft is not
+  // in the vault yet; it opens in the host panel, which routes VNC / RDP
+  // hosts to their dedicated editor, and is inserted on save.
+  const handleNewRemoteDesktopHost = useCallback((protocol: RemoteDesktopProtocol) => {
+    setIsGroupPanelOpen(false);
+    setEditingGroupPath(null);
+    setIsLocalShellHostPanelOpen(false);
+    setEditingLocalShellHost(null);
+    setNewHostGroupPath(null);
+    setEditingHost(createRemoteDesktopHost({ protocol, group: selectedGroupPath ?? '' }));
+    setIsHostPanelOpen(true);
+  }, [selectedGroupPath]);
 
   const handleCancelLocalShellHost = useCallback(() => {
     setIsLocalShellHostPanelOpen(false);
@@ -1572,6 +1586,7 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
           handleImportFileSelected,
           handleNewHost,
           handleNewLocalShellHost,
+          handleNewRemoteDesktopHost,
           handleCancelLocalShellHost,
           handleSaveLocalShellHost,
           handleProtocolSelect,
