@@ -8,7 +8,7 @@ import {
 import { useTerminalLayoutSuppressActive } from '../../application/state/terminalLayoutSuppressStore';
 import type { TerminalSessionExitEvent } from '../../application/state/resolveTerminalSessionExitIntent';
 import { createTerminalSelectionAttachment } from '../../application/state/terminalSelectionAttachment';
-import { getTopTabInsertionTarget, isPointInsideRect, WORKSPACE_SESSION_DRAG_TYPE } from '../../application/state/terminalDragData';
+import { getTopTabInsertionTarget, getTopTabMergeTarget, isPointInsideRect, WORKSPACE_SESSION_DRAG_TYPE } from '../../application/state/terminalDragData';
 import { useAIState } from '../../application/state/useAIState';
 import { useAISessionsStore } from '../../application/state/aiSessionsStore';
 import { useStoredBoolean } from '../../application/state/useStoredBoolean';
@@ -732,6 +732,7 @@ export interface TerminalLayerProps {
     sessionId: string,
     tabInsertionTarget?: { tabId: string; position: 'before' | 'after'; additionalTabIds?: readonly string[] },
   ) => void;
+  onMoveSessionToTab?: (sessionId: string, targetTabId: string) => boolean;
   onSplitSession?: (sessionId: string, direction: SplitDirection) => void;
   onConnectToHost: (host: Host) => string | void;
   onCreateLocalTerminal?: () => void;
@@ -877,6 +878,7 @@ interface TerminalPaneProps {
     sessionId: string,
     tabInsertionTarget?: { tabId: string; position: 'before' | 'after'; additionalTabIds?: readonly string[] },
   ) => void;
+  onMoveSessionToTab?: (sessionId: string, targetTabId: string) => boolean;
   onReorderTabs?: (draggedId: string, targetId: string, position: 'before' | 'after', additionalTabIds?: readonly string[]) => void;
   onStartSessionDrag?: (sessionId: string) => void;
   onEndSessionDrag?: () => void;
@@ -991,6 +993,7 @@ const terminalPanePropsAreEqual = (
   prev.showSelectionAIAction === next.showSelectionAIAction &&
   prev.onStartSessionRename === next.onStartSessionRename &&
   prev.onRemoveSessionFromWorkspace === next.onRemoveSessionFromWorkspace &&
+  prev.onMoveSessionToTab === next.onMoveSessionToTab &&
   prev.onReorderTabs === next.onReorderTabs &&
   prev.onStartSessionDrag === next.onStartSessionDrag &&
   prev.onEndSessionDrag === next.onEndSessionDrag
@@ -1004,6 +1007,7 @@ type WorkspaceDetachPointerDragOptions = {
   onStartSessionDrag?: (sessionId: string) => void;
   onEndSessionDrag?: () => void;
   onRemoveSessionFromWorkspace?: TerminalPaneProps['onRemoveSessionFromWorkspace'];
+  onMoveSessionToTab?: TerminalPaneProps['onMoveSessionToTab'];
   onReorderTabs?: TerminalPaneProps['onReorderTabs'];
 };
 
@@ -1015,6 +1019,7 @@ export function useWorkspaceDetachPointerDrag({
   onStartSessionDrag,
   onEndSessionDrag,
   onRemoveSessionFromWorkspace,
+  onMoveSessionToTab,
   onReorderTabs,
 }: WorkspaceDetachPointerDragOptions): (event: React.PointerEvent<HTMLElement>) => void {
   const activeDragCleanupRef = useRef<(() => void) | null>(null);
@@ -1043,6 +1048,7 @@ export function useWorkspaceDetachPointerDrag({
     let cleanupFinished = false;
     let ghostEl: HTMLDivElement | null = null;
     let insertEl: HTMLDivElement | null = null;
+    let mergeEl: HTMLDivElement | null = null;
 
     const ensureDragElements = () => {
       if (!ghostEl) {
@@ -1082,11 +1088,39 @@ export function useWorkspaceDetachPointerDrag({
       }
     };
 
+    // Outline drawn over the tab the pane would be moved into. Created on the
+    // first merge hover only, so a plain detach drag adds no extra overlay.
+    const ensureMergeElement = () => {
+      if (mergeEl) return mergeEl;
+      mergeEl = ownerDocument.createElement('div');
+      mergeEl.style.position = 'fixed';
+      mergeEl.style.zIndex = '2147483646';
+      mergeEl.style.pointerEvents = 'none';
+      mergeEl.style.borderRadius = '6px';
+      mergeEl.style.border = '2px solid var(--top-tabs-accent, hsl(var(--accent)))';
+      mergeEl.style.background = 'color-mix(in srgb, var(--top-tabs-accent, hsl(var(--accent))) 18%, transparent)';
+      ownerDocument.body.appendChild(mergeEl);
+      return mergeEl;
+    };
+
     const removeDragElements = () => {
       ghostEl?.remove();
       insertEl?.remove();
+      mergeEl?.remove();
       ghostEl = null;
       insertEl = null;
+      mergeEl = null;
+    };
+
+    // Tab the pane would be merged into: the pointer is over the middle of
+    // another terminal tab. The pane's own workspace tab never qualifies, so
+    // dropping there keeps detaching the pane next to it.
+    const resolveMergeTabId = (pointerEvent: PointerEvent, topTabsRoot: HTMLElement | null) => {
+      if (!onMoveSessionToTab) return null;
+      const mergeTabId = getTopTabMergeTarget(pointerEvent, topTabsRoot);
+      return mergeTabId && mergeTabId !== session.workspaceId && mergeTabId !== session.id
+        ? mergeTabId
+        : null;
     };
 
     const updateDragElements = (pointerEvent: PointerEvent) => {
@@ -1097,6 +1131,24 @@ export function useWorkspaceDetachPointerDrag({
 
       const topTabsRoot = ownerDocument.querySelector<HTMLElement>('[data-top-tabs-root]');
       const insertionTarget = getTopTabInsertionTarget(pointerEvent, topTabsRoot);
+      const mergeTabId = resolveMergeTabId(pointerEvent, topTabsRoot);
+      const mergeTab = mergeTabId && topTabsRoot
+        ? Array.from(topTabsRoot.querySelectorAll<HTMLElement>('[data-tab-id]'))
+          .find((tab) => tab.dataset.tabId === mergeTabId)
+        : undefined;
+      if (mergeTab) {
+        const mergeRect = mergeTab.getBoundingClientRect();
+        const outline = ensureMergeElement();
+        outline.style.display = 'block';
+        outline.style.left = `${mergeRect.left}px`;
+        outline.style.top = `${mergeRect.top}px`;
+        outline.style.width = `${mergeRect.width}px`;
+        outline.style.height = `${mergeRect.height}px`;
+        // Merging replaces the before/after insertion line.
+        if (insertEl) insertEl.style.display = 'none';
+        return insertionTarget;
+      }
+      if (mergeEl) mergeEl.style.display = 'none';
       if (!topTabsRoot || !insertionTarget || !insertEl) {
         if (insertEl) insertEl.style.display = 'none';
         return insertionTarget;
@@ -1175,10 +1227,14 @@ export function useWorkspaceDetachPointerDrag({
       startDragIfNeeded(pointerEvent);
       const topTabsRoot = ownerDocument.querySelector<HTMLElement>('[data-top-tabs-root]');
       const insertionTarget = dragStarted ? updateDragElements(pointerEvent) : null;
+      const mergeTabId = dragStarted ? resolveMergeTabId(pointerEvent, topTabsRoot) : null;
       const shouldDetach = dragStarted
         && !!topTabsRoot
         && isPointInsideRect(pointerEvent, topTabsRoot.getBoundingClientRect());
       cleanup();
+      // Dropped on the middle of another terminal tab: move the pane into it.
+      // A refused move (target vanished mid-drag) falls through to a detach.
+      if (mergeTabId && onMoveSessionToTab?.(session.id, mergeTabId)) return;
       if (shouldDetach) {
         const stableInsertionTarget = resolveStableInsertionTarget(insertionTarget);
         if (onRemoveSessionFromWorkspace) {
@@ -1211,6 +1267,7 @@ export function useWorkspaceDetachPointerDrag({
     inActiveWorkspace,
     onEndSessionDrag,
     onRemoveSessionFromWorkspace,
+    onMoveSessionToTab,
     onReorderTabs,
     onStartSessionDrag,
     session,
@@ -1296,6 +1353,7 @@ const TerminalPane: React.FC<TerminalPaneProps> = memo(({
   showSelectionAIAction,
   onStartSessionRename,
   onRemoveSessionFromWorkspace,
+  onMoveSessionToTab,
   onReorderTabs,
   onStartSessionDrag,
   onEndSessionDrag,
@@ -1578,6 +1636,7 @@ const TerminalPane: React.FC<TerminalPaneProps> = memo(({
     onStartSessionDrag,
     onEndSessionDrag,
     onRemoveSessionFromWorkspace,
+    onMoveSessionToTab,
     onReorderTabs,
   });
   const handleTerminalFontSizeChange = useCallback((nextFontSize: number) => {
@@ -1789,6 +1848,7 @@ interface TerminalPanesHostProps {
   onAddSelectionToAI?: (sessionId: string, selection: string) => void;
   onStartSessionRename?: (sessionId: string) => void;
   onRemoveSessionFromWorkspace?: TerminalPaneProps['onRemoveSessionFromWorkspace'];
+  onMoveSessionToTab?: TerminalPaneProps['onMoveSessionToTab'];
   onReorderTabs?: (draggedId: string, targetId: string, position: 'before' | 'after', additionalTabIds?: readonly string[]) => void;
   onStartSessionDrag?: (sessionId: string) => void;
   onEndSessionDrag?: () => void;
@@ -1872,6 +1932,7 @@ const terminalPanesHostPropsAreEqual = (
   if (prev.onAddSelectionToAI !== next.onAddSelectionToAI) return false;
   if (prev.onStartSessionRename !== next.onStartSessionRename) return false;
   if (prev.onRemoveSessionFromWorkspace !== next.onRemoveSessionFromWorkspace) return false;
+  if (prev.onMoveSessionToTab !== next.onMoveSessionToTab) return false;
   if (prev.onReorderTabs !== next.onReorderTabs) return false;
   if (prev.onStartSessionDrag !== next.onStartSessionDrag) return false;
   if (prev.onEndSessionDrag !== next.onEndSessionDrag) return false;

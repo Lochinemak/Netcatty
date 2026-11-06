@@ -680,6 +680,8 @@ export const ruAiMessages: Messages = {
   'terminal.layer.hostTree.newHost': 'Новый хост',
   'terminal.layer.hostTree.newHostInGroup': 'Новый хост в этой группе',
   'terminal.layer.hostTree.editHost': 'Изменить хост',
+  'terminal.layer.hostTree.splitRight': 'Разделить вправо в текущей вкладке',
+  'terminal.layer.hostTree.splitDown': 'Разделить вниз в текущей вкладке',
   'terminal.layer.hostTree.hostSavedNextConnection': 'Хост обновлён. Параметры подключения вступят в силу при следующем подключении.',
   'terminal.layer.hostTree.newGroup': 'Новая группа',
   'terminal.layer.hostTree.localShell': 'Локальная оболочка',

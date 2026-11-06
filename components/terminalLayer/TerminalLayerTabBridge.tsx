@@ -587,6 +587,7 @@ export function TerminalLayerTabBridge({ stableRef }: { stableRef: StableRef }) 
     onStartSessionRename: s.onStartSessionRename,
     onSubmitSessionRename: s.onSubmitSessionRename,
     onRemoveSessionFromWorkspace: s.onRemoveSessionFromWorkspace,
+    onMoveSessionToTab: s.onMoveSessionToTab,
     onOpenVaultNoteFromChat: s.onOpenVaultNoteFromChat,
     onOpenVaultHostFromChat: s.onOpenVaultHostFromChat,
     onOpenVaultSectionFromChat: s.onOpenVaultSectionFromChat,

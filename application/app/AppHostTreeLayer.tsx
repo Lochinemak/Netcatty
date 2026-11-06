@@ -33,6 +33,7 @@ interface AppHostTreeLayerProps {
   themeById: ReadonlyMap<string, TerminalTheme>;
   resolveSessionAppearance?: (hostScope: TerminalAppearanceHostScope) => ResolvedAppearance;
   onConnect: (host: Host) => void;
+  onSplitHostIntoCurrentTab?: (host: Host, direction: 'horizontal' | 'vertical') => void;
   onNewHost?: (defaultGroup?: string) => void;
   onEditHost?: (host: Host) => void;
   onCreateLocalTerminal?: () => void;
@@ -67,6 +68,7 @@ function appHostTreeLayerAreEqual(
     && prev.themeById === next.themeById
     && prev.resolveSessionAppearance === next.resolveSessionAppearance
     && prev.onConnect === next.onConnect
+    && prev.onSplitHostIntoCurrentTab === next.onSplitHostIntoCurrentTab
     && prev.onNewHost === next.onNewHost
     && prev.onEditHost === next.onEditHost
     && prev.onCreateLocalTerminal === next.onCreateLocalTerminal;
@@ -88,6 +90,7 @@ const AppHostTreeLayerInner: React.FC<AppHostTreeLayerProps> = ({
   themeById,
   resolveSessionAppearance,
   onConnect,
+  onSplitHostIntoCurrentTab,
   onNewHost,
   onEditHost,
   onCreateLocalTerminal,
@@ -113,6 +116,13 @@ const AppHostTreeLayerInner: React.FC<AppHostTreeLayerProps> = ({
     sessionIds,
     workspaceIds,
   });
+
+  // Splitting needs a terminal tab to split into: a workspace, or a standalone
+  // session. Log views and editor tabs have no pane layout.
+  const activeTabIsTerminal = Boolean(activeTabId) && (
+    workspaceById.has(activeTabId as string)
+    || Boolean(sessionById.get(activeTabId as string) && !sessionById.get(activeTabId as string)?.workspaceId)
+  );
 
   const activeHostId = useMemo(() => resolveWorkTabActiveHostId({
     activeTabId,
@@ -171,6 +181,7 @@ const AppHostTreeLayerInner: React.FC<AppHostTreeLayerProps> = ({
         resolvedPreviewTheme={hostTreeTheme}
         activeHostId={activeHostId}
         onConnect={onConnect}
+        onSplitHost={activeTabIsTerminal ? onSplitHostIntoCurrentTab : undefined}
         onNewHost={onNewHost}
         onEditHost={onEditHost}
         onCreateLocalTerminal={onCreateLocalTerminal}

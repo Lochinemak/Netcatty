@@ -29,7 +29,7 @@ const { useWorkspaceDetachPointerDrag } = await import("./TerminalLayerSupport")
 
 type Listener = EventListenerOrEventListenerObject;
 
-function createDragDom() {
+function createDragDom(topTabsRoot: unknown = null) {
   const documentListeners = new Map<string, Set<Listener>>();
   const windowListeners = new Map<string, Set<Listener>>();
   const appendedElements = new Set<{ remove: () => void }>();
@@ -65,7 +65,7 @@ function createDragDom() {
       };
       return element;
     },
-    querySelector: () => null,
+    querySelector: () => topTabsRoot,
     addEventListener: (type: string, listener: Listener) => addListener(documentListeners, type, listener),
     removeEventListener: (type: string, listener: Listener) => removeListener(documentListeners, type, listener),
     defaultView: fakeWindow,
@@ -258,4 +258,93 @@ test("all pointer drag exit paths share one idempotent cleanup", async () => {
     renderer!.unmount();
   });
   assert.equal(dragEndCount, 4, "unmount after cleanup must not end the drag twice");
+});
+
+function createTopTabsRoot() {
+  const tab = (tabId: string, tabType: string, left: number, right: number) => ({
+    dataset: { tabId, tabType },
+    getBoundingClientRect: () => ({ left, right, top: 0, bottom: 30, width: right - left, height: 30 }),
+  });
+  const tabs = [
+    tab("workspace-1", "workspace", 0, 200),
+    tab("workspace-2", "workspace", 200, 400),
+    tab("session-9", "session", 400, 600),
+  ];
+  return {
+    getBoundingClientRect: () => ({ left: 0, right: 1000, top: 0, bottom: 30, width: 1000, height: 30 }),
+    querySelectorAll: () => tabs,
+  };
+}
+
+test("dropping a pane on the middle of another tab moves it there instead of detaching", async () => {
+  const dom = createDragDom(createTopTabsRoot());
+  let pointerDown: ((event: React.PointerEvent<HTMLElement>) => void) | null = null;
+  const moves: Array<[string, string]> = [];
+  const detaches: Array<string | undefined> = [];
+  let acceptMove = true;
+
+  function Harness() {
+    pointerDown = useWorkspaceDetachPointerDrag({
+      inActiveWorkspace: true,
+      session: { id: "session-1", workspaceId: "workspace-1" } as never,
+      workspaceById: new Map(),
+      onMoveSessionToTab: (sessionId, targetTabId) => {
+        moves.push([sessionId, targetTabId]);
+        return acceptMove;
+      },
+      onRemoveSessionFromWorkspace: (_sessionId, target) => { detaches.push(target?.tabId); },
+    });
+    return null;
+  }
+
+  let renderer: ReactTestRenderer;
+  await act(async () => {
+    renderer = create(React.createElement(Harness));
+  });
+  const dragTo = async (clientX: number, beforeRelease?: () => void) => {
+    await act(async () => {
+      pointerDown!({
+        button: 0,
+        clientX: 0,
+        clientY: 100,
+        currentTarget: { ownerDocument: dom.document },
+        preventDefault: () => undefined,
+        stopPropagation: () => undefined,
+      } as unknown as React.PointerEvent<HTMLElement>);
+      dom.dispatchDocument("pointermove", { clientX, clientY: 15 } as PointerEvent);
+      beforeRelease?.();
+      dom.dispatchDocument("pointerup", { clientX, clientY: 15 } as PointerEvent);
+    });
+  };
+
+  // Middle of another workspace tab: ghost + insertion line + merge outline.
+  await dragTo(300, () => assert.equal(dom.appendedElements.size, 3));
+  assert.deepEqual(moves, [["session-1", "workspace-2"]]);
+  assert.deepEqual(detaches, []);
+  assert.equal(dom.appendedElements.size, 0, "the merge outline is removed with the other overlays");
+
+  // Middle of a standalone session tab merges too.
+  await dragTo(500);
+  assert.deepEqual(moves[1], ["session-1", "session-9"]);
+  assert.deepEqual(detaches, []);
+
+  // Edge of another tab keeps detaching the pane into its own tab.
+  await dragTo(210, () => assert.equal(dom.appendedElements.size, 2));
+  assert.equal(moves.length, 2);
+  assert.deepEqual(detaches, ["workspace-2"]);
+
+  // The pane's own workspace tab is never a merge target.
+  await dragTo(100);
+  assert.equal(moves.length, 2);
+  assert.equal(detaches.length, 2);
+
+  // A refused move falls back to the detach behaviour.
+  acceptMove = false;
+  await dragTo(300);
+  assert.equal(moves.length, 3);
+  assert.equal(detaches.length, 3);
+
+  await act(async () => {
+    renderer!.unmount();
+  });
 });

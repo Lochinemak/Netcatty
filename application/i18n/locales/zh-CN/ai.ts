@@ -744,6 +744,8 @@ export const zhCNAiMessages: Messages = {
   'terminal.layer.hostTree.newHost': '新建主机',
   'terminal.layer.hostTree.newHostInGroup': '在此分组中新建主机',
   'terminal.layer.hostTree.editHost': '编辑主机',
+  'terminal.layer.hostTree.splitRight': '在当前标签中向右分屏',
+  'terminal.layer.hostTree.splitDown': '在当前标签中向下分屏',
   'terminal.layer.hostTree.hostSavedNextConnection': '主机已更新，连接设置将在下次连接时生效。',
   'terminal.layer.hostTree.newGroup': '新建分组',
   'terminal.layer.hostTree.localShell': '本地 Shell',

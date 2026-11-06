@@ -267,6 +267,7 @@ export function AppSideEffects() {
     createWorkspaceWithHosts,
     createWorkspaceFromTargets,
     splitSession,
+    splitHostIntoTab,
     toggleWorkspaceViewMode,
     setWorkspaceFocusedSession,
     moveFocusInWorkspace,
@@ -1465,7 +1466,14 @@ export function AppSideEffects() {
   temporaryConnectionSettingsRef.current = terminalSettings;
 
   // Wrapper to connect to host with logging
-  const handleConnectToHost = useCallback((host: Host, alreadyEffective = false, hidden = false, workspaceId?: string) => {
+  const handleConnectToHost = useCallback((
+    host: Host,
+    alreadyEffective = false,
+    hidden = false,
+    workspaceId?: string,
+    // Open the host as a new pane of an existing terminal tab instead of a new tab.
+    splitTarget?: { tabId: string; direction: 'horizontal' | 'vertical' },
+  ) => {
     const liveTerminalSettings = temporaryConnectionSettingsRef.current;
     const connectionHost = prepareConnectionHost(
       host,
@@ -1485,7 +1493,9 @@ export function AppSideEffects() {
       addConnectionLog,
       connectToHost: workspaceId
         ? (candidate: Host) => appendHostToWorkspaceConfirmed(workspaceId, candidate)
-        : connectToHost,
+        : splitTarget
+          ? (candidate: Host) => splitHostIntoTab(splitTarget.tabId, candidate, splitTarget.direction)
+          : connectToHost,
       discoveredShells,
       host: connectionHost,
       identities,
@@ -1496,7 +1506,18 @@ export function AppSideEffects() {
       systemInfoRef,
       terminalSettings: liveTerminalSettings,
     }), connectionHost, hidden);
-  }, [addConnectionLog, appendHostToWorkspaceConfirmed, connectToHost, resolveEffectiveHost, identities, keys, discoveredShells]);
+  }, [addConnectionLog, appendHostToWorkspaceConfirmed, connectToHost, splitHostIntoTab, resolveEffectiveHost, identities, keys, discoveredShells]);
+
+  // Host tree "split into current tab": the new connection becomes a pane of
+  // the tab the user is looking at. Falls back to a regular new tab when the
+  // active tab is not a terminal tab (log view, editor, ...).
+  const handleSplitHostIntoCurrentTab = useCallback((host: Host, direction: 'horizontal' | 'vertical') => {
+    const tabId = activeTabStore.getActiveTabId();
+    const sessionId = tabId
+      ? handleConnectToHost(host, false, false, undefined, { tabId, direction })
+      : null;
+    return sessionId ?? handleConnectToHost(host);
+  }, [handleConnectToHost]);
 
   const handleConnectToHostWithTabName = useCallback((host: Host, tabName?: string) => {
     const sessionId = handleConnectToHost(host);
@@ -2059,6 +2080,7 @@ export function AppSideEffects() {
       handleCreateLocalTerminal,
       handleHotkeyAction,
       handleSessionStatusChange,
+      handleSplitHostIntoCurrentTab,
       handleTerminalDataCapture,
       handleUpdateHostFromTerminal,
       updateTerminalHosts,
@@ -2139,6 +2161,7 @@ export function AppSideEffects() {
     handleCreateLocalTerminal,
     handleHotkeyAction,
     handleSessionStatusChange,
+    handleSplitHostIntoCurrentTab,
     handleTerminalDataCapture,
     handleUpdateHostFromTerminal,
     updateTerminalHosts,
