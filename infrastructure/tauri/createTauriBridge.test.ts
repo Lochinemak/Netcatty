@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { createTauriBridge, encodeByteStringBase64, knownHostsToText } from './createTauriBridge';
+import { FlowPauseCoordinator, createTauriBridge, encodeByteStringBase64, knownHostsToText } from './createTauriBridge';
 import { EventHub, SessionDataBacklog, TauriBridgeError, normalizeTauriError } from './tauriApi';
 
 type Listener = (event: { event: string; id: number; payload: unknown }) => void;
@@ -604,4 +604,74 @@ test('startRemoteDesktopSession reports an unsupported runtime when channels are
     bridge.startRemoteDesktopSession!({ protocol: 'rdp', hostname: 'h' }, () => {}),
     (error: unknown) => error instanceof TauriBridgeError && error.code === 'UNSUPPORTED',
   );
+});
+
+// ---------------------------------------------------------------------------
+// Output flow pause leases
+// ---------------------------------------------------------------------------
+
+const flowPauseCalls = (fake: ReturnType<typeof createFakeTauri>) => fake.invokes
+  .filter((entry) => entry.cmd === 'session_set_flow_paused')
+  .map((entry) => (entry.args as { sessionId: string; paused: boolean }).paused);
+
+test('a flow pause lease pauses the output pump and resumes it on release', async () => {
+  const { fake, bridge } = setup();
+
+  const acquired = await bridge.acquireSessionFlowPauseLease!('s1');
+  assert.equal(acquired.success, true);
+  assert.ok(acquired.leaseId);
+  assert.deepEqual(flowPauseCalls(fake), [true]);
+  assert.deepEqual(await bridge.waitSessionFlowPauseLease!('s1', acquired.leaseId!), { success: true });
+  assert.equal((await bridge.waitSessionFlowPauseLease!('s1', 'nope')).success, false);
+
+  // A second lease does not pause again, and the pump stays paused until the last one is back.
+  const second = await bridge.acquireSessionFlowPauseLease!('s1');
+  await bridge.releaseSessionFlowPauseLease!('s1', acquired.leaseId!);
+  assert.deepEqual(flowPauseCalls(fake), [true]);
+  await bridge.releaseSessionFlowPauseLease!('s1', second.leaseId!);
+  assert.deepEqual(flowPauseCalls(fake), [true, false]);
+
+  // Releasing twice is harmless.
+  assert.deepEqual(await bridge.releaseSessionFlowPauseLease!('s1', second.leaseId!), { success: true });
+  assert.deepEqual(flowPauseCalls(fake), [true, false]);
+});
+
+test('a lease never resumes output the renderer paused itself, and keepPaused leaves the pump alone', async () => {
+  const { fake, bridge } = setup();
+
+  // Renderer backpressure pauses first; the lease on top changes nothing on the backend.
+  bridge.setSessionFlowPaused('s1', true);
+  const lease = await bridge.acquireSessionFlowPauseLease!('s1');
+  await bridge.releaseSessionFlowPauseLease!('s1', lease.leaseId!);
+  assert.deepEqual(flowPauseCalls(fake), [true], 'still paused: backpressure has not cleared');
+  bridge.setSessionFlowPaused('s1', false);
+  assert.deepEqual(flowPauseCalls(fake), [true, false]);
+
+  // keepPaused: the session is being replaced, so its pump must not be resumed.
+  const kept = await bridge.acquireSessionFlowPauseLease!('s2');
+  await bridge.releaseSessionFlowPauseLease!('s2', kept.leaseId!, { keepPaused: true });
+  assert.deepEqual(
+    fake.invokes
+      .filter((entry) => entry.cmd === 'session_set_flow_paused' && (entry.args as { sessionId: string }).sessionId === 's2')
+      .map((entry) => (entry.args as { paused: boolean }).paused),
+    [true],
+  );
+});
+
+test('a failed pause reports the error and leaves no lease behind', async () => {
+  let fail = true;
+  const calls: boolean[] = [];
+  const coordinator = new FlowPauseCoordinator(async (_sessionId, paused) => {
+    calls.push(paused);
+    if (fail) throw new Error('session gone');
+  });
+
+  await assert.rejects(coordinator.acquire('s1'), /session gone/);
+  // The failed attempt must not make the next one think the pump is already paused.
+  fail = false;
+  const leaseId = await coordinator.acquire('s1');
+  assert.equal(coordinator.holds('s1', leaseId), true);
+  assert.deepEqual(calls, [true, true]);
+  await coordinator.release('s1', leaseId, false);
+  assert.deepEqual(calls, [true, true, false]);
 });
