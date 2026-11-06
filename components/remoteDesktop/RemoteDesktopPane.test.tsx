@@ -326,3 +326,33 @@ test('the requested desktop size follows the pane, clamped and even', () => {
   assert.deepEqual(resolveRequestedDesktopSize({ width: 300, height: 200 }), { width: 800, height: 600 });
   assert.deepEqual(resolveRequestedDesktopSize({ width: 9000, height: 9000 }), { width: 4096, height: 4096 });
 });
+
+test('StrictMode double mounting dials the server exactly once', async (t) => {
+  // React StrictMode mounts, unmounts and remounts every effect in development.
+  // An RDP server allows one session per account, so a second throw-away
+  // connection would disconnect the real one.
+  const env = mountEnvironment(t);
+  await act(async () => {
+    env.root.render(
+      <React.StrictMode>
+        <RemoteDesktopPane
+          host={rdpHost}
+          protocol="rdp"
+          sessionId="session-strict"
+          keys={[]}
+          identities={[]}
+          isVisible
+          isFocused
+          inWorkspace={false}
+        />
+      </React.StrictMode>,
+    );
+  });
+
+  assert.equal(env.backend.starts.length, 1);
+  assert.deepEqual(env.backend.closes, []);
+  assert.equal(env.pane().dataset.remoteDesktopStatus, 'connecting');
+
+  await act(async () => env.backend.starts[0].emit({ type: 'connected', width: 800, height: 600 }));
+  assert.equal(env.pane().dataset.remoteDesktopStatus, 'connected');
+});

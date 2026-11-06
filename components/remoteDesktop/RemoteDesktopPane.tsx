@@ -216,26 +216,34 @@ export const RemoteDesktopPane: React.FC<RemoteDesktopPaneProps> = ({
       body ? { width: body.clientWidth, height: body.clientHeight } : null,
     );
 
-    backend.start(
-      {
-        protocol: proto,
-        hostname: target.hostname,
-        port: resolveRemoteDesktopPort(proto, target.port),
-        username: proto === 'rdp' ? auth.username?.trim() : undefined,
-        password: auth.password || undefined,
-        domain: proto === 'rdp' ? target.rdpDomain?.trim() || undefined : undefined,
-        width: size.width,
-        height: size.height,
-      },
-      (event) => {
-        if (!cancelled) handleEvent(event);
-      },
-    ).then((backendId) => {
-      if (cancelled) {
-        backend.close(backendId);
-        return;
-      }
-      backendIdRef.current = backendId;
+    // Dial on the next microtask, not inside the effect. React StrictMode
+    // (dev) mounts, unmounts and remounts synchronously; an attempt that is
+    // cancelled that way must never reach the server. A second RDP logon for
+    // the same account disconnects the first, so the throw-away connection of
+    // the discarded mount used to kick out the real one.
+    void Promise.resolve().then(() => {
+      if (cancelled) return undefined;
+      return backend.start(
+        {
+          protocol: proto,
+          hostname: target.hostname,
+          port: resolveRemoteDesktopPort(proto, target.port),
+          username: proto === 'rdp' ? auth.username?.trim() : undefined,
+          password: auth.password || undefined,
+          domain: proto === 'rdp' ? target.rdpDomain?.trim() || undefined : undefined,
+          width: size.width,
+          height: size.height,
+        },
+        (event) => {
+          if (!cancelled) handleEvent(event);
+        },
+      ).then((backendId) => {
+        if (cancelled) {
+          backend.close(backendId);
+          return;
+        }
+        backendIdRef.current = backendId;
+      });
     }).catch((error: unknown) => {
       fail(error instanceof Error ? error.message : String(error));
     });
