@@ -44,6 +44,10 @@ import {
   replaceDissolvedWorkspaceTabOrder,
 } from './sessionWorkspaceDetach';
 import {
+  applyMovedWorkspaceSessionTabOrder,
+  moveWorkspaceSessionToTabState,
+} from './sessionTabMerge';
+import {
   createCopiedTerminalSessionClone,
   createSplitTerminalSessionClone,
 } from './terminalConnectionReuse';
@@ -1091,6 +1095,106 @@ export const useSessionState = ({
 	    });
 	  }, [setActiveTabId]);
 
+  // Open `host` as a new pane inside an existing terminal tab, next to the
+  // pane the user is looking at. A workspace tab gets the pane inserted beside
+  // its focused session; a standalone tab is turned into a two-pane workspace.
+  // Unlike splitSession this starts a different connection, not a clone.
+  const splitHostIntoTab = useCallback((
+    tabId: string,
+    host: Host,
+    direction: SplitDirection,
+  ): string | null => {
+    const newSessionId = crypto.randomUUID();
+    const position = direction === 'horizontal' ? 'bottom' : 'right';
+
+    if (workspacesRef.current.some(w => w.id === tabId)) {
+      const newSession = createWorkspaceHostTerminalSession(newSessionId, host, tabId);
+      // Same nesting as appendHostToWorkspace: the session is only committed
+      // when the workspace update matched, so a concurrent closeWorkspace
+      // cannot leave an orphan pointing at a workspace that is gone.
+      setWorkspaces(prev => {
+        const target = prev.find(w => w.id === tabId);
+        if (!target) return prev;
+        const liveIds = collectSessionIds(target.root);
+        if (liveIds.includes(newSessionId)) return prev;
+        const anchorSessionId = target.focusedSessionId && liveIds.includes(target.focusedSessionId)
+          ? target.focusedSessionId
+          : liveIds[0];
+        if (!anchorSessionId) return prev;
+        setSessions(s => addTerminalSessionIfMissing(s, newSession));
+        setActiveTabId(tabId);
+        return insertWorkspacePaneIfMissing(
+          prev,
+          tabId,
+          newSessionId,
+          { direction, position, targetSessionId: anchorSessionId },
+          { revealInSplitView: true },
+        ).map(ws => (ws.id === tabId ? { ...ws, focusedSessionId: newSessionId } : ws));
+      });
+      return newSessionId;
+    }
+
+    const baseSession = sessionsRef.current.find(s => (
+      s.id === tabId && !s.workspaceId && !s.hiddenFromTabs
+    ));
+    if (!baseSession) return null;
+
+    const created = createWorkspaceEntity(tabId, newSessionId, { direction, position });
+    const newSession = createWorkspaceHostTerminalSession(newSessionId, host, created.id);
+    const mergedTitle = buildMergedWorkspaceTitle(
+      getSessionConnectionLabel(baseSession),
+      getSessionConnectionLabel(newSession),
+    );
+    const newWorkspace: Workspace = {
+      ...(mergedTitle
+        ? { ...created, title: mergedTitle, autoTitle: false, generatedTitle: true }
+        : created),
+      focusedSessionId: newSessionId,
+    };
+
+    setSessions(prevSessions => {
+      const base = prevSessions.find(s => s.id === tabId);
+      if (!base || base.workspaceId) return prevSessions;
+
+      setWorkspaces(prev => addWorkspaceIfMissing(prev, newWorkspace));
+      // The standalone tab's slot becomes the workspace tab.
+      setTabOrder(prevTabOrder => {
+        if (prevTabOrder.includes(newWorkspace.id)) {
+          return prevTabOrder.filter(id => id !== tabId);
+        }
+        return prevTabOrder.includes(tabId)
+          ? prevTabOrder.map(id => (id === tabId ? newWorkspace.id : id))
+          : prevTabOrder;
+      });
+      setActiveTabId(newWorkspace.id);
+
+      return addTerminalSessionIfMissing(
+        prevSessions.map(s => (s.id === tabId ? { ...s, workspaceId: newWorkspace.id } : s)),
+        newSession,
+      );
+    });
+    return newSessionId;
+  }, [setActiveTabId]);
+
+  // Move a workspace pane into another terminal tab (drag a pane onto a tab).
+  const moveSessionToTab = useCallback((sessionId: string, targetTabId: string): boolean => {
+    // Latest refs for the same reason as removeSessionFromWorkspace: a
+    // memoized pane must not act on a stale workspace snapshot.
+    const result = moveWorkspaceSessionToTabState({
+      sessions: sessionsRef.current,
+      workspaces: workspacesRef.current,
+      sessionId,
+      targetTabId,
+    });
+    if (!result.changed) return false;
+
+    setWorkspaces(result.workspaces);
+    setSessions(result.sessions);
+    setTabOrder(prevTabOrder => applyMovedWorkspaceSessionTabOrder(prevTabOrder, result));
+    if (result.activeTabId) setActiveTabId(result.activeTabId);
+    return true;
+  }, [setActiveTabId]);
+
   // Toggle workspace view mode between split and focus
   const toggleWorkspaceViewMode = useCallback((workspaceId: string) => {
     setWorkspaces(prev => prev.map(ws => {
@@ -1523,6 +1627,8 @@ export const useSessionState = ({
     appendLocalTerminalToWorkspace,
     updateSplitSizes,
     splitSession,
+    splitHostIntoTab,
+    moveSessionToTab,
     toggleWorkspaceViewMode,
     setWorkspaceFocusedSession,
     reorderWorkspaceSessions,

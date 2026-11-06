@@ -298,6 +298,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   onStartSessionRename,
   onSubmitSessionRename,
   onRemoveSessionFromWorkspace,
+  onMoveSessionToTab,
 }) => {
   const { t } = useI18n();
   const [magnifiedPane, setMagnifiedPane] = useState<{
@@ -2725,6 +2726,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     onStartSessionRename,
     onSubmitSessionRename,
     onRemoveSessionFromWorkspace,
+    onMoveSessionToTab,
     onStartSessionDrag: onSetDraggingSessionId,
     onEndSessionDrag: handleEndSessionDrag,
     onSplitSession,

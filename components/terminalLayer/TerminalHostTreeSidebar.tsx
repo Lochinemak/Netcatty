@@ -124,6 +124,7 @@ interface TerminalHostTreeSidebarProps {
   resolvedPreviewTheme: TerminalTheme;
   activeHostId?: string | null;
   onConnect: (host: Host) => void;
+  onSplitHost?: (host: Host, direction: 'horizontal' | 'vertical') => void;
   onNewHost?: (defaultGroup?: string) => void;
   onEditHost?: (host: Host) => void;
   onCreateLocalTerminal?: () => void;
@@ -325,6 +326,7 @@ type HostTreeFlatRowProps = {
   isInlineEditing: boolean;
   inlineEditInitialName?: string;
   onConnect: (host: Host) => void;
+  onSplitHost?: (host: Host, direction: 'horizontal' | 'vertical') => void;
   onNewHost?: (defaultGroup?: string) => void;
   onEditHost?: (host: Host) => void;
   onTogglePath: (path: string) => void;
@@ -347,6 +349,7 @@ const HostTreeFlatRowItem = memo<HostTreeFlatRowProps>(({
   isInlineEditing,
   inlineEditInitialName,
   onConnect,
+  onSplitHost,
   onNewHost,
   onEditHost,
   onTogglePath,
@@ -480,6 +483,7 @@ const HostTreeFlatRowItem = memo<HostTreeFlatRowProps>(({
             <HostTreeHostContextMenuContent
               host={row.host}
               onConnect={onConnect}
+              onSplitHost={onSplitHost}
               onEditHost={onEditHost}
               onRenameHost={menuActions.onRenameHost}
               onDuplicateHost={menuActions.onDuplicateHost}
@@ -648,6 +652,7 @@ const HostTreeFlatRowItem = memo<HostTreeFlatRowProps>(({
   if (prev.onDropToRow !== next.onDropToRow) return false;
   if (prev.onTogglePath !== next.onTogglePath) return false;
   if (prev.onConnect !== next.onConnect) return false;
+  if (prev.onSplitHost !== next.onSplitHost) return false;
   if (prev.activeHostId === next.activeHostId) return true;
   if (prev.row.kind === 'host') {
     return prev.row.host.id !== prev.activeHostId && prev.row.host.id !== next.activeHostId;
@@ -668,6 +673,7 @@ const TerminalHostTreeSidebarInner: React.FC<TerminalHostTreeSidebarProps> = ({
   resolvedPreviewTheme,
   activeHostId,
   onConnect,
+  onSplitHost,
   onNewHost,
   onEditHost,
   onCreateLocalTerminal,
@@ -941,6 +947,7 @@ const TerminalHostTreeSidebarInner: React.FC<TerminalHostTreeSidebarProps> = ({
             : undefined
       }
       onConnect={onConnect}
+      onSplitHost={onSplitHost}
       onNewHost={onNewHost}
       onEditHost={onEditHost}
       onTogglePath={togglePath}
@@ -966,6 +973,7 @@ const TerminalHostTreeSidebarInner: React.FC<TerminalHostTreeSidebarProps> = ({
     isRowDragOver,
     menuActions,
     onConnect,
+    onSplitHost,
     onNewHost,
     onEditHost,
     treeExpandAll,
@@ -1215,6 +1223,7 @@ export const TerminalHostTreeSidebar = memo(
     && prev.activeHostId === next.activeHostId
     && themeFingerprint(prev.resolvedPreviewTheme) === themeFingerprint(next.resolvedPreviewTheme)
     && prev.onConnect === next.onConnect
+    && prev.onSplitHost === next.onSplitHost
     && prev.onNewHost === next.onNewHost
     && prev.onEditHost === next.onEditHost
     && prev.onCreateLocalTerminal === next.onCreateLocalTerminal

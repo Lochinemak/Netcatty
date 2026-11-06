@@ -734,6 +734,8 @@ export const zhTWAiMessages: Messages = {
   'terminal.layer.hostTree.newHost': '新增主機',
   'terminal.layer.hostTree.newHostInGroup': '在此群組中新增主機',
   'terminal.layer.hostTree.editHost': '編輯主機',
+  'terminal.layer.hostTree.splitRight': '在目前分頁中向右分割',
+  'terminal.layer.hostTree.splitDown': '在目前分頁中向下分割',
   'terminal.layer.hostTree.hostSavedNextConnection': '主機已更新，連線設定將在下次連線時生效。',
   'terminal.layer.hostTree.newGroup': '新增群組',
   'terminal.layer.hostTree.localShell': '本機 Shell',

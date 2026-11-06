@@ -81,5 +81,5 @@ test('workspace host opening acknowledges committed insertion and rejects queued
 test('agent workspace host opening uses the common launch and history handler', () => {
   const source = readFileSync(new URL('../app/AppSideEffects.tsx', import.meta.url), 'utf8');
   assert.match(source, /const sessionId = handleConnectToHost\(host, true, hidden, target\.workspaceId\)/);
-  assert.match(source, /connectToHost: workspaceId\s*\? \(candidate: Host\) => appendHostToWorkspaceConfirmed\(workspaceId, candidate\)\s*: connectToHost/);
+  assert.match(source, /connectToHost: workspaceId\s*\? \(candidate: Host\) => appendHostToWorkspaceConfirmed\(workspaceId, candidate\)\s*: splitTarget\s*\? \(candidate: Host\) => splitHostIntoTab\(splitTarget\.tabId, candidate, splitTarget\.direction\)\s*: connectToHost/);
 });

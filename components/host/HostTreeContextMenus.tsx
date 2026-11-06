@@ -1,4 +1,4 @@
-import { Copy, FileSymlink, Files, Folder, FolderOpen, Globe2, Monitor, Pencil, Plus, Server, Settings2 } from 'lucide-react';
+import { Columns2, Copy, FileSymlink, Files, Folder, FolderOpen, Globe2, Monitor, Pencil, Plus, Rows2, Server, Settings2 } from 'lucide-react';
 import React from 'react';
 
 import { useI18n } from '../../application/i18n/I18nProvider';
@@ -14,6 +14,8 @@ import { PluginContributionIcon } from '../plugins/PluginContributionIcon';
 
 export interface HostTreeHostContextMenuHandlers {
   onConnect: (host: Host) => void;
+  /** Open the host as a new pane of the current terminal tab. */
+  onSplitHost?: (host: Host, direction: 'horizontal' | 'vertical') => void;
   onOpenBrowser?: (host: Host) => void;
   onEditHost?: (host: Host) => void;
   onRenameHost?: (host: Host) => void;
@@ -45,6 +47,7 @@ export const HostTreeHostContextMenuContent: React.FC<
 > = ({
   host,
   onConnect,
+  onSplitHost,
   onOpenBrowser,
   onEditHost,
   onRenameHost,
@@ -72,6 +75,16 @@ export const HostTreeHostContextMenuContent: React.FC<
       <ContextMenuItem onClick={() => onConnect(safeHost)}>
         <Monitor className="mr-2 h-4 w-4" /> {t('vault.hosts.connect')}
       </ContextMenuItem>
+      {onSplitHost && (
+        <>
+          <ContextMenuItem onClick={() => onSplitHost(safeHost, 'vertical')}>
+            <Columns2 className="mr-2 h-4 w-4" /> {t('terminal.layer.hostTree.splitRight')}
+          </ContextMenuItem>
+          <ContextMenuItem onClick={() => onSplitHost(safeHost, 'horizontal')}>
+            <Rows2 className="mr-2 h-4 w-4" /> {t('terminal.layer.hostTree.splitDown')}
+          </ContextMenuItem>
+        </>
+      )}
       <OpenDualPaneSftpMenuItem host={safeHost} />
       <OpenHostBrowserMenuItem host={safeHost} onOpenBrowser={onOpenBrowser} />
       {onEditHost && (

@@ -744,6 +744,8 @@ export const enAiMessages: Messages = {
   'terminal.layer.hostTree.newHost': 'New host',
   'terminal.layer.hostTree.newHostInGroup': 'New host in this group',
   'terminal.layer.hostTree.editHost': 'Edit host',
+  'terminal.layer.hostTree.splitRight': 'Split right in current tab',
+  'terminal.layer.hostTree.splitDown': 'Split down in current tab',
   'terminal.layer.hostTree.hostSavedNextConnection': 'Host updated. Connection settings will apply the next time you connect.',
   'terminal.layer.hostTree.newGroup': 'New group',
   'terminal.layer.hostTree.localShell': 'Local shell',

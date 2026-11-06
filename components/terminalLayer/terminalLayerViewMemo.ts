@@ -446,6 +446,7 @@ const WORKSPACE_CTX_KEYS = [
   'cn',
   'onStartSessionRename',
   'onRemoveSessionFromWorkspace',
+  'onMoveSessionToTab',
   'onReorderTabs',
   'onStartSessionDrag',
   'onEndSessionDrag',

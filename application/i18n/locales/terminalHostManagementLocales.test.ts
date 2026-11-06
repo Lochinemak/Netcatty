@@ -11,6 +11,8 @@ const keys = [
   'terminal.layer.hostTree.newHost',
   'terminal.layer.hostTree.newHostInGroup',
   'terminal.layer.hostTree.editHost',
+  'terminal.layer.hostTree.splitRight',
+  'terminal.layer.hostTree.splitDown',
   'terminal.layer.hostTree.hostSavedNextConnection',
 ] as const;
 
