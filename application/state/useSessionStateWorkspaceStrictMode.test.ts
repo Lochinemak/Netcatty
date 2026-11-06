@@ -68,6 +68,50 @@ test('workspace pane insertion remains idempotent when the same update runs twic
   assert.equal(paneCount(twice[0], 's2'), 1);
 });
 
+test('splitting a pane in a focus-mode workspace switches it to split view', () => {
+  const hint: SplitHint = {
+    direction: 'horizontal',
+    position: 'bottom',
+    targetSessionId: 's1',
+  };
+  const focusWorkspace: Workspace = { ...workspace(), viewMode: 'focus' };
+
+  const once = insertWorkspacePaneIfMissing([focusWorkspace], 'ws-1', 's2', hint, {
+    revealInSplitView: true,
+  });
+  const twice = insertWorkspacePaneIfMissing(once, 'ws-1', 's2', hint, {
+    revealInSplitView: true,
+  });
+
+  assert.equal(once[0].viewMode, 'split');
+  assert.equal(once[0].focusedSessionId, 's1');
+  assert.deepEqual(collectSessionIds(once[0].root), ['s1', 's2']);
+  assert.equal(twice[0], once[0]);
+});
+
+test('adding a pane without the reveal option keeps a focus-mode workspace in focus view', () => {
+  const hint: SplitHint = {
+    direction: 'vertical',
+    position: 'right',
+    targetSessionId: 's1',
+  };
+  const focusWorkspace: Workspace = { ...workspace(), viewMode: 'focus' };
+
+  const result = insertWorkspacePaneIfMissing([focusWorkspace], 'ws-1', 's2', hint);
+
+  assert.equal(result[0].viewMode, 'focus');
+  assert.deepEqual(collectSessionIds(result[0].root), ['s1', 's2']);
+});
+
+test('splitSession reveals the new pane when the workspace is in focus mode', () => {
+  const splitSessionSource = source.slice(
+    source.indexOf('const splitSession = useCallback('),
+    source.indexOf('const toggleWorkspaceViewMode = useCallback('),
+  );
+
+  assert.match(splitSessionSource, /insertWorkspacePaneIfMissing\([^;]*revealInSplitView: true/);
+});
+
 test('workspace root append remains idempotent when the same update runs twice', () => {
   const once = appendWorkspaceRootPaneIfMissing([workspace()], 'ws-1', 's2', 'vertical');
   const twice = appendWorkspaceRootPaneIfMissing(once, 'ws-1', 's2', 'vertical');

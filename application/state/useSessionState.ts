@@ -94,11 +94,21 @@ export function insertWorkspacePaneIfMissing(
   workspaceId: string,
   sessionId: string,
   hint: SplitHint,
+  options?: {
+    // An explicit "split this pane" has to end up visible. Focus mode renders
+    // only the focused session, so the new pane would land in the sidebar list
+    // while the terminal area looks unchanged (Lochinemak/Netcatty#1).
+    revealInSplitView?: boolean;
+  },
 ): Workspace[] {
   return workspaces.map(ws => {
     if (ws.id !== workspaceId) return ws;
     if (collectSessionIds(ws.root).includes(sessionId)) return ws;
-    return { ...ws, root: insertPaneIntoWorkspace(ws.root, sessionId, hint) };
+    const root = insertPaneIntoWorkspace(ws.root, sessionId, hint);
+    if (options?.revealInSplitView && ws.viewMode === 'focus') {
+      return { ...ws, root, viewMode: 'split' };
+    }
+    return { ...ws, root };
   });
 }
 
@@ -1054,9 +1064,11 @@ export const useSessionState = ({
         };
         
         setWorkspaces(prevWorkspaces => {
-          return insertWorkspacePaneIfMissing(prevWorkspaces, session.workspaceId, newSession.id, hint);
+          return insertWorkspacePaneIfMissing(prevWorkspaces, session.workspaceId, newSession.id, hint, {
+            revealInSplitView: true,
+          });
         });
-        
+
         return addTerminalSessionIfMissing(prevSessions, newSession);
       }
       
