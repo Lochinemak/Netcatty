@@ -42,6 +42,15 @@ declare global {
     filters?: NetcattyTauriDialogFilter[];
   }
 
+  /**
+   * `window.__TAURI__.core.Channel`: an ordered backend → renderer stream
+   * bound to one command invocation. JSON messages arrive parsed, raw
+   * messages as `ArrayBuffer`.
+   */
+  interface NetcattyTauriChannel<T = unknown> {
+    onmessage: (message: T) => void;
+  }
+
   interface NetcattyTauriGlobal {
     core?: {
       invoke?<T>(
@@ -49,6 +58,7 @@ declare global {
         args?: NetcattyTauriInvokeArgs,
         options?: NetcattyTauriInvokeOptions,
       ): Promise<T>;
+      Channel?: new <T = unknown>() => NetcattyTauriChannel<T>;
     };
     event?: {
       listen?<T>(

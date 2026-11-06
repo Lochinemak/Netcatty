@@ -35,6 +35,10 @@ pub struct AppState<R: Runtime> {
     /// Connections dialed privately for a tunnel (not shared with a session),
     /// keyed by `tunnelId`; disconnected when the tunnel stops.
     pub tunnel_connections: dashmap::DashMap<String, Arc<SshConnection>>,
+    /// Running remote desktop (VNC / RDP) sessions keyed by `sessionId`.
+    /// Shared with each session's event sink, which removes its own entry
+    /// when the session ends.
+    pub remote_desktops: Arc<dashmap::DashMap<String, netcatty_rdesktop::RemoteDesktopHandle>>,
 }
 
 /// Command argument giving access to the managed [`AppState`].
@@ -123,6 +127,7 @@ impl<R: Runtime> AppState<R> {
             tree_scans: dashmap::DashMap::new(),
             test_connections: dashmap::DashMap::new(),
             tunnel_connections: dashmap::DashMap::new(),
+            remote_desktops: Arc::new(dashmap::DashMap::new()),
         }
     }
 

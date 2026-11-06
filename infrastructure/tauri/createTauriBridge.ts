@@ -15,9 +15,14 @@ import {
   EventHub,
   SessionDataBacklog,
   TauriBridgeError,
+  createChannel,
   invoke,
   invokeBinary,
 } from './tauriApi';
+import {
+  decodeRemoteDesktopBinaryMessage,
+  isRemoteDesktopControlEvent,
+} from '../../domain/remoteDesktop';
 import { pluginClipboard, pluginDialog, pluginOpener } from './plugins';
 import { cancelStagedUpload, stageUploadFile } from './uploadStaging';
 
@@ -491,6 +496,32 @@ export function createTauriBridge(options: CreateTauriBridgeOptions = {}): Netca
       fireAndForget('session_ack_flow', invoke<void>('session_ack_flow', { sessionId, bytes }));
     },
     closeSession: (sessionId) => invoke<void>('session_close', { sessionId }),
+
+    // -----------------------------------------------------------------------
+    // Remote desktop (VNC / RDP)
+    // -----------------------------------------------------------------------
+    startRemoteDesktopSession: async (desktopOptions, onEvent) => {
+      // Frames are binary messages, everything else is JSON; both arrive on
+      // the per-session channel in backend order.
+      const channel = createChannel<unknown>((message) => {
+        if (message instanceof ArrayBuffer) {
+          const frame = decodeRemoteDesktopBinaryMessage(message);
+          if (frame) onEvent(frame);
+          return;
+        }
+        if (isRemoteDesktopControlEvent(message)) onEvent(message);
+      });
+      const result = await invoke<StartSessionResult>('rdesktop_connect', {
+        payload: { ...desktopOptions },
+        onEvent: channel,
+      });
+      return result.sessionId;
+    },
+    sendRemoteDesktopInput: (sessionId, events) => {
+      if (events.length === 0) return;
+      fireAndForget('rdesktop_input', invoke<void>('rdesktop_input', { payload: { sessionId, events } }));
+    },
+    closeRemoteDesktopSession: (sessionId) => invoke<void>('rdesktop_close', { sessionId }),
 
     onSessionData: (sessionId, cb, dataOptions) =>
       sessions.onData(sessionId, cb, dataOptions?.replayBacklog === true),

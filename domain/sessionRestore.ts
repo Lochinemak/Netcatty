@@ -94,7 +94,7 @@ const isOneOf = <T extends string | number>(
 ): value is T => allowed.includes(value as T);
 
 const sanitizeProtocol = (value: unknown): TerminalSession["protocol"] | undefined => {
-  if (isOneOf(value, ["ssh", "telnet", "mosh", "et", "local", "serial"] as const)) return value;
+  if (isOneOf(value, ["ssh", "telnet", "mosh", "et", "local", "serial", "vnc", "rdp"] as const)) return value;
   return typeof value === "string" && isPluginHostProtocol(value) ? value : undefined;
 };
 

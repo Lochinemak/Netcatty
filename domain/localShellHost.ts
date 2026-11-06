@@ -1,4 +1,5 @@
 import type { Host } from './models';
+import { isRemoteDesktopProtocol } from './remoteDesktop';
 
 /**
  * Vault-side "local shell" (CMD / PowerShell / WSL / custom shell) host entry.
@@ -65,7 +66,10 @@ export const getVaultHostRowSubtitle = (
 ): string => (
   host.protocol === 'local'
     ? getLocalShellHostSubtitle(host, options?.localFallback)
-    : `${host.username ?? ''}@${host.hostname ?? ''}`
+    // VNC hosts have no user name; "@host" would read like a broken entry.
+    : isRemoteDesktopProtocol(host.protocol) && !host.username
+      ? host.hostname ?? ''
+      : `${host.username ?? ''}@${host.hostname ?? ''}`
 );
 
 export interface ResolveDefaultLocalShellContext {

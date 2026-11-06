@@ -6,6 +6,8 @@ import type { LogView } from '../state/logViewState';
 import { useI18n } from '../i18n/I18nProvider';
 import HostDetailsPanel from '../../components/HostDetailsPanel';
 import LocalShellHostDetailsPanel from '../../components/LocalShellHostDetailsPanel';
+import RemoteDesktopHostDetailsPanel from '../../components/RemoteDesktopHostDetailsPanel';
+import { isRemoteDesktopProtocol } from '../../domain/remoteDesktop';
 import SerialHostDetailsPanel from '../../components/SerialHostDetailsPanel';
 import { PortalContainerProvider } from '../../components/ui/portal-container';
 import { resolveGroupDefaults } from '../../domain/groupConfig';
@@ -167,6 +169,19 @@ export const AppHostEditorLayer: React.FC<AppHostEditorLayerProps> = ({
           <LocalShellHostDetailsPanel
             key={editorKey}
             initialData={target.openedHost}
+            groups={groups}
+            onSave={onSave}
+            onCancel={onCancel}
+            layout="overlay"
+            className="pointer-events-auto"
+            {...hostPanelResizeProps}
+          />
+        ) : target.mode === 'edit' && isRemoteDesktopProtocol(target.openedHost.protocol) ? (
+          <RemoteDesktopHostDetailsPanel
+            key={editorKey}
+            initialData={target.openedHost}
+            protocol={target.openedHost.protocol}
+            isNew={false}
             groups={groups}
             onSave={onSave}
             onCancel={onCancel}
