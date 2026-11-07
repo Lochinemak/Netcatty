@@ -524,6 +524,71 @@ Events (broadcast; the adapter delivers the `trayPanel:*` actions and
 | `netcatty:trayPanel:setMenuData` | `TrayMenuData` |
 | `netcatty:trayPanel:refresh` | — |
 
+## System manager, server stats and monitor
+
+Implemented in `commands/system.rs` and `commands/monitor.rs`; command
+builders, parsers and stats bookkeeping live in the `netcatty-sysmgr` crate.
+Every reply is the Electron bridge object verbatim (same keys, same
+user-visible error strings such as `"Session not found"`, `"Missing
+sessionId"`, `"Remote SSH server does not support extra exec channels"`),
+because the renderer parses them; failures are replies with
+`success: false`, never rejected invokes. `payload` is exactly the object the
+Electron preload sends over IPC (including `sessionId`).
+
+Where commands run (Electron `execOnSession`):
+
+* SSH sessions: a new exec channel on the session's existing connection
+  (`bounded_exec`: separate channel-open / run bounds, output cap, optional
+  stdin, `SIGKILL` + close on timeout; the connection is never torn down).
+  Commands of one session are serialized.
+* Local terminal sessions: `sh -c` on this machine (`powershell.exe
+  -NoProfile -NonInteractive -Command` on Windows).
+* Sessions started with `singleChannelSsh`, or whose server banner is a
+  known single-channel implementation, refuse extra exec channels.
+* `sudo` fallbacks (docker, systemctl) use the session's
+  `sudoAutofillPassword` start option on stdin (`sudo -S -p ''`).
+
+| Command | Args | Returns |
+| --- | --- | --- |
+| `system_probe_capabilities` | `payload: { sessionId }` | `{ success, pending?, error?, capabilities? }` |
+| `system_list_processes` | `payload: { sessionId }` | `{ success, pending?, error?, processes? }` |
+| `system_signal_process` | `payload: { sessionId, pid, signal?, nice? }` | `{ success, pending?, error?, code? }` |
+| `system_setup_osc7_tracking` | `payload: { sessionId, command }` | `{ success, pending?, stdout?, stderr?, code?, error? }` |
+| `system_list_tmux_sessions` / `system_create_tmux_session` / `system_list_tmux_windows` / `system_list_tmux_panes` / `system_list_tmux_clients` / `system_tmux_action` | `payload` | as `listTmuxSessions` … `tmuxAction` (60 s per-session tmux environment cache) |
+| `system_list_docker_containers` / `system_list_docker_images` | `payload: { sessionId, runtime? }` | `{ success, error?, errorCode?, containers? \| images? }` |
+| `system_docker_stats` / `system_docker_inspect` / `system_docker_image_inspect` / `system_docker_action` / `system_docker_image_action` | `payload` | as the bridge methods (`runtime` = `docker` \| `podman` \| `nerdctl`) |
+| `system_kubectl` | `payload: { sessionId, op, context?, namespace?, pod? }` | `{ success, error?, errorCode?, contexts?, current?, namespaces?, pods? }` |
+| `system_list_accelerators` | `payload: { sessionId }` | `{ success, pending?, error?, devices?, processes?, nvidiaDriverVersion?, probedAt? }` |
+| `system_list_listening_ports` | `payload: { sessionId }` | `{ success, pending?, error?, ports? }` |
+| `system_list_services` / `system_service_action` | `payload` | `{ success, pending?, error?, units? }` / `{ success, pending?, error? }` |
+| `session_server_stats` | `sessionId` | `{ success, pending?, error?, stats? }` (`getServerStats` shape) |
+| `session_distro_info` | `sessionId` | `{ success, stdout?, stderr?, error? }` |
+| `session_read_remote_history` | `sessionId, limit?` | `{ success, error?, shell?, bash?, zsh?, fish? }` |
+| `pty_child_processes` | `sessionId` | `{ pid, command }[]` — direct children of a local terminal's shell; `[]` otherwise |
+| `monitor_update` | `panels: MonitorPanelDemand[]` | `MonitorSnapshot` (rejects `INVALID_ARGUMENT` for a non-array) |
+| `monitor_snapshot` | `cursor?: MonitorHistoryCursor` | `MonitorSnapshot` (`historyMode: "append"` when the cursor matches `runtimeId` + `epoch`) |
+| `monitor_stop_all` | — | `void` |
+| `monitor_retry` | `hostId` | `void` (the next `monitor_update` re-dials that host if it failed) |
+
+Server stats: one primary probe (plus a second Linux disk probe, kept apart
+for Dropbear's 9000-byte command limit) wrapped in a remote watchdog that
+kills the probe shell when the client gives up; the scripts are
+byte-identical to Electron's. CPU / per-core / network / block-device rates
+are deltas against the previous sample of the same connection.
+`latencyMs` is an SSH transport ping on that connection (skipped when the
+host's keepalive interval is disabled), `responseLatencyMs` the time until
+the exec request was confirmed. Terminal samples are reused for 4 s.
+
+Monitor: demand is owned by the calling window (its label). Each distinct
+endpoint (profile, route, identity, keepalive policy) gets one entry
+(max 256) that reuses a live session connection to the same
+`user@host:port`, else dials (prompts bound to `monitor-<uuid>`; logins are
+serialized), then samples on the smallest panel interval with
+`interval × min(6, 2^failures)` back-off. Network devices and single-channel
+servers (by banner) are `unsupported`. Terminal stats and the monitor share
+one sampler per connection (baselines, 30-minute / 1800-point history and
+the monitor's separate, cached `nvidia-smi` probe).
+
 ## App
 
 | Command | Args | Returns |
@@ -586,9 +651,13 @@ adapter (`window.__TAURI__.dialog`, `.clipboardManager`, `.opener`).
 | `readClipboardText/writeClipboardText` | clipboard-manager plugin |
 | `selectDirectory/selectFile/showSaveDialog` | dialog plugin |
 | `openExternal` | opener plugin |
+| `getServerStats`, `getSessionDistroInfo`, `readRemoteHistory` | `session_server_stats`, `session_distro_info`, `session_read_remote_history` |
+| `probeSystemCapabilities` … `systemServiceAction` (system manager) | `system_*` (`payload` = the Electron IPC payload) |
+| `monitorUpdate`, `monitorSnapshot`, `monitorStopAll`, `monitorRetry` | `monitor_update`, `monitor_snapshot`, `monitor_stop_all`, `monitor_retry` |
+| `ptyGetChildProcesses` | `pty_child_processes` |
 
 Bridge methods that have no Rust counterpart in this version (AI, plugins,
-MCP, ZMODEM/YMODEM, FIDO, plugin sync providers, auto-update, session logs,
-system manager) are left `undefined` on the adapter; the renderer already
-treats them as optional. `onTrayPanelCloseRequest` stays undefined too: the
-Electron main process never sends that event.
+MCP, ZMODEM/YMODEM, FIDO, plugin sync providers, auto-update, session logs)
+are left `undefined` on the adapter; the renderer already treats them as
+optional. `onTrayPanelCloseRequest` stays undefined too: the Electron main
+process never sends that event.

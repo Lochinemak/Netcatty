@@ -1,0 +1,17 @@
+[package]
+name = "netcatty-sysmgr"
+description = "System manager and server monitor: remote command builders and output parsers (processes, tmux, docker, kubectl, GPUs, ports, services, server stats)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+async-trait = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+regex = { workspace = true }
+futures = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true }

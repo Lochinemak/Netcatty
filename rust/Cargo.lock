@@ -3986,6 +3986,7 @@ dependencies = [
  "netcatty-ssh",
  "netcatty-store",
  "netcatty-sync",
+ "netcatty-sysmgr",
  "netcatty-telnet",
  "parking_lot 0.13.0",
  "percent-encoding",
@@ -4212,6 +4213,18 @@ dependencies = [
  "tracing",
  "url",
  "uuid",
+]
+
+[[package]]
+name = "netcatty-sysmgr"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "futures",
+ "regex",
+ "serde",
+ "serde_json",
+ "tokio",
 ]
 
 [[package]]

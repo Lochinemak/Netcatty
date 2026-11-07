@@ -42,6 +42,9 @@ pub struct AppState<R: Runtime> {
     /// Shared with each session's event sink, which removes its own entry
     /// when the session ends.
     pub remote_desktops: Arc<dashmap::DashMap<String, netcatty_rdesktop::RemoteDesktopHandle>>,
+    /// System manager exec queues / sudo passwords / tmux cache, stats
+    /// samplers and the server monitor (`commands::system`, `commands::monitor`).
+    pub system: crate::commands::system::SystemState,
 }
 
 /// Command argument giving access to the managed [`AppState`].
@@ -132,6 +135,7 @@ impl<R: Runtime> AppState<R> {
             tunnel_connections: dashmap::DashMap::new(),
             sync: crate::commands::sync::SyncState::default(),
             remote_desktops: Arc::new(dashmap::DashMap::new()),
+            system: crate::commands::system::SystemState::default(),
         }
     }
 

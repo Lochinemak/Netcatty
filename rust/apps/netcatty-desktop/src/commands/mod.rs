@@ -16,6 +16,7 @@ pub mod filewatch;
 pub mod forward;
 pub mod hotkey;
 pub mod localfs;
+pub mod monitor;
 pub mod mosh;
 pub mod notification;
 pub mod openwith;
@@ -26,6 +27,7 @@ pub mod sftp;
 pub mod ssh;
 pub mod store;
 pub mod sync;
+pub mod system;
 pub mod telnet;
 pub mod temp;
 pub mod tempdir;
@@ -271,6 +273,38 @@ pub fn handler<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + 
         serial::serial_list_ports,
         mosh::mosh_start,
         mosh::et_start,
+        // System manager, server stats / monitor, PTY child processes
+        // (commands/system.rs, commands/monitor.rs).
+        system::system_probe_capabilities,
+        system::system_list_processes,
+        system::system_signal_process,
+        system::system_setup_osc7_tracking,
+        system::system_list_tmux_sessions,
+        system::system_create_tmux_session,
+        system::system_list_tmux_windows,
+        system::system_list_tmux_panes,
+        system::system_list_tmux_clients,
+        system::system_tmux_action,
+        system::system_list_docker_containers,
+        system::system_list_docker_images,
+        system::system_docker_stats,
+        system::system_docker_inspect,
+        system::system_docker_image_inspect,
+        system::system_docker_action,
+        system::system_docker_image_action,
+        system::system_kubectl,
+        system::system_list_accelerators,
+        system::system_list_listening_ports,
+        system::system_list_services,
+        system::system_service_action,
+        system::session_server_stats,
+        system::session_distro_info,
+        system::session_read_remote_history,
+        system::pty_child_processes,
+        monitor::monitor_update,
+        monitor::monitor_snapshot,
+        monitor::monitor_stop_all,
+        monitor::monitor_retry,
     ]
 }
 

@@ -147,6 +147,8 @@ pub async fn session_start_ssh<R: tauri::Runtime>(
         .filter(|c| !c.trim().is_empty())
         .unwrap_or_else(|| crate::decoder::DEFAULT_CHARSET.to_string());
 
+    // System manager: sudo password / single-channel flag of this session.
+    state.system.remember_session(&session_id, &payload);
     state.sessions.insert(SessionEntry {
         session_id: session_id.clone(),
         host_id: payload.host_id.clone(),

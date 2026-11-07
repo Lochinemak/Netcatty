@@ -1156,3 +1156,90 @@ test('serial writes carry serialEraseChar and notifySessionUserInput is fire-and
   });
   assert.deepEqual(lastInvoke(fake, 'session_notify_user_input').args, { sessionId: 's1' });
 });
+
+// ---------------------------------------------------------------------------
+// System manager, server stats, monitor and PTY children
+// ---------------------------------------------------------------------------
+
+test('system manager methods send the Electron IPC payload and return the reply verbatim', async () => {
+  const { fake, bridge } = setup();
+  const reply = { success: true, processes: [{ pid: 1, command: 'init' }] };
+  fake.respond('system_list_processes', () => reply);
+  assert.deepEqual(await bridge.listSystemProcesses!('s1'), reply);
+
+  const cases: Array<[() => Promise<unknown>, string, unknown]> = [
+    [() => bridge.probeSystemCapabilities!('s1'), 'system_probe_capabilities', { payload: { sessionId: 's1' } }],
+    [() => bridge.signalSystemProcess!({ sessionId: 's1', pid: 42, signal: 'KILL' }), 'system_signal_process',
+      { payload: { sessionId: 's1', pid: 42, signal: 'KILL' } }],
+    [() => bridge.setupOsc7Tracking!('s1', 'echo hi'), 'system_setup_osc7_tracking',
+      { payload: { sessionId: 's1', command: 'echo hi' } }],
+    [() => bridge.listTmuxSessions!('s1'), 'system_list_tmux_sessions', { payload: { sessionId: 's1' } }],
+    [() => bridge.createTmuxSession!({ sessionId: 's1', name: 'dev' }), 'system_create_tmux_session',
+      { payload: { sessionId: 's1', name: 'dev' } }],
+    [() => bridge.listTmuxWindows!({ sessionId: 's1', sessionName: 'dev' }), 'system_list_tmux_windows',
+      { payload: { sessionId: 's1', sessionName: 'dev' } }],
+    [() => bridge.listTmuxPanes!({ sessionId: 's1', sessionName: 'dev', windowIndex: 2 }), 'system_list_tmux_panes',
+      { payload: { sessionId: 's1', sessionName: 'dev', windowIndex: 2 } }],
+    [() => bridge.listTmuxClients!({ sessionId: 's1' }), 'system_list_tmux_clients', { payload: { sessionId: 's1' } }],
+    [() => bridge.tmuxAction!({ sessionId: 's1', action: 'kill-session', sessionName: 'dev' } as never),
+      'system_tmux_action', { payload: { sessionId: 's1', action: 'kill-session', sessionName: 'dev' } }],
+    [() => bridge.listDockerContainers!('s1', 'podman'), 'system_list_docker_containers',
+      { payload: { sessionId: 's1', runtime: 'podman' } }],
+    [() => bridge.listDockerImages!('s1'), 'system_list_docker_images', { payload: { sessionId: 's1', runtime: undefined } }],
+    [() => bridge.getDockerStats!({ sessionId: 's1', ids: ['a'] }), 'system_docker_stats',
+      { payload: { sessionId: 's1', ids: ['a'] } }],
+    [() => bridge.dockerInspect!({ sessionId: 's1', containerId: 'c' }), 'system_docker_inspect',
+      { payload: { sessionId: 's1', containerId: 'c' } }],
+    [() => bridge.dockerImageInspect!({ sessionId: 's1', imageId: 'i' }), 'system_docker_image_inspect',
+      { payload: { sessionId: 's1', imageId: 'i' } }],
+    [() => bridge.dockerAction!({ sessionId: 's1', containerId: 'c', action: 'restart' } as never), 'system_docker_action',
+      { payload: { sessionId: 's1', containerId: 'c', action: 'restart' } }],
+    [() => bridge.dockerImageAction!({ sessionId: 's1', action: 'remove', imageId: 'i' } as never),
+      'system_docker_image_action', { payload: { sessionId: 's1', action: 'remove', imageId: 'i' } }],
+    [() => bridge.kubectl!({ sessionId: 's1', op: 'pods', context: 'ctx', namespace: 'ns' }), 'system_kubectl',
+      { payload: { sessionId: 's1', op: 'pods', context: 'ctx', namespace: 'ns' } }],
+    [() => bridge.listAccelerators!('s1'), 'system_list_accelerators', { payload: { sessionId: 's1' } }],
+    [() => bridge.listListeningPorts!('s1'), 'system_list_listening_ports', { payload: { sessionId: 's1' } }],
+    [() => bridge.listSystemServices!('s1'), 'system_list_services', { payload: { sessionId: 's1' } }],
+    [() => bridge.systemServiceAction!({ sessionId: 's1', unitName: 'nginx.service', action: 'restart' } as never),
+      'system_service_action', { payload: { sessionId: 's1', unitName: 'nginx.service', action: 'restart' } }],
+  ];
+  for (const [call, cmd, args] of cases) {
+    await call();
+    assert.deepEqual(lastInvoke(fake, cmd).args, args, cmd);
+  }
+});
+
+test('server stats, distro, history and PTY children map to session commands', async () => {
+  const { fake, bridge } = setup();
+  const stats = { success: true, stats: { cpu: 12, memTotal: 1024 } };
+  fake.respond('session_server_stats', () => stats);
+  fake.respond('pty_child_processes', () => [{ pid: 7, command: 'vim' }]);
+
+  assert.deepEqual(await bridge.getServerStats!('s1'), stats);
+  assert.deepEqual(lastInvoke(fake, 'session_server_stats').args, { sessionId: 's1' });
+  await bridge.getSessionDistroInfo!('s1');
+  assert.deepEqual(lastInvoke(fake, 'session_distro_info').args, { sessionId: 's1' });
+  await bridge.readRemoteHistory!('s1', 200);
+  assert.deepEqual(lastInvoke(fake, 'session_read_remote_history').args, { sessionId: 's1', limit: 200 });
+  assert.deepEqual(await bridge.ptyGetChildProcesses!('local-1'), [{ pid: 7, command: 'vim' }]);
+  assert.deepEqual(lastInvoke(fake, 'pty_child_processes').args, { sessionId: 'local-1' });
+});
+
+test('monitor methods forward panels, cursor and host ids', async () => {
+  const { fake, bridge } = setup();
+  const snapshot = { epoch: 0, runtimeId: 'r', hosts: {}, running: [] };
+  fake.respond('monitor_update', () => snapshot);
+  fake.respond('monitor_snapshot', () => snapshot);
+
+  const panels = [{ id: 'p1', runId: 'run', interval: 5 as const, hosts: [{ id: 'h1' }] }];
+  assert.deepEqual(await bridge.monitorUpdate!(panels), snapshot);
+  assert.deepEqual(lastInvoke(fake, 'monitor_update').args, { panels });
+  const cursor = { runtimeId: 'r', epoch: 0, after: {} };
+  await bridge.monitorSnapshot!(cursor);
+  assert.deepEqual(lastInvoke(fake, 'monitor_snapshot').args, { cursor });
+  await bridge.monitorRetry!('h1');
+  assert.deepEqual(lastInvoke(fake, 'monitor_retry').args, { hostId: 'h1' });
+  await bridge.monitorStopAll!();
+  assert.ok(fake.invokes.some((entry) => entry.cmd === 'monitor_stop_all'));
+});

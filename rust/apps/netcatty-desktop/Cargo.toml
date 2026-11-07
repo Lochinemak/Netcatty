@@ -26,6 +26,7 @@ netcatty-rdesktop = { workspace = true }
 netcatty-telnet = { workspace = true }
 netcatty-serial = { workspace = true }
 netcatty-mosh = { workspace = true }
+netcatty-sysmgr = { workspace = true }
 tauri = { version = "2.12", features = ["tray-icon", "image-png"] }
 tauri-plugin-shell = "2.6"
 tauri-plugin-dialog = "2.8"

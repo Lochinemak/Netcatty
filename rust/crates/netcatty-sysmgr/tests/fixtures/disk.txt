@@ -1,0 +1,123 @@
+exec sh -c '( sleep 10 && nc_self=$(exec sh -c '\''echo $PPID'\'' 2>/dev/null) && nc_tree=$(ps -e -o pid= -o ppid= 2>/dev/null | awk -v root="$$" -v self="$nc_self" '\''{ pp[$1+0]=$2+0 } END { for (p in pp) { q=p+0; d=0; while (q>0 && d<4096) { if (q==root) { printf "%s ", p+0; break } if (q==self) break; q=pp[q]+0; d++ } } }'\'') && kill -9 $nc_tree "$$" 2>/dev/null ) </dev/null >/dev/null 2>&1 & nc_watchdog_pid=$!; disks=$( { { LC_ALL=C mount 2>/dev/null; printf "%s\n" "__NETCATTY_DF__"; LC_ALL=C df -kPT 2>/dev/null || LC_ALL=C df -kP 2>/dev/null; }; } | awk '\''
+        $0 == "__NETCATTY_DF__" { in_df = 1; next }
+        !in_df {
+          on_marker = index($0, " on ");
+          if (on_marker > 1) {
+            mount_rest = substr($0, on_marker + 4);
+            type_marker = index(mount_rest, " type ");
+            if (type_marker > 1) {
+              mount_point = substr(mount_rest, 1, type_marker - 1);
+              filesystem_type = substr(mount_rest, type_marker + 6);
+              sub(/[[:space:]].*$/, "", filesystem_type);
+              mount_filesystem_types[mount_point] = filesystem_type;
+            }
+          }
+          next
+        }
+        $1 == "Filesystem" { has_type = ($2 == "Type"); next }
+        NF > 0 {
+          source = $1;
+          if (has_type) {
+            filesystem_type = $2;
+            total_kb = $3;
+            used_kb = $4;
+            percent = $6;
+            mount_point = $7;
+          } else {
+            filesystem_type = "";
+            total_kb = $2;
+            used_kb = $3;
+            percent = $5;
+            mount_point = $6;
+          }
+          if ((filesystem_type == "" || filesystem_type == "-") && (mount_point in mount_filesystem_types)) {
+            filesystem_type = mount_filesystem_types[mount_point];
+          }
+          if (mount_point == "") next;
+          if (source ~ /^\/dev\/loop/ && mount_point != "/") next;
+          if (mount_point != "/" && mount_point ~ /^\/(etc|proc|sys|dev|snap)(\/|$)/) next;
+          if (mount_point != "/" && source ~ /^(overlay|overlayfs)(\/|$|:)/) next;
+          fstype = tolower(filesystem_type);
+          source_lower = tolower(source);
+          is_network_or_fuse = 0;
+          if (fstype ~ /^fuse\.(rclone|sshfs|s3fs|gcsfuse|ufs|mergerfs|unionfs|unionfs-fuse|ceph|ceph-fuse|cephfs|glusterfs)$/) is_network_or_fuse = 1;
+          if (fstype ~ /clouddrive/) is_network_or_fuse = 1;
+          if (fstype ~ /^(fuse|rclone|sshfs|s3fs|gcsfuse|mergerfs|unionfs|unionfs-fuse|nfs|nfs4|cifs|smb|smb3|smbfs|afs|ceph|cephfs|glusterfs)$/) is_network_or_fuse = 1;
+          if ((filesystem_type == "" || filesystem_type == "-") && source_lower ~ /clouddrive/) is_network_or_fuse = 1;
+          if ((filesystem_type == "" || filesystem_type == "-") && source_lower ~ /^(fuse|fuse\..*|rclone|rclone:.*|sshfs|s3fs|gcsfuse|mergerfs|unionfs|unionfs-fuse|ceph|ceph-fuse|cephfs|gluster|glusterfs|ufs)$/) is_network_or_fuse = 1;
+          if ((filesystem_type == "" || filesystem_type == "-") && source_lower ~ /^\/\//) is_network_or_fuse = 1;
+          if ((filesystem_type == "" || filesystem_type == "-") && source_lower !~ /^(apfs|overlay|overlayfs):/ && source_lower ~ /^([a-z0-9._-]+|\[[0-9a-f:]+(%[a-z0-9._-]+)?\]):\//) is_network_or_fuse = 1;
+          if (is_network_or_fuse) next;
+          pseudo_type = (fstype != "" && fstype != "-") ? fstype : source_lower;
+          if (mount_point != "/" && pseudo_type ~ /^(tmpfs|shm|devtmpfs|udev|none|proc|sysfs|cgroup|cgroup2|devpts|mqueue|hugetlbfs|debugfs|tracefs|securityfs|pstore|bpf|fusectl|configfs|ramfs|rpc_pipefs|binfmt_misc|efivarfs)$/) next;
+          total = total_kb / 1048576;
+          used = used_kb / 1048576;
+          if (total <= 0) next;
+          gsub(/%/, "", percent);
+          if (percent !~ /^[0-9]+$/) percent = int(used * 100 / total + 0.5);
+          metadata = source;
+          if (filesystem_type != "" && filesystem_type != "-") metadata = "fs=" filesystem_type ":" source;
+          printf "%s:%.6f:%.6f:%s:%s,", mount_point, used, total, percent, metadata;
+        }
+      '\'' | sed '\''s/,$//'\'' ); [ -n "$disks" ] || disks=$( { { LC_ALL=C mount 2>/dev/null; printf "%s\n" "__NETCATTY_DF__"; LC_ALL=C df -kPT / 2>/dev/null || LC_ALL=C df -kP / 2>/dev/null; }; } | awk '\''
+        $0 == "__NETCATTY_DF__" { in_df = 1; next }
+        !in_df {
+          on_marker = index($0, " on ");
+          if (on_marker > 1) {
+            mount_rest = substr($0, on_marker + 4);
+            type_marker = index(mount_rest, " type ");
+            if (type_marker > 1) {
+              mount_point = substr(mount_rest, 1, type_marker - 1);
+              filesystem_type = substr(mount_rest, type_marker + 6);
+              sub(/[[:space:]].*$/, "", filesystem_type);
+              mount_filesystem_types[mount_point] = filesystem_type;
+            }
+          }
+          next
+        }
+        $1 == "Filesystem" { has_type = ($2 == "Type"); next }
+        NF > 0 {
+          source = $1;
+          if (has_type) {
+            filesystem_type = $2;
+            total_kb = $3;
+            used_kb = $4;
+            percent = $6;
+            mount_point = $7;
+          } else {
+            filesystem_type = "";
+            total_kb = $2;
+            used_kb = $3;
+            percent = $5;
+            mount_point = $6;
+          }
+          if ((filesystem_type == "" || filesystem_type == "-") && (mount_point in mount_filesystem_types)) {
+            filesystem_type = mount_filesystem_types[mount_point];
+          }
+          if (mount_point == "") next;
+          if (source ~ /^\/dev\/loop/ && mount_point != "/") next;
+          if (mount_point != "/" && mount_point ~ /^\/(etc|proc|sys|dev|snap)(\/|$)/) next;
+          if (mount_point != "/" && source ~ /^(overlay|overlayfs)(\/|$|:)/) next;
+          fstype = tolower(filesystem_type);
+          source_lower = tolower(source);
+          is_network_or_fuse = 0;
+          if (fstype ~ /^fuse\.(rclone|sshfs|s3fs|gcsfuse|ufs|mergerfs|unionfs|unionfs-fuse|ceph|ceph-fuse|cephfs|glusterfs)$/) is_network_or_fuse = 1;
+          if (fstype ~ /clouddrive/) is_network_or_fuse = 1;
+          if (fstype ~ /^(fuse|rclone|sshfs|s3fs|gcsfuse|mergerfs|unionfs|unionfs-fuse|nfs|nfs4|cifs|smb|smb3|smbfs|afs|ceph|cephfs|glusterfs)$/) is_network_or_fuse = 1;
+          if ((filesystem_type == "" || filesystem_type == "-") && source_lower ~ /clouddrive/) is_network_or_fuse = 1;
+          if ((filesystem_type == "" || filesystem_type == "-") && source_lower ~ /^(fuse|fuse\..*|rclone|rclone:.*|sshfs|s3fs|gcsfuse|mergerfs|unionfs|unionfs-fuse|ceph|ceph-fuse|cephfs|gluster|glusterfs|ufs)$/) is_network_or_fuse = 1;
+          if ((filesystem_type == "" || filesystem_type == "-") && source_lower ~ /^\/\//) is_network_or_fuse = 1;
+          if ((filesystem_type == "" || filesystem_type == "-") && source_lower !~ /^(apfs|overlay|overlayfs):/ && source_lower ~ /^([a-z0-9._-]+|\[[0-9a-f:]+(%[a-z0-9._-]+)?\]):\//) is_network_or_fuse = 1;
+          if (is_network_or_fuse) next;
+          pseudo_type = (fstype != "" && fstype != "-") ? fstype : source_lower;
+          if (mount_point != "/" && pseudo_type ~ /^(tmpfs|shm|devtmpfs|udev|none|proc|sysfs|cgroup|cgroup2|devpts|mqueue|hugetlbfs|debugfs|tracefs|securityfs|pstore|bpf|fusectl|configfs|ramfs|rpc_pipefs|binfmt_misc|efivarfs)$/) next;
+          total = total_kb / 1048576;
+          used = used_kb / 1048576;
+          if (total <= 0) next;
+          gsub(/%/, "", percent);
+          if (percent !~ /^[0-9]+$/) percent = int(used * 100 / total + 0.5);
+          metadata = source;
+          if (filesystem_type != "" && filesystem_type != "-") metadata = "fs=" filesystem_type ":" source;
+          printf "%s:%.6f:%.6f:%s:%s,", mount_point, used, total, percent, metadata;
+        }
+      '\'' | sed '\''s/,$//'\'' ); echo "DISKS:$disks"; nc_status=$?; nc_kids=$(ps -e -o pid= -o ppid= 2>/dev/null | awk -v root="$nc_watchdog_pid" -v self="-1" '\''{ pp[$1+0]=$2+0 } END { for (p in pp) { q=p+0; d=0; while (q>0 && d<4096) { if (q==root) { printf "%s ", p+0; break } if (q==self) break; q=pp[q]+0; d++ } } }'\''); kill -9 $nc_kids "$nc_watchdog_pid" 2>/dev/null; exit $nc_status'
