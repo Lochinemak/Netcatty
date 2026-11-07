@@ -215,7 +215,7 @@ pub struct EnabledResult {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EnabledStatus {
-    enabled: bool,
+    pub enabled: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]

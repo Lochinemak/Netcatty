@@ -51,6 +51,7 @@ pub fn configure_with<R: tauri::Runtime>(
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_clipboard_manager::init())
+        .plugin(tauri_plugin_process::init())
         .setup(move |app| {
             // `AppState::new` also subscribes to the tunnel registry and
             // forwards its events to the renderer; directory creation
@@ -78,6 +79,7 @@ pub fn configure_with<R: tauri::Runtime>(
             commands::hotkey::setup(app);
             commands::autostart::setup(app);
             commands::notification::setup(app);
+            commands::update::setup(app);
             tracing::info!("netcatty-desktop started");
             Ok(())
         })

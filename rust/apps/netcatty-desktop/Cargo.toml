@@ -37,6 +37,9 @@ tauri-plugin-clipboard-manager = "2.5"
 tauri-plugin-global-shortcut = "2.4"
 tauri-plugin-autostart = "2.7"
 tauri-plugin-notification = "2.8"
+# Auto-update (commands/update.rs): signed bundles from GitHub Releases, relaunch after install
+tauri-plugin-updater = "2.10"
+tauri-plugin-process = "2.3"
 tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -61,6 +64,7 @@ sha1 = "0.11"
 sha2 = { workspace = true }
 url = { workspace = true }
 chrono = { workspace = true }
+uuid = { workspace = true }
 
 [dev-dependencies]
 tauri = { version = "2.12", features = ["test", "tray-icon", "image-png"] }

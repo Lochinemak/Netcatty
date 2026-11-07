@@ -34,6 +34,7 @@ pub mod temp;
 pub mod tempdir;
 pub mod totp;
 pub mod tray;
+pub mod update;
 pub mod window;
 
 use netcatty_core::CoreError;
@@ -318,6 +319,14 @@ pub fn handler<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + 
         monitor::monitor_snapshot,
         monitor::monitor_stop_all,
         monitor::monitor_retry,
+        // Auto-update (commands/update.rs).
+        update::update_check,
+        update::update_download,
+        update::update_install,
+        update::update_get_status,
+        update::update_get_auto_update,
+        update::update_set_auto_update,
+        update::app_report_dirty_editors,
     ]
 }
 

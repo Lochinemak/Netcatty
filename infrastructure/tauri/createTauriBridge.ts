@@ -24,6 +24,7 @@ import {
   decodeRemoteDesktopBinaryMessage,
   isRemoteDesktopControlEvent,
 } from '../../domain/remoteDesktop';
+import { createUpdateBridge } from './bridge/update';
 import { pluginClipboard, pluginDialog, pluginOpener } from './plugins';
 import { cancelStagedUpload, stageUploadFile } from './uploadStaging';
 
@@ -1449,6 +1450,9 @@ export function createTauriBridge(options: CreateTauriBridgeOptions = {}): Netca
       platform: detectPlatform(),
     }),
     getTempDirPath: () => invoke<string>('app_get_temp_dir_path'),
+
+    // Auto-update + dirty-editor round trip (bridge/update.ts).
+    ...createUpdateBridge({ hub }),
   };
 
   return bridge as NetcattyBridge;
