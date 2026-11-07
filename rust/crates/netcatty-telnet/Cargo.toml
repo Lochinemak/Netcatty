@@ -1,0 +1,10 @@
+[package]
+name = "netcatty-telnet"
+description = "Telnet protocol (RFC 854 framing, option negotiation) and login-prompt auto-login detection"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+regex = { workspace = true }
