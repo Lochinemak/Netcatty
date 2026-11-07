@@ -103,11 +103,51 @@ fn token_error_detail(res: &TextResponse) -> String {
         .unwrap_or_else(|| res.code().to_string())
 }
 
+/// Machine-readable reasons of a Google API error body: the v1 `errors[].reason`
+/// list and the newer `details[].reason` (`google.rpc.ErrorInfo`). The coarse
+/// `error.status` (`PERMISSION_DENIED` for every 403) is deliberately ignored.
+fn api_error_reasons(res: &TextResponse) -> Vec<String> {
+    let Some(data) = http::safe_json(&res.text) else {
+        return Vec::new();
+    };
+    let mut reasons = Vec::new();
+    for list in ["/error/errors", "/error/details"] {
+        if let Some(items) = data.pointer(list).and_then(Value::as_array) {
+            reasons.extend(
+                items
+                    .iter()
+                    .filter_map(|item| item.get("reason").and_then(Value::as_str))
+                    .map(str::to_owned),
+            );
+        }
+    }
+    reasons
+}
+
+/// A 403 from Drive. Electron reported every 403 as "API not enabled", which
+/// also hid the common case of the user unticking the Drive permission on the
+/// consent screen; only the disabled-API reasons get that message now.
+fn drive_forbidden_error(res: &TextResponse, what: &str) -> CoreError {
+    let reasons = api_error_reasons(res);
+    let has = |names: &[&str]| reasons.iter().any(|r| names.contains(&r.as_str()));
+    if has(&["accessNotConfigured", "SERVICE_DISABLED"]) {
+        return CoreError::network(format!(
+            "Google Drive API not enabled. Please enable it in Google Cloud Console. ({})",
+            describe_api_error(res)
+        ));
+    }
+    if has(&["insufficientPermissions", "ACCESS_TOKEN_SCOPE_INSUFFICIENT"]) {
+        return CoreError::auth(
+            "Netcatty was not granted access to Google Drive. Reconnect and allow the \
+             Google Drive permission on the consent screen.",
+        );
+    }
+    CoreError::network(format!("{what}: {}", describe_api_error(res)))
+}
+
 fn drive_status_error(res: &TextResponse, what: &str, not_enabled_on_403: bool) -> CoreError {
     if not_enabled_on_403 && res.code() == 403 {
-        return CoreError::network(
-            "Google Drive API not enabled. Please enable it in Google Cloud Console.",
-        );
+        return drive_forbidden_error(res, what);
     }
     if res.code() == 401 {
         return CoreError::auth("Token expired or invalid. Please reconnect Google Drive.");
@@ -164,7 +204,28 @@ pub async fn exchange_code(
         form.push(("client_secret", secret));
     }
     let data = token_request(client, endpoints, &form, "Google token exchange").await?;
+    ensure_drive_scope_granted(&data)?;
     Ok(OAuthTokens::from_token_response(&data))
+}
+
+/// Scope the sync file lives under (`appDataFolder`).
+const DRIVE_APPDATA_SCOPE: &str = "https://www.googleapis.com/auth/drive.appdata";
+
+/// Google's granular consent lets the user untick the Drive permission and
+/// still sign in; every Drive call then fails with a 403. Reject that token
+/// up front. A response without `scope` is accepted (nothing to check).
+fn ensure_drive_scope_granted(token_response: &Value) -> CoreResult<()> {
+    let Some(scope) = token_response.get("scope").and_then(Value::as_str) else {
+        return Ok(());
+    };
+    if scope.split_whitespace().any(|s| s == DRIVE_APPDATA_SCOPE) {
+        return Ok(());
+    }
+    Err(CoreError::auth(
+        "Google Drive access was not granted. Connect again and tick the Google Drive \
+         permission (\"See, create, and delete its own configuration data in your Google \
+         Drive\") on the consent screen.",
+    ))
 }
 
 /// Refresh-token grant. Google does not rotate refresh tokens, so the input
@@ -432,10 +493,11 @@ mod tests {
     }
 
     #[test]
-    fn drive_errors_map_like_electron() {
+    fn drive_status_errors() {
+        // A 403 without a known reason shows Google's own message.
         assert_eq!(
             drive_status_error(&res(403, "{}"), "x", true).message,
-            "Google Drive API not enabled. Please enable it in Google Cloud Console."
+            "x: 403 - {}"
         );
         assert_eq!(
             drive_status_error(&res(401, "{}"), "x", true).message,
@@ -449,6 +511,41 @@ mod tests {
             )
             .message,
             "Google Drive download error: 403 - denied"
+        );
+    }
+
+    #[test]
+    fn exchange_requires_the_drive_scope() {
+        let granted = serde_json::json!({
+            "scope": "openid https://www.googleapis.com/auth/drive.appdata https://www.googleapis.com/auth/userinfo.email"
+        });
+        assert!(ensure_drive_scope_granted(&granted).is_ok());
+        assert!(ensure_drive_scope_granted(&serde_json::json!({})).is_ok());
+        let missing = serde_json::json!({
+            "scope": "openid https://www.googleapis.com/auth/userinfo.profile https://www.googleapis.com/auth/userinfo.email"
+        });
+        let err = ensure_drive_scope_granted(&missing).unwrap_err();
+        assert_eq!(err.code, netcatty_core::ErrorCode::AuthFailed);
+        assert!(err.message.contains("Google Drive access was not granted"));
+    }
+
+    #[test]
+    fn drive_403_reasons_pick_the_message() {
+        let disabled = r#"{"error":{"code":403,"message":"Google Drive API has not been used in project 123 before or it is disabled.","status":"PERMISSION_DENIED","errors":[{"reason":"accessNotConfigured"}],"details":[{"reason":"SERVICE_DISABLED"}]}}"#;
+        let err = drive_status_error(&res(403, disabled), "x", true);
+        assert!(err
+            .message
+            .starts_with("Google Drive API not enabled. Please enable it in Google Cloud Console. (403 - Google Drive API has not been used in project 123"));
+
+        let scope = r#"{"error":{"code":403,"message":"Request had insufficient authentication scopes.","status":"PERMISSION_DENIED","errors":[{"reason":"insufficientPermissions"}],"details":[{"reason":"ACCESS_TOKEN_SCOPE_INSUFFICIENT"}]}}"#;
+        let err = drive_status_error(&res(403, scope), "x", true);
+        assert_eq!(err.code, netcatty_core::ErrorCode::AuthFailed);
+        assert!(err.message.contains("not granted access to Google Drive"));
+
+        let quota = r#"{"error":{"code":403,"message":"Rate limit exceeded","errors":[{"reason":"userRateLimitExceeded"}]}}"#;
+        assert_eq!(
+            drive_status_error(&res(403, quota), "x", true).message,
+            "x: 403 - Rate limit exceeded"
         );
     }
 
