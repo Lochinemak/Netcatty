@@ -53,6 +53,9 @@ export const TAURI_EVENTS = {
   languageChanged: 'netcatty:language-changed',
   windowFullscreenChanged: 'netcatty:window:fullscreen-changed',
   vaultBackupsChanged: 'netcatty:vault-backups:changed',
+  fileWatchSynced: 'netcatty:filewatch:synced',
+  fileWatchError: 'netcatty:filewatch:error',
+  fileWatchStopped: 'netcatty:filewatch:stopped',
 } as const;
 
 /** Terminal output kept per session until a display listener attaches (JS string length). */
@@ -766,6 +769,22 @@ export function createTauriBridge(options: CreateTauriBridgeOptions = {}): Netca
       hub.subscribe<SftpConnectionProgressEvent>(TAURI_EVENTS.sftpConnectionProgress, (event) => {
         cb(event.sessionId, event.label, event.status, event.detail);
       }),
+
+    // -----------------------------------------------------------------------
+    // Edit-and-sync: watch a downloaded temp file and upload saves
+    // -----------------------------------------------------------------------
+    startFileWatch: (localPath, remotePath, sftpId, encoding) =>
+      invoke<BridgeResult<'startFileWatch'>>('filewatch_start', { localPath, remotePath, sftpId, encoding }),
+    stopFileWatch: (watchId, cleanupTempFile) =>
+      invoke<BridgeResult<'stopFileWatch'>>('filewatch_stop', { watchId, cleanupTempFile }),
+    listFileWatches: () => invoke<BridgeResult<'listFileWatches'>>('filewatch_list'),
+    registerTempFile: (sftpId, localPath) =>
+      invoke<BridgeResult<'registerTempFile'>>('filewatch_register_temp_file', { sftpId, localPath }),
+    unregisterTempFile: (sftpId, localPath) =>
+      invoke<BridgeResult<'unregisterTempFile'>>('filewatch_unregister_temp_file', { sftpId, localPath }),
+    onFileWatchSynced: (cb) => hub.subscribe(TAURI_EVENTS.fileWatchSynced, cb),
+    onFileWatchError: (cb) => hub.subscribe(TAURI_EVENTS.fileWatchError, cb),
+    onFileWatchStopped: (cb) => hub.subscribe(TAURI_EVENTS.fileWatchStopped, cb),
 
     // -----------------------------------------------------------------------
     // Transfers

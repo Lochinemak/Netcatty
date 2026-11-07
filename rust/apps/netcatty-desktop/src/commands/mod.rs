@@ -11,6 +11,7 @@
 pub mod app;
 pub mod clipboard;
 pub mod diagnostics;
+pub mod filewatch;
 pub mod forward;
 pub mod localfs;
 pub mod rdesktop;
@@ -107,6 +108,12 @@ pub fn handler<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + 
         tempdir::tempdir_open,
         tempdir::tempdir_set_custom,
         tempdir::tempdir_reset_custom,
+        // Edit-and-sync file watches.
+        filewatch::filewatch_start,
+        filewatch::filewatch_stop,
+        filewatch::filewatch_list,
+        filewatch::filewatch_register_temp_file,
+        filewatch::filewatch_unregister_temp_file,
         session::session_start_ssh,
         session::session_test_connection,
         session::session_cancel_test_connection,

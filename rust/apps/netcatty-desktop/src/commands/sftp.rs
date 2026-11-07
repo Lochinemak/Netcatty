@@ -401,6 +401,7 @@ pub async fn sftp_close<R: tauri::Runtime>(
     state: Ctx<'_, R>,
     sftp_id: String,
 ) -> CmdResult<SuccessResult> {
+    super::filewatch::stop_for_session(&state.app, &sftp_id);
     let Some((_, client)) = state.sftp.remove(&sftp_id) else {
         return Ok(SuccessResult::ok());
     };
@@ -549,6 +550,18 @@ pub async fn transfer_start<R: tauri::Runtime>(
     state: Ctx<'_, R>,
     payload: StreamTransferOptions,
 ) -> CmdResult<StreamTransferResult> {
+    run_transfer(&state, payload, true).await
+}
+
+/// Run a transfer to completion. With `emit_events` it reports on
+/// `netcatty:sftp:global-transfer` (renderer-started transfers); internal
+/// transfers such as file-watch syncs run silently but stay cancellable
+/// through the registry.
+pub async fn run_transfer<R: tauri::Runtime>(
+    state: &AppState<R>,
+    payload: StreamTransferOptions,
+    emit_events: bool,
+) -> CmdResult<StreamTransferResult> {
     if payload.transfer_id.trim().is_empty() {
         return Err(CoreError::invalid("transferId is required"));
     }
@@ -560,13 +573,13 @@ pub async fn transfer_start<R: tauri::Runtime>(
     }
     let endpoints = TransferEndpoints {
         source: endpoint(
-            &state,
+            state,
             payload.source_type,
             payload.source_sftp_id.as_ref(),
             "sourceSftpId",
         )?,
         target: endpoint(
-            &state,
+            state,
             payload.target_type,
             payload.target_sftp_id.as_ref(),
             "targetSftpId",
@@ -593,7 +606,9 @@ pub async fn transfer_start<R: tauri::Runtime>(
     state.transfers.insert(transfer_id.clone(), handle);
 
     let base = started_event(&payload, netcatty_core::ids::now_ms());
-    events::emit(&state.app, ev::SFTP_GLOBAL_TRANSFER, base.clone());
+    if emit_events {
+        events::emit(&state.app, ev::SFTP_GLOBAL_TRANSFER, base.clone());
+    }
 
     let app = state.app.clone();
     let template = base.clone();
@@ -607,6 +622,9 @@ pub async fn transfer_start<R: tauri::Runtime>(
                 continue;
             }
             last_emit = Some(Instant::now());
+            if !emit_events {
+                continue;
+            }
             events::emit(
                 &app,
                 ev::SFTP_GLOBAL_TRANSFER,
@@ -624,7 +642,9 @@ pub async fn transfer_start<R: tauri::Runtime>(
         checkpoint_bytes: payload.checkpoint_bytes.unwrap_or(0),
     });
     let (event, result) = outcome_event(&base, &outcome, netcatty_core::ids::now_ms());
-    events::emit(&state.app, ev::SFTP_GLOBAL_TRANSFER, event);
+    if emit_events {
+        events::emit(&state.app, ev::SFTP_GLOBAL_TRANSFER, event);
+    }
     Ok(result)
 }
 

@@ -125,7 +125,8 @@ Implemented in Rust:
 * Crash log (Rust panics + renderer diagnostics, Electron's JSONL format),
   clipboard file lists and images, temp directory management (info, clear,
   custom root), Electron-compatible local vault backups, app-level HTTP proxy
-  for cloud sync / OAuth (system / direct / custom)
+  for cloud sync / OAuth (system / direct / custom), edit-and-sync file
+  watches for files opened with external apps
 * Tauri shell: dialogs, clipboard, opener, event fan-out
 
 Not yet ported (the renderer treats these bridge methods as optional and
@@ -138,7 +139,7 @@ hides the features when they are absent):
 * Plugin-provided sync providers (they need the plugin runtime)
 * Tray, tray panel, global shortcuts, auto-launch, auto-update, deep links,
   Explorer context menu
-* Session logging, file watch (edit-and-sync), compressed folder upload,
+* Session logging, compressed folder upload,
   system manager (processes/tmux/docker/kubectl), monitor bridge
 * X11 forwarding is requested on the channel but no local X11 proxy is
   started yet

@@ -771,3 +771,77 @@ fn vault_backups_round_trip() {
         json!({ "deletedCount": 1 })
     );
 }
+
+#[test]
+fn file_watch_polls_reports_and_cleans_up() {
+    let h = build_app();
+    let errors = collect(&h.app, "netcatty:filewatch:error");
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("edit.txt");
+
+    let err = invoke(
+        &h.webview,
+        "filewatch_start",
+        json!({ "localPath": file, "remotePath": "/r/edit.txt", "sftpId": "s1" }),
+    )
+    .unwrap_err();
+    assert!(err["message"]
+        .as_str()
+        .unwrap()
+        .starts_with("Cannot watch file:"));
+
+    std::fs::write(&file, "v1").unwrap();
+    let args = json!({ "localPath": file, "remotePath": "/r/edit.txt", "sftpId": "s1" });
+    let started = ok(invoke(&h.webview, "filewatch_start", args.clone()));
+    let watch_id = started["watchId"].as_str().unwrap().to_owned();
+    assert_eq!(
+        ok(invoke(&h.webview, "filewatch_start", args))["reused"],
+        json!(true)
+    );
+    assert_eq!(
+        ok(invoke(&h.webview, "filewatch_list", json!({})))
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+
+    // A save is picked up by the poller; with no SFTP session the sync fails
+    // and is reported like Electron.
+    std::fs::write(&file, "version two").unwrap();
+    assert!(wait_for(&errors, Duration::from_secs(6), |seen| seen
+        .iter()
+        .any(|e| {
+            e["watchId"] == json!(watch_id)
+                && e["error"] == json!("SFTP session not found or expired")
+        })));
+
+    assert_eq!(
+        ok(invoke(
+            &h.webview,
+            "filewatch_stop",
+            json!({ "watchId": watch_id, "cleanupTempFile": false })
+        )),
+        json!({ "success": true })
+    );
+    assert!(ok(invoke(&h.webview, "filewatch_list", json!({})))
+        .as_array()
+        .unwrap()
+        .is_empty());
+
+    ok(invoke(
+        &h.webview,
+        "filewatch_register_temp_file",
+        json!({ "sftpId": "s1", "localPath": file }),
+    ));
+    let unregistered = ok(invoke(
+        &h.webview,
+        "filewatch_unregister_temp_file",
+        json!({ "sftpId": "s1", "localPath": file }),
+    ));
+    assert_eq!(
+        unregistered,
+        json!({ "success": true, "retained": false, "wasTracked": true })
+    );
+    assert!(!file.exists());
+}

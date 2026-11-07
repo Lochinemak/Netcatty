@@ -863,3 +863,23 @@ test('http network proxy maps to the app proxy commands', async () => {
   assert.deepEqual(await bridge.setHttpNetworkProxy!(settings), { success: true, settings });
   assert.deepEqual(lastInvoke(fake, 'app_set_http_proxy').args, { settings });
 });
+
+test('file watches map to the filewatch commands and events', async () => {
+  const { fake, bridge } = setup();
+  fake.respond('filewatch_start', () => ({ watchId: 'watch-1' }));
+  assert.deepEqual(await bridge.startFileWatch!('/tmp/a.txt', '/srv/a.txt', 'sftp-1', 'utf-8'), { watchId: 'watch-1' });
+  assert.deepEqual(lastInvoke(fake, 'filewatch_start').args, {
+    localPath: '/tmp/a.txt', remotePath: '/srv/a.txt', sftpId: 'sftp-1', encoding: 'utf-8',
+  });
+  await bridge.stopFileWatch!('watch-1', true);
+  assert.deepEqual(lastInvoke(fake, 'filewatch_stop').args, { watchId: 'watch-1', cleanupTempFile: true });
+  await bridge.registerTempFile!('sftp-1', '/tmp/a.txt');
+  assert.deepEqual(lastInvoke(fake, 'filewatch_register_temp_file').args, { sftpId: 'sftp-1', localPath: '/tmp/a.txt' });
+
+  const synced: unknown[] = [];
+  bridge.onFileWatchSynced!((payload) => synced.push(payload));
+  await flush();
+  const payload = { watchId: 'watch-1', localPath: '/tmp/a.txt', remotePath: '/srv/a.txt', bytesWritten: 3 };
+  fake.emit('netcatty:filewatch:synced', payload);
+  assert.deepEqual(synced, [payload]);
+});

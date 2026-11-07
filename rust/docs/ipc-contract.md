@@ -335,6 +335,28 @@ tool-output store). The effective temp dir is the custom root when set, else
 
 `chooseTempDir` is the dialog plugin's directory picker.
 
+## File watch (edit and sync)
+
+`commands/filewatch.rs` (Electron: `fileWatcherBridge.cjs`). A watch polls the
+local temp file every second; a newer mtime or a size change is debounced
+500 ms and uploaded with the transfer engine (`run_transfer`, no
+global-transfer events). Syncs of one watch are serialized; deleting the
+local file stops the watch; `sftp_close` stops the session's watches and
+deletes its registered temp files. Max 256 watches. No OS notification is
+shown on sync (Electron shows one).
+
+| Command | Args | Returns |
+| --- | --- | --- |
+| `filewatch_start` | `localPath, remotePath, sftpId, encoding?` | `{ watchId, reused? }` |
+| `filewatch_stop` | `watchId, cleanupTempFile?` | `{ success }` |
+| `filewatch_list` | — | `[{ watchId, localPath, remotePath, sftpId }]` |
+| `filewatch_register_temp_file` | `sftpId, localPath` | `{ success }` |
+| `filewatch_unregister_temp_file` | `sftpId, localPath` | `{ success, retained, wasTracked }` (deletes unless watched) |
+
+Events: `netcatty:filewatch:synced` `{ watchId, localPath, remotePath,
+bytesWritten, warning? }`, `netcatty:filewatch:error` `{ …, error }`,
+`netcatty:filewatch:stopped` `{ watchId, localPath, remotePath, sftpId }`.
+
 ## App HTTP proxy
 
 `netcatty_sync::proxy` (Electron: `httpNetworkProxyBridge.cjs`): the proxy
