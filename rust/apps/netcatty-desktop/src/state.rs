@@ -35,6 +35,9 @@ pub struct AppState<R: Runtime> {
     /// Connections dialed privately for a tunnel (not shared with a session),
     /// keyed by `tunnelId`; disconnected when the tunnel stops.
     pub tunnel_connections: dashmap::DashMap<String, Arc<SshConnection>>,
+    /// Cloud sync: OAuth loopback receiver, in-flight GitHub device-flow
+    /// polls and the session master password.
+    pub sync: crate::commands::sync::SyncState,
 }
 
 /// Command argument giving access to the managed [`AppState`].
@@ -123,6 +126,7 @@ impl<R: Runtime> AppState<R> {
             tree_scans: dashmap::DashMap::new(),
             test_connections: dashmap::DashMap::new(),
             tunnel_connections: dashmap::DashMap::new(),
+            sync: crate::commands::sync::SyncState::default(),
         }
     }
 

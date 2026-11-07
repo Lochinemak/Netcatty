@@ -48,6 +48,9 @@ pub mod events {
     pub const TELNET_AUTO_LOGIN_COMPLETE: &str = "netcatty:telnet:auto-login-complete";
     /// `LocalTreeProgressEvent`.
     pub const LOCAL_TREE_PROGRESS: &str = "netcatty:local:tree-progress";
+    /// No payload — the cloud sync master password became available
+    /// (another window unlocked sync).
+    pub const CLOUD_SYNC_PASSWORD_AVAILABLE: &str = "netcatty:cloudsync:password-available";
 }
 
 // ---------------------------------------------------------------------------

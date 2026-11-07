@@ -20,7 +20,8 @@ rust/
 │   ├── netcatty-forward       local / remote / dynamic (SOCKS5) port forwarding
 │   ├── netcatty-pty           local shells (portable-pty) + shell discovery
 │   ├── netcatty-localfs       local file browser operations, tree scans
-│   └── netcatty-store         JSON key/value store, OS-keychain credential cipher, vault backups
+│   ├── netcatty-store         JSON key/value store, OS-keychain credential cipher, vault backups
+│   └── netcatty-sync          cloud sync transports: GitHub, Google Drive, OneDrive, WebDAV, S3, OAuth callback
 └── apps/
     └── netcatty-desktop       Tauri 2 app: commands, session registry, prompt broker, events
 ```
@@ -102,6 +103,10 @@ Implemented in Rust:
 * Local file browser operations and tree scans with progress
 * JSON document store, AES-256-GCM credential encryption keyed from the OS
   keychain, vault backups
+* Cloud sync transports (`netcatty-sync`): GitHub Gist device flow, Google
+  Drive and OneDrive (OAuth loopback callback + PKCE), WebDAV (Basic / Digest
+  / token) and S3 (SigV4); the sync master password is kept encrypted with
+  the credential cipher
 * Tauri shell: window, dialogs, clipboard, opener, event fan-out
 
 Not yet ported (the renderer treats these bridge methods as optional and
@@ -111,7 +116,7 @@ hides the features when they are absent):
   MCP controller
 * Mosh / EternalTerminal, telnet and serial sessions, ZMODEM/YMODEM
 * FIDO2 security keys and Windows Hello / app lock
-* Cloud sync (S3/WebDAV/OneDrive/Google), GitHub/Google OAuth
+* Plugin-provided sync providers (they need the plugin runtime)
 * Tray, tray panel, global shortcuts, auto-launch, auto-update, deep links,
   Explorer context menu
 * Session logging, file watch (edit-and-sync), compressed folder upload,

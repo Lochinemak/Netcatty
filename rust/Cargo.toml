@@ -8,6 +8,7 @@ members = [
   "crates/netcatty-pty",
   "crates/netcatty-localfs",
   "crates/netcatty-store",
+  "crates/netcatty-sync",
   "crates/netcatty-e2e",
   "apps/netcatty-desktop",
 ]
@@ -28,6 +29,7 @@ netcatty-forward = { path = "crates/netcatty-forward" }
 netcatty-pty = { path = "crates/netcatty-pty" }
 netcatty-localfs = { path = "crates/netcatty-localfs" }
 netcatty-store = { path = "crates/netcatty-store" }
+netcatty-sync = { path = "crates/netcatty-sync" }
 
 # async runtime
 tokio = { version = "1.54", features = ["full"] }
@@ -46,6 +48,11 @@ ssh-key = { version = "0.6", features = ["ed25519", "rsa", "ecdsa", "p256", "p38
 
 # pty / serial
 portable-pty = "0.9"
+
+# http (cloud sync)
+reqwest = { version = "0.13", features = ["json", "form", "query"] }
+hmac = "0.13"
+md5 = "0.8"
 
 # misc
 thiserror = "2.0"

@@ -194,6 +194,43 @@ Events: `netcatty:portforward:status` → `PortForwardStatusEvent`;
 | `vault_backup_read` | `fileName` | `string` |
 | `vault_backup_trim` / `vault_backup_clear` | — | `number` |
 
+## Cloud sync
+
+Implemented by the `netcatty-sync` crate. The renderer keeps the sync engine
+(encryption, merge, conflicts); these commands move the encrypted
+`SyncedFile` and run the HTTP calls a WebView cannot make because of CORS.
+Error messages match the Electron bridges (`githubAuthBridge`,
+`googleAuthBridge`, `onedriveAuthBridge`, `cloudSyncBridge`, `oauthBridge`),
+including the `ONEDRIVE_REAUTH_REQUIRED:` prefix on dead OneDrive refresh
+tokens.
+
+| Command | Args | Returns |
+| --- | --- | --- |
+| `cloudsync_password_set` | `password?` (empty clears) | `true`; emits `netcatty:cloudsync:password-available` |
+| `cloudsync_password_get` | — | `string \| null` (memory, else `cloud-sync-session.enc` decrypted) |
+| `cloudsync_password_clear` | — | `true` |
+| `oauth_prepare_callback` | — | `{ sessionId, port, redirectUri }` (`127.0.0.1:45678`, OS port if busy) |
+| `oauth_await_callback` | `expectedState?, sessionId?` | `{ code, state? }`; rejects on cancel, CSRF, provider error, 5 min timeout |
+| `oauth_cancel_callback` | `sessionId?` | `void` |
+| `github_device_flow_start` | `payload: { clientId?, scope? }` | `{ deviceCode, userCode, verificationUri, expiresAt, interval }` |
+| `github_device_flow_poll` | `payload: { clientId?, deviceCode, pollId? }` | raw token JSON (`access_token` or `error`) |
+| `github_device_flow_cancel` | `pollId` | `void` (the poll rejects with "…aborted") |
+| `github_gist_raw_content` | `payload: { accessToken, rawUrl }` | `string` (only `gist.githubusercontent.com`) |
+| `google_oauth_exchange` / `google_oauth_refresh` | `payload` (PKCE code / refresh token) | `{ accessToken, refreshToken?, expiresAt, tokenType?, scope? }` |
+| `google_oauth_userinfo` | `payload: { accessToken }` | userinfo JSON |
+| `google_drive_{find,create,update,download,delete}_sync_file` | `payload: { accessToken, fileId?, fileName?, syncedFile? }` | `{ fileId }` / `{ ok: true }` / `{ syncedFile }` |
+| `onedrive_oauth_exchange` / `onedrive_oauth_refresh` | `payload` | token set as above |
+| `onedrive_oauth_userinfo` | `payload: { accessToken }` | `{ id, email, name, avatarDataUrl? }` |
+| `onedrive_{find,upload,download,delete}_sync_file` | `payload: { accessToken, fileId?, fileName?, syncedFile? }` | `{ fileId }` / `{ syncedFile }` / `{ ok: true }` |
+| `webdav_{initialize,upload,download,delete}` | `config: WebDAVConfig, syncedFile?` | `{ resourceId }` / `{ syncedFile }` / `{ ok: true }` |
+| `s3_{initialize,upload,download,delete}` | `config: S3Config, syncedFile?` | `{ resourceId }` / `{ syncedFile }` / `{ ok: true }` |
+
+WebDAV supports Basic (UTF-8 credentials), Bearer token and Digest auth and
+replaces the file with temp-`PUT` + `MOVE`, falling back to a padded in-place
+`PUT` for servers that do not truncate on overwrite. S3 requests are signed
+with SigV4 (path-style by default). `allowInsecure` skips TLS verification
+for that endpoint only. Requests honour the system proxy.
+
 ## App
 
 | Command | Args | Returns |
@@ -230,11 +267,15 @@ adapter (`window.__TAURI__.dialog`, `.clipboardManager`, `.opener`).
 | `onPortForwardStatus(cb)` | listen `netcatty:portforward:status` |
 | `listLocalDir` … `listDrives`, `getSystemInfo` | `local_*`, `system_info` |
 | `credentialsAvailable/Encrypt/Decrypt` | `credentials_*` |
+| `cloudSync{Set,Get,Clear}SessionPassword` / `onCloudSyncSessionPasswordAvailable` | `cloudsync_password_*` / listen `netcatty:cloudsync:password-available` |
+| `prepareOAuthCallback`, `awaitOAuthCallback`, `cancelOAuthCallback` | `oauth_*_callback` |
+| `github*`, `google*`, `googleDrive*`, `onedrive*` | `github_*`, `google_*`, `onedrive_*` (options object as `payload`) |
+| `cloudSyncWebdav*` / `cloudSyncS3*` | `webdav_*` / `s3_*` (`config`, `syncedFile`) |
 | `readClipboardText/writeClipboardText` | clipboard-manager plugin |
 | `selectDirectory/selectFile/showSaveDialog` | dialog plugin |
 | `openExternal` | opener plugin |
 
 Bridge methods that have no Rust counterpart in this version (AI, plugins,
-MCP, Mosh/ET, FIDO, cloud sync, tray, auto-update, session logs, file watch,
-system manager) are left `undefined` on the adapter; the renderer already
+MCP, Mosh/ET, FIDO, plugin sync providers, tray, auto-update, session logs,
+file watch, system manager) are left `undefined` on the adapter; the renderer already
 treats them as optional.

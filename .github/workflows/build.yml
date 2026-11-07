@@ -5,10 +5,10 @@ name: build-packages
 #    when packaging, native runtimes, or installer inputs change. Ordinary
 #    app changes are covered by the required test workflow's production build.
 #    Artifacts upload as workflow artifacts only; *no* release is published.
-#  - Tag push matching `v<MAJOR>.<MINOR>.<PATCH>` (with optional
-#    pre-release suffix like `v1.2.3-rc.1`) -> run the matrix and
-#    publish a GitHub Release. Loose tags like `v-test`, `vNEXT`, or
-#    `v1.0` no longer auto-publish.
+#  - Tag pushes no longer trigger this Electron workflow on the
+#    rust-rewrite branch: version tags publish the Tauri build instead
+#    (see build-tauri.yml). To publish an Electron release, run this
+#    workflow manually on a strict version tag with `publish_release`.
 #  - Manual `workflow_dispatch` -> run the matrix on the selected ref.
 #    `publish_release` only publishes when the selected ref is also a
 #    strict version tag.
@@ -34,9 +34,6 @@ on:
   push:
     branches:
       - main
-    tags:
-      - "v[0-9]+.[0-9]+.[0-9]+"
-      - "v[0-9]+.[0-9]+.[0-9]+-[0-9A-Za-z]*"
   pull_request:
     paths:
       - ".github/workflows/build.yml"

@@ -515,3 +515,61 @@ test('stageUploadFile deletes the staged file when a chunk fails', async () => {
   assert.deepEqual(del.args, { filePath: '/tmp/netcatty/.transfer_x_f.part' });
   assert.deepEqual(await bridge.cancelStagedUploadFile!('x'), { success: false });
 });
+
+test('cloud sync methods map to the netcatty-sync commands with Electron-shaped arguments', async () => {
+  const { fake, bridge } = setup();
+  const webdav = { endpoint: 'https://dav.example.com', authType: 'basic' as const, username: 'u', password: 'p' };
+  const s3 = { endpoint: 'https://s3.example.com', region: 'us-east-1', bucket: 'b', accessKeyId: 'a', secretAccessKey: 's' };
+  const syncedFile = { meta: { version: 1 }, payload: 'cipher' } as unknown as Parameters<NonNullable<NetcattyBridge['cloudSyncWebdavUpload']>>[1];
+
+  fake.respond('webdav_download', () => ({ syncedFile }));
+  assert.deepEqual(await bridge.cloudSyncWebdavDownload!(webdav), { syncedFile });
+  await bridge.cloudSyncWebdavUpload!(webdav, syncedFile);
+  assert.deepEqual(lastInvoke(fake, 'webdav_upload').args, { config: webdav, syncedFile });
+  await bridge.cloudSyncS3Delete!(s3);
+  assert.deepEqual(lastInvoke(fake, 's3_delete').args, { config: s3 });
+
+  fake.respond('oauth_prepare_callback', () => ({ sessionId: 'oauth-1', port: 45678, redirectUri: 'http://127.0.0.1:45678/oauth/callback' }));
+  assert.equal((await bridge.prepareOAuthCallback!()).sessionId, 'oauth-1');
+  await bridge.awaitOAuthCallback!('state-1', 'oauth-1');
+  assert.deepEqual(lastInvoke(fake, 'oauth_await_callback').args, { expectedState: 'state-1', sessionId: 'oauth-1' });
+  await bridge.cancelOAuthCallback!('oauth-1');
+  assert.deepEqual(lastInvoke(fake, 'oauth_cancel_callback').args, { sessionId: 'oauth-1' });
+
+  await bridge.githubStartDeviceFlow!();
+  assert.deepEqual(lastInvoke(fake, 'github_device_flow_start').args, { payload: {} });
+  await bridge.githubPollDeviceFlowToken!({ deviceCode: 'dc', pollId: 'p1' });
+  assert.deepEqual(lastInvoke(fake, 'github_device_flow_poll').args, { payload: { deviceCode: 'dc', pollId: 'p1' } });
+  await bridge.githubCancelDeviceFlowPoll!('p1');
+  assert.deepEqual(lastInvoke(fake, 'github_device_flow_cancel').args, { pollId: 'p1' });
+
+  const exchange = { clientId: 'c', code: 'x', codeVerifier: 'v', redirectUri: 'http://127.0.0.1:45678/oauth/callback' };
+  await bridge.googleExchangeCodeForTokens!(exchange);
+  assert.deepEqual(lastInvoke(fake, 'google_oauth_exchange').args, { payload: exchange });
+  await bridge.onedriveDownloadSyncFile!({ accessToken: 't', fileId: 'f' });
+  assert.deepEqual(lastInvoke(fake, 'onedrive_download_sync_file').args, { payload: { accessToken: 't', fileId: 'f' } });
+});
+
+test('cloud sync session password round-trips and announces availability', async () => {
+  const { fake, bridge } = setup();
+  fake.respond('cloudsync_password_get', () => 'hunter2');
+
+  let notified = 0;
+  const off = bridge.onCloudSyncSessionPasswordAvailable!(() => {
+    notified += 1;
+  });
+  await flush();
+
+  await bridge.cloudSyncSetSessionPassword!('hunter2');
+  assert.deepEqual(lastInvoke(fake, 'cloudsync_password_set').args, { password: 'hunter2' });
+  assert.equal(await bridge.cloudSyncGetSessionPassword!(), 'hunter2');
+
+  fake.emit('netcatty:cloudsync:password-available', null);
+  assert.equal(notified, 1);
+  off();
+  fake.emit('netcatty:cloudsync:password-available', null);
+  assert.equal(notified, 1);
+
+  await bridge.cloudSyncClearSessionPassword!();
+  assert.ok(fake.invokes.some((entry) => entry.cmd === 'cloudsync_password_clear'));
+});

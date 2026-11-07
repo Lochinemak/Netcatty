@@ -42,6 +42,7 @@ export const TAURI_EVENTS = {
   sftpConnectionProgress: 'netcatty:sftp:connection-progress',
   sftpGlobalTransfer: 'netcatty:sftp:global-transfer',
   localTreeProgress: 'netcatty:local:tree-progress',
+  cloudSyncPasswordAvailable: 'netcatty:cloudsync:password-available',
 } as const;
 
 /** Terminal output kept per session until a display listener attaches (JS string length). */
@@ -796,6 +797,74 @@ export function createTauriBridge(options: CreateTauriBridgeOptions = {}): Netca
     credentialsAvailable: () => invoke<boolean>('credentials_available'),
     credentialsEncrypt: (plaintext) => invoke<string>('credentials_encrypt', { plaintext }),
     credentialsDecrypt: (value) => invoke<string>('credentials_decrypt', { value }),
+
+    // -----------------------------------------------------------------------
+    // Cloud sync (netcatty-sync). The renderer keeps the sync engine; Rust
+    // moves the encrypted file and makes the calls CORS blocks in a WebView.
+    // -----------------------------------------------------------------------
+    cloudSyncSetSessionPassword: (password) => invoke<boolean>('cloudsync_password_set', { password }),
+    cloudSyncGetSessionPassword: () => invoke<string | null>('cloudsync_password_get'),
+    cloudSyncClearSessionPassword: () => invoke<boolean>('cloudsync_password_clear'),
+    onCloudSyncSessionPasswordAvailable: (cb) =>
+      hub.subscribe<unknown>(TAURI_EVENTS.cloudSyncPasswordAvailable, () => cb()),
+
+    cloudSyncWebdavInitialize: (config) =>
+      invoke<BridgeResult<'cloudSyncWebdavInitialize'>>('webdav_initialize', { config }),
+    cloudSyncWebdavUpload: (config, syncedFile) =>
+      invoke<BridgeResult<'cloudSyncWebdavUpload'>>('webdav_upload', { config, syncedFile }),
+    cloudSyncWebdavDownload: (config) =>
+      invoke<BridgeResult<'cloudSyncWebdavDownload'>>('webdav_download', { config }),
+    cloudSyncWebdavDelete: (config) => invoke<BridgeResult<'cloudSyncWebdavDelete'>>('webdav_delete', { config }),
+    cloudSyncS3Initialize: (config) => invoke<BridgeResult<'cloudSyncS3Initialize'>>('s3_initialize', { config }),
+    cloudSyncS3Upload: (config, syncedFile) =>
+      invoke<BridgeResult<'cloudSyncS3Upload'>>('s3_upload', { config, syncedFile }),
+    cloudSyncS3Download: (config) => invoke<BridgeResult<'cloudSyncS3Download'>>('s3_download', { config }),
+    cloudSyncS3Delete: (config) => invoke<BridgeResult<'cloudSyncS3Delete'>>('s3_delete', { config }),
+
+    prepareOAuthCallback: () => invoke<BridgeResult<'prepareOAuthCallback'>>('oauth_prepare_callback'),
+    awaitOAuthCallback: (expectedState, sessionId) =>
+      invoke<BridgeResult<'awaitOAuthCallback'>>('oauth_await_callback', { expectedState, sessionId }),
+    cancelOAuthCallback: (sessionId) => invoke<void>('oauth_cancel_callback', { sessionId }),
+
+    githubStartDeviceFlow: (flowOptions) =>
+      invoke<BridgeResult<'githubStartDeviceFlow'>>('github_device_flow_start', { payload: flowOptions ?? {} }),
+    githubPollDeviceFlowToken: (pollOptions) =>
+      invoke<BridgeResult<'githubPollDeviceFlowToken'>>('github_device_flow_poll', { payload: pollOptions }),
+    githubCancelDeviceFlowPoll: (pollId) => invoke<void>('github_device_flow_cancel', { pollId }),
+    githubDownloadGistRawContent: (gistOptions) =>
+      invoke<string>('github_gist_raw_content', { payload: gistOptions }),
+
+    googleExchangeCodeForTokens: (tokenOptions) =>
+      invoke<BridgeResult<'googleExchangeCodeForTokens'>>('google_oauth_exchange', { payload: tokenOptions }),
+    googleRefreshAccessToken: (tokenOptions) =>
+      invoke<BridgeResult<'googleRefreshAccessToken'>>('google_oauth_refresh', { payload: tokenOptions }),
+    googleGetUserInfo: (userOptions) =>
+      invoke<BridgeResult<'googleGetUserInfo'>>('google_oauth_userinfo', { payload: userOptions }),
+    googleDriveFindSyncFile: (driveOptions) =>
+      invoke<BridgeResult<'googleDriveFindSyncFile'>>('google_drive_find_sync_file', { payload: driveOptions }),
+    googleDriveCreateSyncFile: (driveOptions) =>
+      invoke<BridgeResult<'googleDriveCreateSyncFile'>>('google_drive_create_sync_file', { payload: driveOptions }),
+    googleDriveUpdateSyncFile: (driveOptions) =>
+      invoke<BridgeResult<'googleDriveUpdateSyncFile'>>('google_drive_update_sync_file', { payload: driveOptions }),
+    googleDriveDownloadSyncFile: (driveOptions) =>
+      invoke<BridgeResult<'googleDriveDownloadSyncFile'>>('google_drive_download_sync_file', { payload: driveOptions }),
+    googleDriveDeleteSyncFile: (driveOptions) =>
+      invoke<BridgeResult<'googleDriveDeleteSyncFile'>>('google_drive_delete_sync_file', { payload: driveOptions }),
+
+    onedriveExchangeCodeForTokens: (tokenOptions) =>
+      invoke<BridgeResult<'onedriveExchangeCodeForTokens'>>('onedrive_oauth_exchange', { payload: tokenOptions }),
+    onedriveRefreshAccessToken: (tokenOptions) =>
+      invoke<BridgeResult<'onedriveRefreshAccessToken'>>('onedrive_oauth_refresh', { payload: tokenOptions }),
+    onedriveGetUserInfo: (userOptions) =>
+      invoke<BridgeResult<'onedriveGetUserInfo'>>('onedrive_oauth_userinfo', { payload: userOptions }),
+    onedriveFindSyncFile: (driveOptions) =>
+      invoke<BridgeResult<'onedriveFindSyncFile'>>('onedrive_find_sync_file', { payload: driveOptions }),
+    onedriveUploadSyncFile: (driveOptions) =>
+      invoke<BridgeResult<'onedriveUploadSyncFile'>>('onedrive_upload_sync_file', { payload: driveOptions }),
+    onedriveDownloadSyncFile: (driveOptions) =>
+      invoke<BridgeResult<'onedriveDownloadSyncFile'>>('onedrive_download_sync_file', { payload: driveOptions }),
+    onedriveDeleteSyncFile: (driveOptions) =>
+      invoke<BridgeResult<'onedriveDeleteSyncFile'>>('onedrive_delete_sync_file', { payload: driveOptions }),
 
     // -----------------------------------------------------------------------
     // Clipboard / dialogs / opener (Tauri plugins; absent when not registered)

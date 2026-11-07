@@ -502,3 +502,61 @@ fn temp_upload_staging_round_trip() {
     ));
     assert_eq!(again["success"], true);
 }
+
+#[test]
+fn cloud_sync_password_and_oauth_commands() {
+    let h = build_app();
+    let available = collect(&h.app, "netcatty:cloudsync:password-available");
+
+    // Session master password: set → persisted encrypted → get → clear.
+    assert_eq!(ok(invoke(&h.webview, "cloudsync_password_get", json!({}))), Value::Null);
+    assert_eq!(
+        ok(invoke(&h.webview, "cloudsync_password_set", json!({ "password": "hunter2" }))),
+        json!(true)
+    );
+    assert!(wait_for(&available, Duration::from_secs(2), |seen| seen.len() == 1));
+    let persisted = std::fs::read_to_string(h._data_dir.path().join("cloud-sync-session.enc"))
+        .expect("password persisted");
+    assert!(persisted.starts_with("enc:v2:"), "persisted encrypted: {persisted}");
+    assert!(!persisted.contains("hunter2"));
+    assert_eq!(ok(invoke(&h.webview, "cloudsync_password_get", json!({}))), json!("hunter2"));
+    assert_eq!(ok(invoke(&h.webview, "cloudsync_password_clear", json!({}))), json!(true));
+    assert_eq!(ok(invoke(&h.webview, "cloudsync_password_get", json!({}))), Value::Null);
+    assert!(!h._data_dir.path().join("cloud-sync-session.enc").exists());
+
+    // OAuth loopback: prepare returns a loopback redirect URI; cancel is
+    // reported by the next await.
+    let prepared = ok(invoke(&h.webview, "oauth_prepare_callback", json!({})));
+    let redirect = prepared["redirectUri"].as_str().unwrap();
+    assert!(redirect.starts_with("http://127.0.0.1:") && redirect.ends_with("/oauth/callback"));
+    let session_id = prepared["sessionId"].as_str().unwrap().to_owned();
+    ok(invoke(&h.webview, "oauth_cancel_callback", json!({ "sessionId": session_id })));
+    let err = invoke(
+        &h.webview,
+        "oauth_await_callback",
+        json!({ "expectedState": "s", "sessionId": session_id }),
+    )
+    .unwrap_err();
+    assert_eq!(err["message"], "OAuth flow cancelled");
+
+    // Argument validation happens before any network access.
+    let err = invoke(&h.webview, "webdav_initialize", json!({})).unwrap_err();
+    assert_eq!(err["message"], "Missing WebDAV config");
+    let err = invoke(
+        &h.webview,
+        "s3_upload",
+        json!({ "config": { "endpoint": "https://s3.example.com", "bucket": "b" } }),
+    )
+    .unwrap_err();
+    assert_eq!(err["message"], "Missing syncedFile");
+    let err = invoke(&h.webview, "google_drive_find_sync_file", json!({ "payload": {} })).unwrap_err();
+    assert_eq!(err["message"], "Missing accessToken");
+    let err = invoke(
+        &h.webview,
+        "github_device_flow_poll",
+        json!({ "payload": { "pollId": "p" } }),
+    )
+    .unwrap_err();
+    assert_eq!(err["message"], "Missing deviceCode");
+    ok(invoke(&h.webview, "github_device_flow_cancel", json!({ "pollId": "unknown" })));
+}

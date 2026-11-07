@@ -15,6 +15,7 @@ pub mod session;
 pub mod sftp;
 pub mod ssh;
 pub mod store;
+pub mod sync;
 pub mod temp;
 
 use netcatty_core::CoreError;
@@ -142,6 +143,39 @@ pub fn handler<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + 
         store::vault_backup_read,
         store::vault_backup_trim,
         store::vault_backup_clear,
+        sync::cloudsync_password_set,
+        sync::cloudsync_password_get,
+        sync::cloudsync_password_clear,
+        sync::oauth_prepare_callback,
+        sync::oauth_await_callback,
+        sync::oauth_cancel_callback,
+        sync::github_device_flow_start,
+        sync::github_device_flow_poll,
+        sync::github_device_flow_cancel,
+        sync::github_gist_raw_content,
+        sync::google_oauth_exchange,
+        sync::google_oauth_refresh,
+        sync::google_oauth_userinfo,
+        sync::google_drive_find_sync_file,
+        sync::google_drive_create_sync_file,
+        sync::google_drive_update_sync_file,
+        sync::google_drive_download_sync_file,
+        sync::google_drive_delete_sync_file,
+        sync::onedrive_oauth_exchange,
+        sync::onedrive_oauth_refresh,
+        sync::onedrive_oauth_userinfo,
+        sync::onedrive_find_sync_file,
+        sync::onedrive_upload_sync_file,
+        sync::onedrive_download_sync_file,
+        sync::onedrive_delete_sync_file,
+        sync::webdav_initialize,
+        sync::webdav_upload,
+        sync::webdav_download,
+        sync::webdav_delete,
+        sync::s3_initialize,
+        sync::s3_upload,
+        sync::s3_download,
+        sync::s3_delete,
     ]
 }
 
