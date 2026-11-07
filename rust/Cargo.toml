@@ -16,6 +16,7 @@ members = [
   "crates/netcatty-telnet",
   "crates/netcatty-serial",
   "crates/netcatty-mosh",
+  "crates/netcatty-hostbrowser",
   "apps/netcatty-desktop",
 ]
 
@@ -42,6 +43,7 @@ netcatty-serial = { path = "crates/netcatty-serial" }
 netcatty-mosh = { path = "crates/netcatty-mosh" }
 netcatty-sysmgr = { path = "crates/netcatty-sysmgr" }
 netcatty-sessionlog = { path = "crates/netcatty-sessionlog" }
+netcatty-hostbrowser = { path = "crates/netcatty-hostbrowser" }
 
 # async runtime
 tokio = { version = "1.54", features = ["full"] }
