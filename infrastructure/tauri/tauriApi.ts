@@ -47,6 +47,17 @@ export function getTauriGlobal(): NetcattyTauriGlobal {
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null;
 
+/**
+ * Label of the window this page runs in (`"main"`, `"settings"`, …), read
+ * from the metadata Tauri injects. Falls back to `"main"` outside Tauri.
+ */
+export function currentWindowLabel(): string {
+  const internals = typeof window !== 'undefined' ? window.__TAURI_INTERNALS__ : undefined;
+  const metadata = isRecord(internals) && isRecord(internals.metadata) ? internals.metadata : undefined;
+  const current = metadata && isRecord(metadata.currentWindow) ? metadata.currentWindow : undefined;
+  return current && typeof current.label === 'string' && current.label ? current.label : 'main';
+}
+
 /** Turn whatever a rejected `invoke` produced into a `TauriBridgeError`. */
 export function normalizeTauriError(error: unknown): TauriBridgeError {
   if (error instanceof TauriBridgeError) return error;

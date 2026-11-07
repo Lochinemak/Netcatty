@@ -268,6 +268,43 @@ replaces the file with temp-`PUT` + `MOVE`, falling back to a padded in-place
 with SigV4 (path-style by default). `allowInsecure` skips TLS verification
 for that endpoint only. Requests honour the system proxy.
 
+## Windows
+
+Implemented in `commands/window.rs` (Electron: `windowManager.cjs`,
+`settingsWindow.cjs`). Window commands act on the calling window.
+
+* Main window chrome matches Electron: inset traffic lights on macOS
+  (`tauri.macos.conf.json`: overlay title bar), frameless on Windows / Linux
+  (`tauri.{windows,linux}.conf.json`) with the renderer's own buttons. The
+  renderer's `.app-drag` / `.app-no-drag` regions are made draggable by
+  `infrastructure/tauri/dragRegion.ts` (`start_dragging`,
+  `internal_toggle_maximize` on double click).
+* The settings window (label `settings`, `index.html#/settings`, 980×720) is
+  created hidden, shown on `window_renderer_ready` (3 s fallback), hidden on
+  close and reused. Closing the main window destroys it so the app quits.
+
+| Command | Args | Returns |
+| --- | --- | --- |
+| `window_open_settings` | — | `true` (creates or re-shows, centred on the caller's monitor) |
+| `window_close_settings` | — | `bool` (hides the settings window) |
+| `window_renderer_ready` | — | `void` (shows the caller if hidden) |
+| `window_minimize` / `window_close` | — | `void` |
+| `window_maximize` | — | `bool` new maximized state (toggles) |
+| `window_is_maximized` / `window_is_fullscreen` | — | `bool` |
+| `window_focus` | — | `true` |
+| `window_set_title` | `title?` | `bool` (empty → "Netcatty") |
+| `window_open_main` | — | `bool` |
+| `app_quit` | — | `void` |
+| `app_set_theme` | `theme: "light" \| "dark" \| "system"` | `true` (native theme of every window) |
+| `app_set_background_color` | `color?` (`#rgb[a]`, `#rrggbb[aa]`, `"H S% L%"`) | `bool` (`false` if unparseable) |
+| `app_set_language` | `language?` | `true`; emits `netcatty:language-changed` |
+| `app_broadcast_settings_changed` | `payload: { key, value }` | `void`; emits `netcatty:settings:changed` `{ source, payload }` |
+
+Events: `netcatty:settings:changed` (`{ source, payload }`, the adapter
+drops events whose `source` is its own window), `netcatty:language-changed`
+(language string), `netcatty:window:fullscreen-changed` (`{ label,
+fullscreen }`, filtered by label).
+
 ## App
 
 | Command | Args | Returns |
@@ -292,6 +329,10 @@ adapter (`window.__TAURI__.dialog`, `.clipboardManager`, `.opener`).
 | `startRemoteDesktopSession(o, onEvent)` | `rdesktop_connect` with a `Channel`; binary messages are decoded into `frame` / `copyRect` events |
 | `sendRemoteDesktopInput(id, events)` / `closeRemoteDesktopSession(id)` | `rdesktop_input` (fire-and-forget) / `rdesktop_close` |
 | `execCommand(o)` | `session_exec` |
+| `openSettingsWindow()` / `closeSettingsWindow()` / `rendererReady()` | `window_open_settings` / `window_close_settings` / `window_renderer_ready` |
+| `windowMinimize/Maximize/Close/IsMaximized/IsFullscreen/Focus()`, `setWindowTitle(t)` | `window_*` on the calling window |
+| `setTheme`, `setBackgroundColor`, `setLanguage` / `onLanguageChanged` | `app_set_theme`, `app_set_background_color`, `app_set_language` / `netcatty:language-changed` |
+| `notifySettingsChanged(p)` / `onSettingsChanged(cb)` | `app_broadcast_settings_changed` / `netcatty:settings:changed` minus own window |
 | `getSessionPwd`, `getSessionRemoteInfo` | `session_pwd`, `session_remote_info` |
 | `generateKeyPair`, `checkSshAgent`, `getDefaultKeys`, `readKnownHosts` | `ssh_*` |
 | `onHostKeyVerification` / `respondHostKeyVerification` | listen `netcatty:host-key:verify` / `ssh_respond_host_key` |

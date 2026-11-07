@@ -1,8 +1,11 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Capabilities for the main Netcatty window",
-  "windows": ["main"],
+  "description": "Capabilities for the Netcatty main and settings windows",
+  "windows": [
+    "main",
+    "settings"
+  ],
   "permissions": [
     "core:default",
     "core:window:allow-set-title",
@@ -14,6 +17,9 @@
     "core:window:allow-is-maximized",
     "core:window:allow-toggle-maximize",
     "core:window:allow-start-dragging",
+    "core:window:allow-hide",
+    "core:window:allow-show",
+    "core:window:allow-unminimize",
     "opener:default",
     "opener:allow-open-url",
     "opener:allow-reveal-item-in-dir",

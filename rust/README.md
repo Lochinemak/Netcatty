@@ -118,7 +118,11 @@ Implemented in Rust:
   Drive and OneDrive (OAuth loopback callback + PKCE), WebDAV (Basic / Digest
   / token) and S3 (SigV4); the sync master password is kept encrypted with
   the credential cipher
-* Tauri shell: window, dialogs, clipboard, opener, event fan-out
+* Windows: reusable settings window, Electron-style chrome (inset traffic
+  lights on macOS, frameless with the renderer's own buttons elsewhere, drag
+  regions), title-bar controls, native theme / background colour, language
+  and cross-window settings sync
+* Tauri shell: dialogs, clipboard, opener, event fan-out
 
 Not yet ported (the renderer treats these bridge methods as optional and
 hides the features when they are absent):

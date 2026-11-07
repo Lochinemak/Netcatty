@@ -664,3 +664,75 @@ fn remote_desktop_commands() {
     });
     assert!(reusable, "a finished session must free its id");
 }
+
+#[test]
+fn settings_window_and_cross_window_events() {
+    use tauri::Manager;
+    let h = build_app();
+    let settings_changed = collect(&h.app, "netcatty:settings:changed");
+    let language = collect(&h.app, "netcatty:language-changed");
+
+    // Opening twice reuses one window; closing hides it (Electron parity).
+    assert_eq!(
+        ok(invoke(&h.webview, "window_open_settings", json!({}))),
+        json!(true)
+    );
+    assert!(h.app.get_webview_window("settings").is_some());
+    assert_eq!(
+        ok(invoke(&h.webview, "window_open_settings", json!({}))),
+        json!(true)
+    );
+    assert_eq!(h.app.webview_windows().len(), 2);
+    assert_eq!(
+        ok(invoke(&h.webview, "window_close_settings", json!({}))),
+        json!(true)
+    );
+    assert!(h.app.get_webview_window("settings").is_some());
+
+    assert_eq!(
+        ok(invoke(
+            &h.webview,
+            "app_set_background_color",
+            json!({ "color": "216 33% 96%" })
+        )),
+        json!(true)
+    );
+    assert_eq!(
+        ok(invoke(
+            &h.webview,
+            "app_set_background_color",
+            json!({ "color": "red" })
+        )),
+        json!(false)
+    );
+    assert_eq!(
+        ok(invoke(
+            &h.webview,
+            "window_set_title",
+            json!({ "title": "  " })
+        )),
+        json!(true)
+    );
+
+    ok(invoke(
+        &h.webview,
+        "app_set_language",
+        json!({ "language": "zh-CN" }),
+    ));
+    assert!(wait_for(&language, Duration::from_secs(2), |seen| seen
+        .iter()
+        .any(|v| v == &json!("zh-CN"))));
+
+    ok(invoke(
+        &h.webview,
+        "app_broadcast_settings_changed",
+        json!({ "payload": { "key": "k", "value": 1 } }),
+    ));
+    assert!(wait_for(
+        &settings_changed,
+        Duration::from_secs(2),
+        |seen| seen
+            .iter()
+            .any(|v| v == &json!({ "source": "main", "payload": { "key": "k", "value": 1 } }))
+    ));
+}

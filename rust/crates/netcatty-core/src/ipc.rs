@@ -51,6 +51,13 @@ pub mod events {
     /// No payload — the cloud sync master password became available
     /// (another window unlocked sync).
     pub const CLOUD_SYNC_PASSWORD_AVAILABLE: &str = "netcatty:cloudsync:password-available";
+    /// `{ source, payload: { key, value } }` — a setting changed in the
+    /// window labelled `source`; other windows apply it.
+    pub const SETTINGS_CHANGED: &str = "netcatty:settings:changed";
+    /// UI language string (`"en"`, `"zh-CN"`, …).
+    pub const LANGUAGE_CHANGED: &str = "netcatty:language-changed";
+    /// `{ label, fullscreen }` — the window entered / left fullscreen.
+    pub const WINDOW_FULLSCREEN_CHANGED: &str = "netcatty:window:fullscreen-changed";
 }
 
 // ---------------------------------------------------------------------------

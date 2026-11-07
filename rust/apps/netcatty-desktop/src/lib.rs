@@ -59,9 +59,11 @@ pub fn configure_with<R: tauri::Runtime>(
                 None => state::AppState::new(handle),
             };
             app.manage(state);
+            app.manage(commands::window::WindowState::default());
             tracing::info!("netcatty-desktop started");
             Ok(())
         })
+        .on_window_event(commands::window::on_window_event)
         .invoke_handler(commands::handler())
 }
 

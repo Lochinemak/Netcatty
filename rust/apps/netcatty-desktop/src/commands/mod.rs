@@ -18,6 +18,7 @@ pub mod ssh;
 pub mod store;
 pub mod sync;
 pub mod temp;
+pub mod window;
 
 use netcatty_core::CoreError;
 
@@ -68,6 +69,23 @@ pub fn handler<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + 
         app::app_get_temp_dir_path,
         app::app_reveal_in_folder,
         app::system_info,
+        // Window management / settings window.
+        window::window_open_settings,
+        window::window_close_settings,
+        window::window_renderer_ready,
+        window::window_minimize,
+        window::window_maximize,
+        window::window_close,
+        window::window_is_maximized,
+        window::window_is_fullscreen,
+        window::window_focus,
+        window::window_set_title,
+        window::window_open_main,
+        window::app_quit,
+        window::app_set_theme,
+        window::app_set_background_color,
+        window::app_set_language,
+        window::app_broadcast_settings_changed,
         session::session_start_ssh,
         session::session_test_connection,
         session::session_cancel_test_connection,

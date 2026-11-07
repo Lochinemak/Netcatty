@@ -733,3 +733,69 @@ test('a failed pause reports the error and leaves no lease behind', async () => 
   await coordinator.release('s1', leaseId, false);
   assert.deepEqual(calls, [true, true, false]);
 });
+
+// ---------------------------------------------------------------------------
+// Windows
+// ---------------------------------------------------------------------------
+
+test('window controls and the settings window map to the window commands', async () => {
+  const { fake, bridge } = setup();
+  fake.respond('window_open_settings', () => true);
+  fake.respond('window_maximize', () => true);
+  fake.respond('window_open_main', () => true);
+
+  assert.equal(await bridge.openSettingsWindow!(), true);
+  await bridge.closeSettingsWindow!();
+  assert.ok(fake.invokes.some((entry) => entry.cmd === 'window_close_settings'));
+  assert.equal(await bridge.windowMaximize!(), true);
+  await bridge.windowMinimize!();
+  assert.ok(fake.invokes.some((entry) => entry.cmd === 'window_minimize'));
+  await bridge.setWindowTitle!('prod-db');
+  assert.deepEqual(lastInvoke(fake, 'window_set_title').args, { title: 'prod-db' });
+  assert.deepEqual(await bridge.openMainWindow!(), { success: true });
+
+  await bridge.setTheme!('dark');
+  assert.deepEqual(lastInvoke(fake, 'app_set_theme').args, { theme: 'dark' });
+  await bridge.setBackgroundColor!('216 33% 96%');
+  assert.deepEqual(lastInvoke(fake, 'app_set_background_color').args, { color: '216 33% 96%' });
+  await bridge.setLanguage!('zh-CN');
+  assert.deepEqual(lastInvoke(fake, 'app_set_language').args, { language: 'zh-CN' });
+
+  bridge.rendererReady!();
+  await flush();
+  assert.ok(fake.invokes.some((entry) => entry.cmd === 'window_renderer_ready'));
+});
+
+test('settings changes are relayed to other windows but not echoed back', async () => {
+  const { fake, bridge } = setup();
+  const received: Array<{ key: string; value: unknown }> = [];
+  const off = bridge.onSettingsChanged!((payload) => received.push(payload));
+  await flush();
+
+  bridge.notifySettingsChanged!({ key: 'netcatty_theme_v1', value: 'dark' });
+  await flush();
+  assert.deepEqual(lastInvoke(fake, 'app_broadcast_settings_changed').args, {
+    payload: { key: 'netcatty_theme_v1', value: 'dark' },
+  });
+
+  // Outside a real webview the current window label is "main".
+  fake.emit('netcatty:settings:changed', { source: 'main', payload: { key: 'own', value: 1 } });
+  fake.emit('netcatty:settings:changed', { source: 'settings', payload: { key: 'other', value: 2 } });
+  assert.deepEqual(received, [{ key: 'other', value: 2 }]);
+  off();
+});
+
+test('language and fullscreen events reach the right listeners', async () => {
+  const { fake, bridge } = setup();
+  const languages: string[] = [];
+  const fullscreen: boolean[] = [];
+  bridge.onLanguageChanged!((language) => languages.push(language));
+  bridge.onWindowFullScreenChanged!((value) => fullscreen.push(value));
+  await flush();
+
+  fake.emit('netcatty:language-changed', 'ja');
+  fake.emit('netcatty:window:fullscreen-changed', { label: 'settings', fullscreen: true });
+  fake.emit('netcatty:window:fullscreen-changed', { label: 'main', fullscreen: true });
+  assert.deepEqual(languages, ['ja']);
+  assert.deepEqual(fullscreen, [true]);
+});

@@ -16,6 +16,7 @@ import {
   SessionDataBacklog,
   TauriBridgeError,
   createChannel,
+  currentWindowLabel,
   invoke,
   invokeBinary,
 } from './tauriApi';
@@ -48,6 +49,9 @@ export const TAURI_EVENTS = {
   sftpGlobalTransfer: 'netcatty:sftp:global-transfer',
   localTreeProgress: 'netcatty:local:tree-progress',
   cloudSyncPasswordAvailable: 'netcatty:cloudsync:password-available',
+  settingsChanged: 'netcatty:settings:changed',
+  languageChanged: 'netcatty:language-changed',
+  windowFullscreenChanged: 'netcatty:window:fullscreen-changed',
 } as const;
 
 /** Terminal output kept per session until a display listener attaches (JS string length). */
@@ -181,6 +185,10 @@ interface LocalTreeProgressEvent {
   entries?: LocalTreeEntry[];
   done?: boolean;
 }
+
+/** Settings relayed between windows; `source` is the sender's window label. */
+interface SettingsChangedEvent { source: string; payload: { key: string; value: unknown } }
+interface FullscreenChangedEvent { label: string; fullscreen: boolean }
 
 interface WireKnownHost {
   id: string;
@@ -1043,6 +1051,52 @@ export function createTauriBridge(options: CreateTauriBridgeOptions = {}): Netca
     openWithSystemDefault: opener?.openPath
       ? (filePath) => openerResult(() => opener.openPath!(filePath))
       : undefined,
+
+    // -----------------------------------------------------------------------
+    // Windows: settings window, custom title-bar controls, native theme,
+    // language and cross-window settings sync. Commands act on the calling
+    // window. Tauri delivers events to every window, so the ones aimed at a
+    // single window are filtered by label here.
+    // -----------------------------------------------------------------------
+    openSettingsWindow: () => invoke<boolean>('window_open_settings'),
+    closeSettingsWindow: () => invoke<void>('window_close_settings').then(() => undefined),
+    rendererReady: () => {
+      fireAndForget('window_renderer_ready', invoke<void>('window_renderer_ready'));
+    },
+    windowMinimize: () => invoke<void>('window_minimize'),
+    windowMaximize: () => invoke<boolean>('window_maximize'),
+    windowClose: () => invoke<void>('window_close'),
+    windowIsMaximized: () => invoke<boolean>('window_is_maximized'),
+    windowIsFullscreen: () => invoke<boolean>('window_is_fullscreen'),
+    windowFocus: () => invoke<boolean>('window_focus'),
+    setWindowTitle: (title) => invoke<boolean>('window_set_title', { title }),
+    onWindowFullScreenChanged: (cb) => {
+      const label = currentWindowLabel();
+      return hub.subscribe<FullscreenChangedEvent>(TAURI_EVENTS.windowFullscreenChanged, (event) => {
+        if (event?.label === label) cb(event.fullscreen === true);
+      });
+    },
+    openMainWindow: async () => ({ success: await invoke<boolean>('window_open_main') }),
+    quitApp: async () => {
+      await invoke<void>('app_quit');
+      return { success: true };
+    },
+    setTheme: (theme) => invoke<boolean>('app_set_theme', { theme }),
+    setBackgroundColor: (color) => invoke<boolean>('app_set_background_color', { color }),
+    setLanguage: (language) => invoke<boolean>('app_set_language', { language }),
+    onLanguageChanged: (cb) => hub.subscribe<string>(TAURI_EVENTS.languageChanged, (language) => {
+      if (typeof language === 'string' && language) cb(language);
+    }),
+    notifySettingsChanged: (payload) => {
+      fireAndForget('app_broadcast_settings_changed', invoke<void>('app_broadcast_settings_changed', { payload }));
+    },
+    onSettingsChanged: (cb) => {
+      const label = currentWindowLabel();
+      return hub.subscribe<SettingsChangedEvent>(TAURI_EVENTS.settingsChanged, (event) => {
+        if (!event || event.source === label || !event.payload) return;
+        cb(event.payload);
+      });
+    },
 
     // -----------------------------------------------------------------------
     // App
