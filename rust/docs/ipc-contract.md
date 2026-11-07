@@ -305,6 +305,78 @@ drops events whose `source` is its own window), `netcatty:language-changed`
 (language string), `netcatty:window:fullscreen-changed` (`{ label,
 fullscreen }`, filtered by label).
 
+## Tray, global hotkey, auto launch, notifications
+
+Implemented in `commands/tray.rs`, `hotkey.rs`, `autostart.rs` and
+`notification.rs` (Electron: `globalShortcutBridge.cjs`,
+`trayPanelBounds.cjs`, `autoLaunch.cjs`, `systemNotification.cjs`).
+
+* **Tray icon** (`tray-icon` feature, artwork from `public/tray-icon*`): exists
+  while `showTrayIcon` is on, is created by `tray_set_close_to_tray(true)`
+  unless hidden by preference, and is pinned during a hidden auto-launch
+  until the main window is shown once. macOS: left click toggles the tray
+  panel. Windows: left click opens the main window, right click toggles the
+  panel. Linux trays report no clicks, so they get Electron's native menu
+  (Open Main Window, sessions, port-forward rules, Quit).
+* **Tray panel**: window `tray-panel` on `index.html#/tray`, 360×520,
+  frameless, always on top, no taskbar entry, transparent except on macOS
+  (that needs the private-API feature). Placed next to the icon on the
+  icon's monitor (below a menu-bar icon, above a bottom taskbar, clamped to
+  the work area; port of `trayPanelBounds.cjs`). Created on first use and
+  shown on `window_renderer_ready` (3 s fallback); hidden on blur / close
+  and reused. While visible it gets `netcatty:trayPanel:refresh` every
+  second.
+* **Close to tray**: with it on (and the icon present or hidden by
+  preference) closing the main window hides it; on macOS a fullscreen window
+  leaves fullscreen first. Clicking the Dock icon re-shows it
+  (`RunEvent::Reopen`). A real close also destroys the hidden panel so the
+  app quits.
+* **Hidden launch**: `--hidden` (the autostart argument) keeps the main
+  window hidden (`window_renderer_ready` does not show it) and pins the tray.
+* **Global hotkey** (`tauri-plugin-global-shortcut`): the renderer string
+  (`"⌘ + Space"`, `"Ctrl + `"`) becomes an Electron accelerator
+  (`CommandOrControl+Space`, returned as `accelerator`) and then a plugin
+  shortcut (`Return` → `Enter`, shifted US symbols → their key). Pressing it
+  hides a focused main window, otherwise shows and focuses it.
+* **Auto launch** (`tauri-plugin-autostart`, argument `--hidden`): macOS
+  LaunchAgent, Windows `Run` key, Linux XDG autostart (AppImage path when
+  run from one). Debug builds report `supported: false`.
+* **Notifications** (`tauri-plugin-notification`): title / body sanitized
+  like Electron (controls stripped, whitespace collapsed, 120 / 500 chars
+  with `…`). A click shows and focuses the window that raised it and emits
+  `netcatty:tray:focusSession` `{ sessionId, label }` for it.
+
+| Command | Args | Returns |
+| --- | --- | --- |
+| `tray_set_show_icon` | `enabled` | `{ success: true, enabled }` |
+| `tray_is_show_icon` | — | `{ enabled }` (default `true`) |
+| `tray_set_close_to_tray` | `enabled` | `{ success: true, enabled }` |
+| `tray_is_close_to_tray` | — | `{ enabled }` (default `false`) |
+| `tray_update_menu_data` | `payload: { sessions?, portForwardRules?, hosts? }` | `{ success: true }`; absent lists are kept; rebuilds the Linux menu and pushes `netcatty:trayPanel:setMenuData` to an open panel |
+| `tray_get_menu_data` | — | `TrayMenuData { sessions, portForwardRules, hosts }` |
+| `tray_panel_hide` | — | `{ success: true }` |
+| `tray_panel_jump_to_session` | `sessionId` | `{ success: true }`; emits `netcatty:trayPanel:jumpToSession` (main window not focused) |
+| `tray_panel_connect_to_host` | `hostId` | `{ success: true }`; focuses the main window, emits `netcatty:trayPanel:connectToHost` |
+| `tray_panel_start_port_forward` | `ruleId` | `{ success, error? }`; emits `netcatty:trayPanel:startPortForward` (`"Main window is not ready"` without a main window) |
+| `tray_panel_close_session` | `sessionId` | `{ success, error? }`; emits `netcatty:trayPanel:closeSession` |
+| `hotkey_register` | `hotkey?` | `{ success, enabled?, accelerator?, error? }` — empty / `"Disabled"` → `{ success: true, enabled: false }`; `"Invalid hotkey format"`; `"Hotkey may be in use by another application"` |
+| `hotkey_unregister` | — | `{ success: true }` |
+| `hotkey_status` | — | `{ enabled, hotkey: string \| null }` |
+| `autostart_get` | — | `{ success, enabled, supported }` (`success: false` = state unknown) |
+| `autostart_set` | `enabled` | `{ success, enabled, supported }` — the state read back after the write |
+| `notification_show` | `payload: { title, body, sessionId?, dedupeKey?, whenUnfocused? }` | `{ shown, reason? }` — `reason`: `"focused"` (`whenUnfocused` and a Netcatty window is focused), `"duplicate"` (`dedupeKey` already shown), `"unavailable"`, or the plugin error |
+
+Events (broadcast; the adapter delivers the `trayPanel:*` actions and
+`tray:togglePortForward` to the main window only):
+
+| Event | Payload |
+| --- | --- |
+| `netcatty:tray:focusSession` | `{ sessionId, label }` — for the window `label` |
+| `netcatty:tray:togglePortForward` | `{ ruleId, start }` (tray menu) |
+| `netcatty:trayPanel:jumpToSession` / `connectToHost` / `closeSession` / `startPortForward` | the id string |
+| `netcatty:trayPanel:setMenuData` | `TrayMenuData` |
+| `netcatty:trayPanel:refresh` | — |
+
 ## App
 
 | Command | Args | Returns |
@@ -333,6 +405,15 @@ adapter (`window.__TAURI__.dialog`, `.clipboardManager`, `.opener`).
 | `windowMinimize/Maximize/Close/IsMaximized/IsFullscreen/Focus()`, `setWindowTitle(t)` | `window_*` on the calling window |
 | `setTheme`, `setBackgroundColor`, `setLanguage` / `onLanguageChanged` | `app_set_theme`, `app_set_background_color`, `app_set_language` / `netcatty:language-changed` |
 | `notifySettingsChanged(p)` / `onSettingsChanged(cb)` | `app_broadcast_settings_changed` / `netcatty:settings:changed` minus own window |
+| `registerGlobalHotkey(h)` / `unregisterGlobalHotkey()` / `getGlobalHotkeyStatus()` | `hotkey_register` / `hotkey_unregister` / `hotkey_status` |
+| `setShowTrayIcon`, `isShowTrayIcon`, `setCloseToTray`, `isCloseToTray` | `tray_set_show_icon`, `tray_is_show_icon`, `tray_set_close_to_tray`, `tray_is_close_to_tray` |
+| `updateTrayMenuData(d)` | `tray_update_menu_data` (`payload`) |
+| `onTrayFocusSession(cb)` / `onTrayTogglePortForward(cb)` | `netcatty:tray:focusSession` for this window's label / `netcatty:tray:togglePortForward` + `netcatty:trayPanel:startPortForward` (`start: true`), main window only |
+| `onTrayPanelJumpToSession` / `ConnectToHost` / `CloseSession` | `netcatty:trayPanel:*`, main window only |
+| `hideTrayPanel`, `jumpToSessionFromTrayPanel`, `connectToHostFromTrayPanel`, `startPortForwardFromTrayPanel`, `closeSessionFromTrayPanel` | `tray_panel_*` |
+| `onTrayPanelMenuData(cb)` / `onTrayPanelRefresh(cb)` | `tray_get_menu_data` once (unless a push came first) + `netcatty:trayPanel:setMenuData` / `netcatty:trayPanel:refresh` |
+| `getAutoLaunch()` / `setAutoLaunch(e)` | `autostart_get` / `autostart_set` |
+| `showSystemNotification(p)` | `notification_show` (`payload`) |
 | `getSessionPwd`, `getSessionRemoteInfo` | `session_pwd`, `session_remote_info` |
 | `generateKeyPair`, `checkSshAgent`, `getDefaultKeys`, `readKnownHosts` | `ssh_*` |
 | `onHostKeyVerification` / `respondHostKeyVerification` | listen `netcatty:host-key:verify` / `ssh_respond_host_key` |
@@ -356,6 +437,7 @@ adapter (`window.__TAURI__.dialog`, `.clipboardManager`, `.opener`).
 | `openExternal` | opener plugin |
 
 Bridge methods that have no Rust counterpart in this version (AI, plugins,
-MCP, Mosh/ET, FIDO, plugin sync providers, tray, auto-update, session logs,
+MCP, Mosh/ET, FIDO, plugin sync providers, auto-update, session logs,
 file watch, system manager) are left `undefined` on the adapter; the renderer already
-treats them as optional.
+treats them as optional. `onTrayPanelCloseRequest` stays undefined too: the
+Electron main process never sends that event.

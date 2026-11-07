@@ -58,6 +58,27 @@ pub mod events {
     pub const LANGUAGE_CHANGED: &str = "netcatty:language-changed";
     /// `{ label, fullscreen }` — the window entered / left fullscreen.
     pub const WINDOW_FULLSCREEN_CHANGED: &str = "netcatty:window:fullscreen-changed";
+
+    // Tray, tray panel and system notifications (`commands/tray.rs`,
+    // `commands/notification.rs`). The `trayPanel:*` actions and
+    // `tray:togglePortForward` are meant for the main window only.
+    /// `{ sessionId, label }` — focus a session in the window `label`
+    /// (tray menu → `"main"`, notification click → the notifying window).
+    pub const TRAY_FOCUS_SESSION: &str = "netcatty:tray:focusSession";
+    /// `{ ruleId, start }` — start / stop a port-forward rule (tray menu).
+    pub const TRAY_TOGGLE_PORT_FORWARD: &str = "netcatty:tray:togglePortForward";
+    /// Session id (string).
+    pub const TRAY_PANEL_JUMP_TO_SESSION: &str = "netcatty:trayPanel:jumpToSession";
+    /// Host id (string).
+    pub const TRAY_PANEL_CONNECT_TO_HOST: &str = "netcatty:trayPanel:connectToHost";
+    /// Session id (string).
+    pub const TRAY_PANEL_CLOSE_SESSION: &str = "netcatty:trayPanel:closeSession";
+    /// Port-forward rule id (string).
+    pub const TRAY_PANEL_START_PORT_FORWARD: &str = "netcatty:trayPanel:startPortForward";
+    /// `TrayMenuData { sessions, portForwardRules, hosts }` for the tray panel.
+    pub const TRAY_PANEL_MENU_DATA: &str = "netcatty:trayPanel:setMenuData";
+    /// No payload — once per second while the tray panel is visible.
+    pub const TRAY_PANEL_REFRESH: &str = "netcatty:trayPanel:refresh";
 }
 
 // ---------------------------------------------------------------------------

@@ -736,3 +736,141 @@ fn settings_window_and_cross_window_events() {
             .any(|v| v == &json!({ "source": "main", "payload": { "key": "k", "value": 1 } }))
     ));
 }
+
+/// Tray preferences, tray data, tray panel actions, global hotkey edge cases
+/// and autostart. Nothing here creates a native tray icon or registers an OS
+/// hotkey: the mock runtime never runs main-thread tasks, which both need.
+#[test]
+fn tray_hotkey_and_autostart_commands() {
+    let h = build_app();
+    let jump = collect(&h.app, "netcatty:trayPanel:jumpToSession");
+    let connect = collect(&h.app, "netcatty:trayPanel:connectToHost");
+    let close = collect(&h.app, "netcatty:trayPanel:closeSession");
+    let start = collect(&h.app, "netcatty:trayPanel:startPortForward");
+
+    // Defaults match Electron: icon shown, close-to-tray off.
+    assert_eq!(
+        ok(invoke(&h.webview, "tray_is_show_icon", json!({}))),
+        json!({ "enabled": true })
+    );
+    assert_eq!(
+        ok(invoke(&h.webview, "tray_is_close_to_tray", json!({}))),
+        json!({ "enabled": false })
+    );
+    assert_eq!(
+        ok(invoke(
+            &h.webview,
+            "tray_set_show_icon",
+            json!({ "enabled": false })
+        )),
+        json!({ "success": true, "enabled": false })
+    );
+    // With the icon hidden by preference this does not create a tray.
+    assert_eq!(
+        ok(invoke(
+            &h.webview,
+            "tray_set_close_to_tray",
+            json!({ "enabled": true })
+        )),
+        json!({ "success": true, "enabled": true })
+    );
+    assert_eq!(
+        ok(invoke(&h.webview, "tray_is_close_to_tray", json!({}))),
+        json!({ "enabled": true })
+    );
+    assert_eq!(
+        ok(invoke(&h.webview, "tray_is_show_icon", json!({}))),
+        json!({ "enabled": false })
+    );
+
+    // Partial menu-data updates merge; the panel reads the result back.
+    let session = json!({ "id": "s1", "label": "web", "hostLabel": "Web", "status": "connected" });
+    ok(invoke(
+        &h.webview,
+        "tray_update_menu_data",
+        json!({ "payload": { "sessions": [session.clone()] } }),
+    ));
+    assert_eq!(
+        ok(invoke(
+            &h.webview,
+            "tray_update_menu_data",
+            json!({ "payload": { "hosts": [{ "id": "h1" }] } })
+        )),
+        json!({ "success": true })
+    );
+    assert_eq!(
+        ok(invoke(&h.webview, "tray_get_menu_data", json!({}))),
+        json!({ "sessions": [session], "portForwardRules": [], "hosts": [{ "id": "h1" }] })
+    );
+
+    // Tray panel actions are forwarded to the main window as events.
+    assert_eq!(
+        ok(invoke(&h.webview, "tray_panel_hide", json!({}))),
+        json!({ "success": true })
+    );
+    for (cmd, args) in [
+        ("tray_panel_jump_to_session", json!({ "sessionId": "s1" })),
+        ("tray_panel_connect_to_host", json!({ "hostId": "h1" })),
+        ("tray_panel_close_session", json!({ "sessionId": "s1" })),
+        ("tray_panel_start_port_forward", json!({ "ruleId": "r1" })),
+    ] {
+        assert_eq!(
+            ok(invoke(&h.webview, cmd, args)),
+            json!({ "success": true }),
+            "{cmd}"
+        );
+    }
+    for (seen, expected) in [
+        (&jump, "s1"),
+        (&connect, "h1"),
+        (&close, "s1"),
+        (&start, "r1"),
+    ] {
+        assert!(wait_for(seen, Duration::from_secs(2), |events| events
+            .iter()
+            .any(|v| v == &json!(expected))));
+    }
+
+    // Global hotkey: disabled / unparseable hotkeys never reach the OS.
+    assert_eq!(
+        ok(invoke(&h.webview, "hotkey_status", json!({}))),
+        json!({ "enabled": false, "hotkey": null })
+    );
+    assert_eq!(
+        ok(invoke(
+            &h.webview,
+            "hotkey_register",
+            json!({ "hotkey": "Disabled" })
+        )),
+        json!({ "success": true, "enabled": false })
+    );
+    assert_eq!(
+        ok(invoke(
+            &h.webview,
+            "hotkey_register",
+            json!({ "hotkey": "Ctrl + ä" })
+        )),
+        json!({ "success": false, "error": "Invalid hotkey format" })
+    );
+    assert_eq!(
+        ok(invoke(&h.webview, "hotkey_unregister", json!({}))),
+        json!({ "success": true })
+    );
+
+    // Autostart is unsupported in debug builds (Electron: dev runs).
+    if cfg!(debug_assertions) {
+        let unsupported = json!({ "success": true, "enabled": false, "supported": false });
+        assert_eq!(
+            ok(invoke(&h.webview, "autostart_get", json!({}))),
+            unsupported
+        );
+        assert_eq!(
+            ok(invoke(
+                &h.webview,
+                "autostart_set",
+                json!({ "enabled": true })
+            )),
+            unsupported
+        );
+    }
+}

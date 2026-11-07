@@ -52,7 +52,18 @@ export const TAURI_EVENTS = {
   settingsChanged: 'netcatty:settings:changed',
   languageChanged: 'netcatty:language-changed',
   windowFullscreenChanged: 'netcatty:window:fullscreen-changed',
+  trayFocusSession: 'netcatty:tray:focusSession',
+  trayTogglePortForward: 'netcatty:tray:togglePortForward',
+  trayPanelJumpToSession: 'netcatty:trayPanel:jumpToSession',
+  trayPanelConnectToHost: 'netcatty:trayPanel:connectToHost',
+  trayPanelCloseSession: 'netcatty:trayPanel:closeSession',
+  trayPanelStartPortForward: 'netcatty:trayPanel:startPortForward',
+  trayPanelMenuData: 'netcatty:trayPanel:setMenuData',
+  trayPanelRefresh: 'netcatty:trayPanel:refresh',
 } as const;
+
+/** Label of the main window (tray actions are delivered there only). */
+const MAIN_WINDOW_LABEL = 'main';
 
 /** Terminal output kept per session until a display listener attaches (JS string length). */
 export const SESSION_BACKLOG_MAX_CHARS = 2 * 1024 * 1024;
@@ -189,6 +200,9 @@ interface LocalTreeProgressEvent {
 /** Settings relayed between windows; `source` is the sender's window label. */
 interface SettingsChangedEvent { source: string; payload: { key: string; value: unknown } }
 interface FullscreenChangedEvent { label: string; fullscreen: boolean }
+interface TrayFocusSessionEvent { sessionId: string; label: string }
+interface TrayTogglePortForwardEvent { ruleId: string; start: boolean }
+type TrayMenuData = Parameters<BridgeArgs<'onTrayPanelMenuData'>[0]>[0];
 
 interface WireKnownHost {
   id: string;
@@ -531,6 +545,14 @@ export function createTauriBridge(options: CreateTauriBridgeOptions = {}): Netca
     } catch (error) {
       return { success: false, error: error instanceof Error ? error.message : String(error) };
     }
+  };
+
+  /** Tray panel → main window actions carry a bare id. */
+  const subscribeMainWindowString = (event: string, cb: (value: string) => void): (() => void) => {
+    if (currentWindowLabel() !== MAIN_WINDOW_LABEL) return () => {};
+    return hub.subscribe<string>(event, (value) => {
+      if (typeof value === 'string') cb(value);
+    });
   };
 
   const flowPause = new FlowPauseCoordinator((sessionId, paused) =>
@@ -1097,6 +1119,80 @@ export function createTauriBridge(options: CreateTauriBridgeOptions = {}): Netca
         cb(event.payload);
       });
     },
+
+    // -----------------------------------------------------------------------
+    // Tray, tray panel, global hotkey, auto launch, system notifications
+    // (`commands/{tray,hotkey,autostart,notification}.rs`). Tray / panel
+    // actions are broadcast by Rust; only the main window acts on them
+    // (`focusSession` names its target window). `openMainWindow` / `quitApp`
+    // are in the Windows section above.
+    // -----------------------------------------------------------------------
+    registerGlobalHotkey: (hotkey) =>
+      invoke<BridgeResult<'registerGlobalHotkey'>>('hotkey_register', { hotkey }),
+    unregisterGlobalHotkey: () => invoke<BridgeResult<'unregisterGlobalHotkey'>>('hotkey_unregister'),
+    getGlobalHotkeyStatus: () => invoke<BridgeResult<'getGlobalHotkeyStatus'>>('hotkey_status'),
+    setCloseToTray: (enabled) =>
+      invoke<BridgeResult<'setCloseToTray'>>('tray_set_close_to_tray', { enabled: enabled === true }),
+    isCloseToTray: () => invoke<BridgeResult<'isCloseToTray'>>('tray_is_close_to_tray'),
+    setShowTrayIcon: (enabled) =>
+      invoke<BridgeResult<'setShowTrayIcon'>>('tray_set_show_icon', { enabled: enabled === true }),
+    isShowTrayIcon: () => invoke<BridgeResult<'isShowTrayIcon'>>('tray_is_show_icon'),
+    getAutoLaunch: () => invoke<BridgeResult<'getAutoLaunch'>>('autostart_get'),
+    setAutoLaunch: (enabled) =>
+      invoke<BridgeResult<'setAutoLaunch'>>('autostart_set', { enabled: enabled === true }),
+    updateTrayMenuData: (data) =>
+      invoke<BridgeResult<'updateTrayMenuData'>>('tray_update_menu_data', { payload: data ?? {} }),
+    onTrayFocusSession: (cb) => {
+      const label = currentWindowLabel();
+      return hub.subscribe<TrayFocusSessionEvent>(TAURI_EVENTS.trayFocusSession, (event) => {
+        if (event?.label === label && typeof event.sessionId === 'string') cb(event.sessionId);
+      });
+    },
+    onTrayTogglePortForward: (cb) => {
+      if (currentWindowLabel() !== MAIN_WINDOW_LABEL) return () => {};
+      const offToggle = hub.subscribe<TrayTogglePortForwardEvent>(TAURI_EVENTS.trayTogglePortForward, (event) => {
+        if (typeof event?.ruleId === 'string') cb(event.ruleId, event.start === true);
+      });
+      const offStart = hub.subscribe<string>(TAURI_EVENTS.trayPanelStartPortForward, (ruleId) => {
+        if (typeof ruleId === 'string') cb(ruleId, true);
+      });
+      return () => {
+        offToggle();
+        offStart();
+      };
+    },
+    onTrayPanelJumpToSession: (cb) => subscribeMainWindowString(TAURI_EVENTS.trayPanelJumpToSession, cb),
+    onTrayPanelConnectToHost: (cb) => subscribeMainWindowString(TAURI_EVENTS.trayPanelConnectToHost, cb),
+    onTrayPanelCloseSession: (cb) => subscribeMainWindowString(TAURI_EVENTS.trayPanelCloseSession, cb),
+    hideTrayPanel: () => invoke<BridgeResult<'hideTrayPanel'>>('tray_panel_hide'),
+    jumpToSessionFromTrayPanel: (sessionId) =>
+      invoke<BridgeResult<'jumpToSessionFromTrayPanel'>>('tray_panel_jump_to_session', { sessionId }),
+    connectToHostFromTrayPanel: (hostId) =>
+      invoke<BridgeResult<'connectToHostFromTrayPanel'>>('tray_panel_connect_to_host', { hostId }),
+    startPortForwardFromTrayPanel: (ruleId) =>
+      invoke<BridgeResult<'startPortForwardFromTrayPanel'>>('tray_panel_start_port_forward', { ruleId }),
+    closeSessionFromTrayPanel: (sessionId) =>
+      invoke<BridgeResult<'closeSessionFromTrayPanel'>>('tray_panel_close_session', { sessionId }),
+    onTrayPanelRefresh: (cb) => hub.subscribe<unknown>(TAURI_EVENTS.trayPanelRefresh, () => cb()),
+    onTrayPanelMenuData: (cb) => {
+      // Rust pushes the data when the panel opens, possibly before this
+      // listener exists (Electron's preload replays its buffer for the same
+      // reason): read the current data once unless a push already arrived.
+      let pushed = false;
+      const off = hub.subscribe<TrayMenuData>(TAURI_EVENTS.trayPanelMenuData, (data) => {
+        pushed = true;
+        if (data) cb(data);
+      });
+      invoke<TrayMenuData>('tray_get_menu_data').then(
+        (data) => {
+          if (!pushed && data) cb(data);
+        },
+        (error) => warn('tray_get_menu_data failed', error),
+      );
+      return off;
+    },
+    showSystemNotification: (payload) =>
+      invoke<BridgeResult<'showSystemNotification'>>('notification_show', { payload: payload ?? {} }),
 
     // -----------------------------------------------------------------------
     // App

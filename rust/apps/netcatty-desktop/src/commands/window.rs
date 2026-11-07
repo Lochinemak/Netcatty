@@ -78,6 +78,10 @@ fn internal(err: impl std::fmt::Display) -> CoreError {
 ///   app quits instead of lingering without a visible window;
 /// * fullscreen transitions are reported to the window's renderer.
 pub fn on_window_event<R: Runtime>(window: &tauri::Window<R>, event: &WindowEvent) {
+    // Close-to-tray and the tray panel (`tray.rs`).
+    if super::tray::on_window_event(window, event) {
+        return;
+    }
     let label = window.label().to_owned();
     match event {
         WindowEvent::CloseRequested { api, .. } if label == SETTINGS_LABEL => {
@@ -217,7 +221,9 @@ pub fn window_close_settings<R: Runtime>(app: AppHandle<R>, window: WebviewWindo
 /// Renderer finished its first render: show a window created hidden.
 #[tauri::command]
 pub fn window_renderer_ready<R: Runtime>(window: WebviewWindow<R>) {
-    if !window.is_visible().unwrap_or(true) {
+    // Tray panel: only when a show is pending; main: not during a hidden launch.
+    let may_show = super::tray::renderer_ready_may_show(&window);
+    if may_show && !window.is_visible().unwrap_or(true) {
         show_and_focus(&window);
     }
 }
@@ -280,6 +286,7 @@ pub fn window_open_main<R: Runtime>(app: AppHandle<R>) -> bool {
     match app.get_webview_window(MAIN_LABEL) {
         Some(main) => {
             show_and_focus(&main);
+            super::tray::main_window_shown(&app);
             true
         }
         None => false,
