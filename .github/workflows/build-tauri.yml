@@ -138,21 +138,67 @@ jobs:
           node scripts/patch-xterm-image-iip-type.cjs
           node scripts/patch-xterm-webgl-atlas.cjs
 
+      - name: Fetch bundled mosh-client and et
+        # Same MoshCatty / et releases the Electron build bundles. Best
+        # effort: without them the app uses mosh-client / et from PATH.
+        continue-on-error: true
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          MOSH_BIN_RELEASE: ${{ vars.MOSH_BIN_RELEASE || '' }}
+          ET_BIN_RELEASE: ${{ vars.ET_BIN_RELEASE || '' }}
+          # Upstream's binary repo, also when this workflow runs in a fork.
+          ET_BIN_OWNER: binaricat
+        run: |
+          case "${{ matrix.target }}" in
+            *-apple-darwin) platform=darwin; arch=universal ;;
+            x86_64-pc-windows-msvc) platform=win32; arch=x64 ;;
+            x86_64-unknown-linux-gnu) platform=linux; arch=x64 ;;
+            aarch64-unknown-linux-gnu) platform=linux; arch=arm64 ;;
+            *) echo "no bundled clients for ${{ matrix.target }}"; exit 0 ;;
+          esac
+          node scripts/fetch-mosh-binaries.cjs --platform="$platform" --arch="$arch" --resolve-release \
+            || echo "::warning::bundled mosh-client unavailable for $platform-$arch"
+          node scripts/fetch-et-binaries.cjs --platform="$platform" --arch="$arch" --resolve-release \
+            || echo "::warning::bundled et unavailable for $platform-$arch"
+
       - name: Write CI Tauri config
         shell: bash
         run: |
           # Tag builds take the version from the tag; other builds keep the
           # version in tauri.conf.json. macOS bundles are ad-hoc signed so
           # Apple Silicon reports an unidentified developer instead of a
-          # "damaged" app.
+          # "damaged" app. Fetched mosh-client / et binaries are bundled as
+          # resources (<resource_dir>/mosh/, <resource_dir>/et/), the layout
+          # the backend looks up first.
           version=""
           if [[ "$GITHUB_REF" =~ $STRICT_VERSION_REF_RE ]]; then
             version="${GITHUB_REF_NAME#v}"
           fi
-          VERSION="$version" node -e '
+          case "${{ matrix.target }}" in
+            *-apple-darwin) client_dir=darwin-universal; exe="" ;;
+            x86_64-pc-windows-msvc) client_dir=win32-x64; exe=".exe" ;;
+            x86_64-unknown-linux-gnu) client_dir=linux-x64; exe="" ;;
+            aarch64-unknown-linux-gnu) client_dir=linux-arm64; exe="" ;;
+            *) client_dir=""; exe="" ;;
+          esac
+          VERSION="$version" CLIENT_DIR="$client_dir" EXE="$exe" node -e '
             const fs = require("node:fs");
+            const path = require("node:path");
             const conf = { bundle: { macOS: { signingIdentity: "-" } } };
             if (process.env.VERSION) conf.version = process.env.VERSION;
+            const resources = {};
+            const dir = process.env.CLIENT_DIR;
+            const exe = process.env.EXE;
+            if (dir) {
+              for (const [tool, name] of [["mosh", "mosh-client"], ["et", "et"]]) {
+                const file = path.posix.join("resources", tool, dir, name + exe);
+                if (fs.existsSync(file)) resources[`../../../${file}`] = `${tool}/${name}${exe}`;
+              }
+              const dlls = path.posix.join("resources", "et", dir, `et-${dir}-dlls`);
+              if (exe && fs.existsSync(dlls)) resources[`../../../${dlls}/`] = `et/et-${dir}-dlls/`;
+            }
+            if (Object.keys(resources).length > 0) conf.bundle.resources = resources;
             fs.writeFileSync(process.argv[1], JSON.stringify(conf, null, 2));
             console.log(JSON.stringify(conf));
           ' "$APP_DIR/tauri.ci.conf.json"

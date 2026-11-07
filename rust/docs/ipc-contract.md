@@ -39,7 +39,7 @@ renderer does not change.
 | `session_test_connection` | `payload: SshSessionOptions` | `{ sessionId }` | Connect + auth + disconnect. Prompts fire like a real start. |
 | `session_cancel_test_connection` | `sessionId` | `{ success, error? }` | |
 | `session_start_local` | `payload: LocalSessionOptions` | `{ sessionId }` | |
-| `session_write` | `payload: WriteToSessionPayload` | `void` | `data` is UTF-8 text (encoded to the session charset before it is sent), or base64 when `binary`. `lineDelayMs` (clamped to 2000 ms) paces multi-line writes line by line; the command resolves immediately and the remaining lines are written in the background. |
+| `session_write` | `payload: WriteToSessionPayload` | `void` | `data` is UTF-8 text (encoded to the session charset before it is sent), or base64 when `binary`. `lineDelayMs` (clamped to 2000 ms) paces multi-line writes line by line; the command resolves immediately and the remaining lines are written in the background. `automated: false` input cancels telnet / serial auto-login; `serialEraseChar` (serial only) expands a single Backspace into one per encoded byte of that character. |
 | `session_resize` | `payload: { sessionId, cols, rows }` | `void` | |
 | `session_interrupt` | `sessionId` | `void` | Sends `0x03`. |
 | `session_set_flow_paused` | `sessionId, paused` | `void` | Pauses the output pump. Output is buffered (up to 4 MiB; beyond that it is dropped with a warning) and flushed as one `netcatty:data` on resume. |
@@ -56,10 +56,58 @@ Events:
 
 | Event | Payload |
 | --- | --- |
-| `netcatty:data` | `{ sessionId, data: string }` — output decoded with the session charset (`utf-8` default, `gb18030` (+ `gbk`/`gb2312`/`cp936`), `big5`, `shift_jis`, `euc-kr`, `latin1`/`iso-8859-1`; unknown labels → `utf-8`). Streaming decoder: multi-byte sequences split across chunks are handled. Bursts are coalesced (up to 256 KiB per event). |
+| `netcatty:data` | `{ sessionId, data: string, meta? }` — `meta` is `{ moshHandshake?, moshHandshakeRequiresUserInput? }` on Mosh bootstrap output (absent otherwise). Output decoded with the session charset (`utf-8` default, `gb18030` (+ `gbk`/`gb2312`/`cp936`), `big5`, `shift_jis`, `euc-kr`, `latin1`/`iso-8859-1`; unknown labels → `utf-8`). Streaming decoder: multi-byte sequences split across chunks are handled. Bursts are coalesced (up to 256 KiB per event). |
 | `netcatty:exit` | `SessionExitEvent { sessionId, exitCode?, signal?, exitSignal?, error?, reason, remoteClosedWithoutExitStatus? }` — `reason: "exited"` when the backend ended (`"signaled"` with `exitSignal` when killed by a signal), `"closed"` after `session_close`. |
 | `netcatty:auth:failed` | `{ sessionId, error, hostname }` emitted before the start command rejects with `AUTH_FAILED`. |
 | `netcatty:chain:progress` | `ChainProgressEvent` per jump hop. |
+
+## Telnet, serial, Mosh and EternalTerminal
+
+These sessions live in the same registry as SSH / local sessions, so
+`session_write`, `session_resize`, `session_interrupt`,
+`session_set_flow_paused`, `session_close`, `netcatty:data` and the single
+`netcatty:exit` behave exactly as above. Start options are the renderer's
+objects (camelCase; unknown fields ignored); `sessionId` is honoured.
+Errors keep the Electron messages.
+
+| Command | Args | Returns | Notes |
+| --- | --- | --- | --- |
+| `telnet_start` | `payload: { sessionId?, hostname, port? = 23, username?, password?, cols?, rows?, charset?, label?, bootEpoch? }` | `{ sessionId }` | Resolves once TCP is connected. `TIMEOUT` `Connection timeout to <host>:<port>` after 10 s, `NETWORK` `Failed to connect: <reason>`. Telnet negotiation starts on the first IAC from the peer (raw TCP services pass through untouched): DO SGA, WILL TERMINAL-TYPE (`XTERM-256COLOR`), WILL NAWS; ECHO / SGA accepted, everything else refused. Input follows NVT newline rules (CR → CR LF) and doubles 0xFF once negotiation is active; `session_resize` sends NAWS when the peer enabled it. Peer close → exit `{ exitCode: 0, reason: "closed" }`, socket error → `{ exitCode: 1, error, reason: "error" }`. |
+| `telnet_get_echo_mode` | `sessionId` | `{ success: true, sessionId, remoteEcho, localEcho }` or `{ success: false, error: "Telnet echo mode unavailable" }` | Initial mode `remoteEcho: true, localEcho: false`. |
+| `serial_start` | `payload: { sessionId?, path, baudRate? = 115200, dataBits? = 8, stopBits? = 1, parity? = "none", flowControl? = "none", username?, password?, charset?, label?, bootEpoch? }` | `{ sessionId }` | Hardware ports and PTY devices; on Windows also local `\\.\pipe\name` consoles (elsewhere: `Windows named pipes are only supported on Windows`). Open failure → `IO` `Failed to open serial port: <reason>`. `stopBits: 1.5` opens with 2; `mark` / `space` parity are rejected. Exit: `{ exitCode: 0, reason: "closed" }` on hang-up, `{ exitCode: 1, error, reason: "error" }` on a read error. |
+| `serial_list_ports` | — | `[{ path, manufacturer, serialNumber, vendorId, productId, pnpId, type: "hardware" }]` | `vendorId` / `productId` are 4-digit lower-case hex, `pnpId` is always empty. Errors yield `[]`. |
+| `mosh_start` | `payload: { sessionId?, hostname, port? = 22, username?, password?, passphrase?, privateKey?, certificate?, authMethod?, requiresMfa?, identityFilePaths?, useSshAgent?, agentPublicKeys?, identityAgent?, identitiesOnly?, agentForwarding?, moshServerPath?, knownHosts?, verifyHostKeys?, env?, cols?, rows?, charset?, label?, bootEpoch? }` | `{ sessionId }` | Resolves once the bootstrap `ssh` runs in a PTY (`ssh -n -tt ... -- sh -c '...exec mosh-server new -s -c 256 -l LANG=...'`). Its output carries `meta.moshHandshake` (and `moshHandshakeRequiresUserInput` at prompts Netcatty does not answer); a saved passphrase / password is typed once; the `MOSH IP` / `MOSH CONNECT` lines are hidden. When ssh exits with a parsed key, `mosh-client <ip> <port>` (`MOSH_KEY`, `MOSH_NO_TERM_INIT=1`) replaces it in the same session and `netcatty:mosh:ready` fires; mosh-client exit → `reason: "exited"` (status 0) or `"error"`. No `MOSH CONNECT` → a hint line and exit `{ reason: "error", error: "Mosh SSH startup failed: no MOSH CONNECT from mosh-server (UDP client not started)" }`. Missing binaries: `Bundled mosh-client not found. ...` / `OpenSSH client not found. ...`. |
+| `et_start` | `payload`: as `mosh_start` plus `etPort? = 2022`, `jumpHosts?` (at most one), `legacyAlgorithms?` | `{ sessionId }` | Runs `et [-p port] [-f --ssh-socket <agent>] --ssh-option ... [--jumphost u@h --jport 2022] user@host` in a PTY with `ET_NO_TELEMETRY=1`. A private `et-ssh-home-<id>` directory under the app temp dir holds key / certificate files, an ssh `config` (comma-valued options, jump `Host` block, `Include` of the user and system config) and a PATH-fronted `ssh -F` wrapper; it is removed when the session ends. Saved passwords / passphrases are answered through `SSH_ASKPASS` pointing at the Netcatty executable itself (helper mode, see `src/askpass.rs`). Exit: `reason: "exited"` for status 0, else `"error"`. |
+| `session_notify_user_input` | `sessionId` | `void` | Line-mode "first keystroke" notification: cancels telnet / serial auto-login. Ignored for other sessions. |
+| `session_set_encoding` | `sessionId, encoding` | `{ ok, encoding }` | Any session: the pump switches its decoder before the next chunk and input is encoded with the new charset. `encoding` is the normalised label (`utf-8`, `gb18030`, `big5`, `shift_jis`, `euc-kr`, `latin1`, ...). `{ ok: false }` for unknown sessions. |
+
+Events:
+
+| Event | Payload |
+| --- | --- |
+| `netcatty:telnet:echo-mode` | `{ sessionId, remoteEcho, localEcho }` on every ECHO negotiation. |
+| `netcatty:telnet:auto-login-complete` | `{ sessionId, bootEpoch? }` — a command prompt appeared after the saved credentials were sent (telnet and serial). |
+| `netcatty:telnet:auto-login-cancelled` | `{ sessionId, bootEpoch? }` — the user typed first; serial sessions also report a stalled exchange (a password prompt with no saved password, or the 60 s window expiring at a login prompt). |
+| `netcatty:mosh:ready` | `{ sessionId, bootEpoch? }` — `mosh-client` replaced the bootstrap PTY. |
+
+Auto-login (telnet and serial, only with a saved username or password):
+answers one "Press RETURN" banner, sends the username at a login prompt
+(also `用户名` / `账号` / Kylin-style prompts without a colon) and the
+password at a password prompt, each once; a bare CR / LF from the user before
+any prompt is a console wake and does not cancel it. The detector gives up
+after 60 s.
+
+Client binaries: `mosh-client` and `et` are looked up in the bundled
+resources (`<resource_dir>/mosh/`, `<resource_dir>/et/`; in debug builds also
+`resources/<tool>/<platform-arch>/` of the repository, the Electron
+development layout), then on the session's `PATH`. `ssh` comes from `PATH`
+(Windows: also `%SystemRoot%\System32\OpenSSH\ssh.exe`).
+
+Not ported: ZMODEM / YMODEM (`onZmodemEvent`, `cancelZmodem`,
+`startZmodemDragDropUpload`, `onZmodemOverwriteRequest`,
+`respondZmodemOverwrite`, `sendSerialYmodem`, `receiveSerialYmodem` stay
+undefined), the Mosh / ET host-stats companion SSH connection, session
+logging for these sessions, and FIDO2 agent preparation for the external ssh.
 
 ## Remote desktop (VNC / RDP)
 
@@ -291,6 +339,10 @@ adapter (`window.__TAURI__.dialog`, `.clipboardManager`, `.opener`).
 | `onSessionData(id, cb)` / `onSessionExit(id, cb)` | listen `netcatty:data` / `netcatty:exit`, filter by `sessionId`; return unlisten |
 | `startRemoteDesktopSession(o, onEvent)` | `rdesktop_connect` with a `Channel`; binary messages are decoded into `frame` / `copyRect` events |
 | `sendRemoteDesktopInput(id, events)` / `closeRemoteDesktopSession(id)` | `rdesktop_input` (fire-and-forget) / `rdesktop_close` |
+| `startTelnetSession`, `startSerialSession`, `startMoshSession`, `startEtSession` | `telnet_start`, `serial_start`, `mosh_start`, `et_start` → `.sessionId` (protocol events subscribed first) |
+| `listSerialPorts()` / `getTelnetEchoMode(id)` | `serial_list_ports` / `telnet_get_echo_mode` |
+| `onTelnetEchoMode`, `onTelnetAutoLoginComplete`, `onTelnetAutoLoginCancelled`, `onMoshSessionReady` | listen `netcatty:telnet:echo-mode`, `netcatty:telnet:auto-login-complete`, `netcatty:telnet:auto-login-cancelled`, `netcatty:mosh:ready`, filtered by `sessionId` |
+| `notifySessionUserInput(id)` / `setSessionEncoding(id, enc)` | `session_notify_user_input` (fire-and-forget) / `session_set_encoding` |
 | `execCommand(o)` | `session_exec` |
 | `getSessionPwd`, `getSessionRemoteInfo` | `session_pwd`, `session_remote_info` |
 | `generateKeyPair`, `checkSshAgent`, `getDefaultKeys`, `readKnownHosts` | `ssh_*` |
@@ -315,6 +367,6 @@ adapter (`window.__TAURI__.dialog`, `.clipboardManager`, `.opener`).
 | `openExternal` | opener plugin |
 
 Bridge methods that have no Rust counterpart in this version (AI, plugins,
-MCP, Mosh/ET, FIDO, plugin sync providers, tray, auto-update, session logs,
+MCP, ZMODEM/YMODEM, FIDO, plugin sync providers, tray, auto-update, session logs,
 file watch, system manager) are left `undefined` on the adapter; the renderer already
 treats them as optional.

@@ -22,7 +22,10 @@ rust/
 │   ├── netcatty-localfs       local file browser operations, tree scans
 │   ├── netcatty-rdesktop      embedded remote desktops: VNC (vnc-rs) and RDP (IronRDP)
 │   ├── netcatty-store         JSON key/value store, OS-keychain credential cipher, vault backups
-│   └── netcatty-sync          cloud sync transports: GitHub, Google Drive, OneDrive, WebDAV, S3, OAuth callback
+│   ├── netcatty-sync          cloud sync transports: GitHub, Google Drive, OneDrive, WebDAV, S3, OAuth callback
+│   ├── netcatty-telnet        telnet framing / option negotiation, login-prompt auto-login (pure)
+│   ├── netcatty-serial        serial ports (serialport, no libudev), port listing, Windows named pipes
+│   └── netcatty-mosh          Mosh handshake sniffer + ssh/mosh-client command lines, ET invocation, askpass (pure)
 └── apps/
     └── netcatty-desktop       Tauri 2 app: commands, session registry, prompt broker, events
 ```
@@ -101,6 +104,17 @@ Implemented in Rust:
 * Port forwarding: local, remote, dynamic SOCKS5, with the authoritative
   runtime snapshot and status events the UI expects
 * Local terminals with shell discovery and cwd detection
+* Telnet sessions (lazy option negotiation, NAWS, echo-mode events, NVT
+  newlines, IAC escaping), serial sessions (hardware ports, PTY devices,
+  Windows named pipes, byte-oriented Backspace, port listing) and the shared
+  Username / Password auto-login with its renderer events
+* Mosh (system `ssh` bootstrap in a PTY, saved password typed, swap to
+  `mosh-client`, `netcatty:mosh:ready`) and EternalTerminal (`et` with a
+  private ssh config, `-F` wrapper and an askpass helper served by the
+  Netcatty executable). `mosh-client` / `et` come from the bundled resources
+  (`build-tauri.yml` fetches the same MoshCatty / et releases the Electron
+  build bundles) or, when absent, from `PATH`
+* Runtime charset switching for any terminal session (`setSessionEncoding`)
 * Local file browser operations and tree scans with progress
 * Embedded remote desktops (hosts with protocol `vnc` / `rdp`): the backend
   decodes the remote framebuffer and streams RGBA rectangles over a per-session
@@ -125,7 +139,8 @@ hides the features when they are absent):
 
 * AI bridge (chat streaming, SDK agents, MCP server), plugin runtime, external
   MCP controller
-* Mosh / EternalTerminal, telnet and serial sessions, ZMODEM/YMODEM
+* ZMODEM/YMODEM file transfer (terminal sessions and serial), the Mosh / ET
+  host-stats companion SSH connection
 * FIDO2 security keys and Windows Hello / app lock
 * Plugin-provided sync providers (they need the plugin runtime)
 * Tray, tray panel, global shortcuts, auto-launch, auto-update, deep links,
@@ -150,7 +165,9 @@ managed state and event emission through `tauri::test`'s mock runtime (no
 window): local shell start → write → `netcatty:data` → resize → close →
 exactly one `netcatty:exit`, the store and credential commands, local file
 commands including the raw-body / raw-response binary path, and shell
-discovery. The crate is generic over `tauri::Runtime` for this reason;
+discovery. Telnet runs against an in-process fake server (negotiation, NAWS,
+echo mode, auto-login, exit), serial over a pseudo-terminal pair, and Mosh /
+ET with fake `ssh` / `mosh-client` / `et` scripts on the session `PATH`. The crate is generic over `tauri::Runtime` for this reason;
 commands take `Ctx<'_, R>` (a thin `State<AppState<R>>` extractor).
 
 Note for packaging: `CredentialCipher::load_or_create` runs synchronously in
