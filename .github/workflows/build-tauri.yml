@@ -165,8 +165,10 @@ jobs:
       - name: Write CI Tauri config
         shell: bash
         run: |
-          # Tag builds take the version from the tag; other builds keep the
-          # version in tauri.conf.json. macOS bundles are ad-hoc signed so
+          # Tag builds take the version from the tag; other builds take the
+          # newest released vX.Y.Z tag (so the About page and update check
+          # match the latest release), falling back to tauri.conf.json.
+          # macOS bundles are ad-hoc signed so
           # Apple Silicon reports an unidentified developer instead of a
           # "damaged" app. Fetched mosh-client / et binaries are bundled as
           # resources (<resource_dir>/mosh/, <resource_dir>/et/), the layout
@@ -174,7 +176,13 @@ jobs:
           version=""
           if [[ "$GITHUB_REF" =~ $STRICT_VERSION_REF_RE ]]; then
             version="${GITHUB_REF_NAME#v}"
+          else
+            version="$(git ls-remote --tags --refs origin 'v*' \
+              | sed 's#.*refs/tags/v##' \
+              | grep -E '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$' \
+              | sort -t. -k1,1n -k2,2n -k3,3n | tail -n 1 || true)"
           fi
+          echo "bundle version: ${version:-<tauri.conf.json>}"
           case "${{ matrix.target }}" in
             *-apple-darwin) client_dir=darwin-universal; exe="" ;;
             x86_64-pc-windows-msvc) client_dir=win32-x64; exe=".exe" ;;
