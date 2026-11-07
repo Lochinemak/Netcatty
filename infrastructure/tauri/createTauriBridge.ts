@@ -781,6 +781,10 @@ export function createTauriBridge(options: CreateTauriBridgeOptions = {}): Netca
         sftpId, remotePath, fileName, encoding, transferId,
       }),
     confirmCloseBusy: (payload) => invoke<boolean>('dialog_confirm_close_busy', { payload }),
+    // `cp -ra` on the remote; `{ success: false }` makes the renderer fall
+    // back to its per-file copy.
+    sameHostCopyDirectory: (sftpId, sourcePath, targetPath) =>
+      invoke<BridgeResult<'sameHostCopyDirectory'>>('sftp_same_host_copy_dir', { sftpId, sourcePath, targetPath }),
 
     // -----------------------------------------------------------------------
     // Edit-and-sync: watch a downloaded temp file and upload saves

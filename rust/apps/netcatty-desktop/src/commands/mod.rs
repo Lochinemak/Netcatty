@@ -120,6 +120,7 @@ pub fn handler<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + 
         openwith::app_open_with_application,
         openwith::sftp_download_to_temp,
         openwith::dialog_confirm_close_busy,
+        openwith::sftp_same_host_copy_dir,
         session::session_start_ssh,
         session::session_test_connection,
         session::session_cancel_test_connection,

@@ -252,3 +252,66 @@ mod tests {
         assert!(!err.message.is_empty());
     }
 }
+
+// ---------------------------------------------------------------------------
+// Same-host directory copy (Electron: `transferBridge.sameHostCopyDirectory`)
+// ---------------------------------------------------------------------------
+
+/// POSIX single-quote a path for the remote shell.
+fn shell_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\\''"))
+}
+
+/// `mkdir -p target && cp -ra source/. target/` (copies the contents, so an
+/// existing target is merged rather than nested).
+fn same_host_copy_command(source: &str, target: &str) -> String {
+    let target = target.replace('\\', "/");
+    format!(
+        "mkdir -p {} && cp -ra {} {}",
+        shell_quote(&target),
+        shell_quote(&format!("{source}/.")),
+        shell_quote(&format!("{target}/")),
+    )
+}
+
+#[derive(Serialize)]
+pub struct CopyResult {
+    success: bool,
+}
+
+/// Copy a directory on the remote host with `cp`. Any failure (no exec
+/// channel, `cp` missing, non-zero exit) resolves `{ success: false }` and the
+/// renderer falls back to its per-file copy, exactly like Electron.
+#[tauri::command]
+pub async fn sftp_same_host_copy_dir<R: Runtime>(
+    state: Ctx<'_, R>,
+    sftp_id: String,
+    source_path: String,
+    target_path: String,
+) -> CmdResult<CopyResult> {
+    let Ok(client) = state.sftp_client(&sftp_id) else {
+        return Ok(CopyResult { success: false });
+    };
+    let command = same_host_copy_command(&source_path, &target_path);
+    let success = match client.connection.exec(&command, None).await {
+        Ok(output) => output.exit_code == Some(0),
+        Err(err) => {
+            tracing::debug!(%err, "same-host copy exec failed; falling back");
+            false
+        }
+    };
+    Ok(CopyResult { success })
+}
+
+#[cfg(test)]
+mod copy_tests {
+    use super::*;
+
+    #[test]
+    fn builds_a_quoted_copy_command() {
+        assert_eq!(
+            same_host_copy_command("/srv/it's", "/srv\\backup"),
+            "mkdir -p '/srv/backup' && cp -ra '/srv/it'\\''s/.' '/srv/backup/'"
+        );
+    }
+}

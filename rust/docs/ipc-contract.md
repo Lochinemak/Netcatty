@@ -345,6 +345,7 @@ tool-output store). The effective temp dir is the custom root when set, else
 | `app_open_with_application` | `filePath, appPath` | `true` once launched (`open -a` on macOS); rejects when the app cannot start |
 | `sftp_download_to_temp` | `sftpId, remotePath, fileName, encoding?, transferId` | `{ localPath, cancelled }`; progress on `netcatty:sftp:global-transfer` under `transferId`, partial file removed on error / cancel |
 | `dialog_confirm_close_busy` | `payload: { command, title?, message?, cancelLabel?, closeLabel? }` | `bool` (`true` only for Close) |
+| `sftp_same_host_copy_dir` | `sftpId, sourcePath, targetPath` | `{ success }` — `mkdir -p` + `cp -ra src/. dst/` over exec; `false` (any failure) makes the renderer copy file by file |
 
 ## File watch (edit and sync)
 
