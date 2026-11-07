@@ -23,6 +23,9 @@ netcatty-localfs = { workspace = true }
 netcatty-store = { workspace = true }
 netcatty-sync = { workspace = true }
 netcatty-rdesktop = { workspace = true }
+netcatty-telnet = { workspace = true }
+netcatty-serial = { workspace = true }
+netcatty-mosh = { workspace = true }
 tauri = { version = "2.12", features = [] }
 tauri-plugin-shell = "2.6"
 tauri-plugin-dialog = "2.8"
@@ -49,3 +52,4 @@ percent-encoding = "2.3"
 [dev-dependencies]
 tauri = { version = "2.12", features = ["test"] }
 tempfile = "3"
+serialport = { version = "4.7", default-features = false }

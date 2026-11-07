@@ -20,7 +20,10 @@
 
 use crate::decoder::{encode_input, StreamDecoder};
 use crate::events;
-use netcatty_core::ipc::{events as ev, ExitReason, SessionDataEvent, SessionExitEvent};
+use crate::stream::{InputMeta, SessionInput, StreamEvent, StreamExit, StreamTransport};
+use netcatty_core::ipc::{
+    events as ev, ExitReason, SessionDataEvent, SessionDataMeta, SessionExitEvent,
+};
 use netcatty_core::{CoreError, CoreResult};
 use netcatty_pty::{PtyEvent, PtySession};
 use netcatty_sftp::SftpClient;
@@ -46,6 +49,12 @@ pub enum SessionBackend {
     Local {
         pty: PtySession,
     },
+    /// Telnet / serial / Mosh / EternalTerminal: the transport owns its I/O
+    /// and streams output on `events` (see [`crate::stream`]).
+    Stream {
+        transport: Arc<dyn StreamTransport>,
+        events: mpsc::Receiver<StreamEvent>,
+    },
     /// Backend already torn down (entry is being removed).
     Closed,
 }
@@ -54,7 +63,7 @@ pub struct SessionEntry {
     pub session_id: String,
     pub host_id: Option<String>,
     pub label: String,
-    /// `ssh` | `local` | `telnet`.
+    /// `ssh` | `local` | `telnet` | `serial` | `mosh` | `et`.
     pub protocol: &'static str,
     pub backend: SessionBackend,
     /// Output decoder charset (`utf-8`, `gb18030`, ...).
@@ -72,6 +81,9 @@ pub struct SessionFlags {
     pub exit_emitted: AtomicBool,
     pub dropped_output: AtomicBool,
     pub wake: Notify,
+    /// Charset requested by `session_set_encoding`, applied by the pump
+    /// before it decodes the next chunk.
+    pub charset_change: parking_lot::Mutex<Option<String>>,
 }
 
 pub type SftpMap = Arc<dashmap::DashMap<String, Arc<SftpClient>>>;
@@ -105,16 +117,21 @@ impl<R: Runtime> Clone for SessionRegistry<R> {
 /// Unified backend event.
 enum Pumped {
     Data(bytes::Bytes),
+    /// Pre-decoded text with renderer hints (stream backends only).
+    Text(String, Option<SessionDataMeta>),
     Eof,
     Exit {
         code: Option<i32>,
         signal: Option<String>,
     },
+    /// Stream backend exit with explicit reason / error.
+    StreamExit(StreamExit),
 }
 
 enum Source {
     Ssh(mpsc::Receiver<ShellEvent>),
     Local(mpsc::Receiver<PtyEvent>),
+    Stream(mpsc::Receiver<StreamEvent>, Arc<dyn StreamTransport>),
 }
 
 impl Source {
@@ -122,6 +139,7 @@ impl Source {
         match self {
             Source::Ssh(rx) => rx.recv().await.map(Pumped::from),
             Source::Local(rx) => rx.recv().await.map(Pumped::from),
+            Source::Stream(rx, _) => rx.recv().await.map(Pumped::from),
         }
     }
 
@@ -129,6 +147,26 @@ impl Source {
         match self {
             Source::Ssh(rx) => rx.try_recv().map(Pumped::from),
             Source::Local(rx) => rx.try_recv().map(Pumped::from),
+            Source::Stream(rx, _) => rx.try_recv().map(Pumped::from),
+        }
+    }
+
+    /// Let a stream transport see decoded output (auto-login).
+    fn observe(&self, text: &str, charset: crate::decoder::Charset) {
+        if let Source::Stream(_, transport) = self {
+            if !text.is_empty() {
+                transport.observe_output(text, charset);
+            }
+        }
+    }
+}
+
+impl From<StreamEvent> for Pumped {
+    fn from(e: StreamEvent) -> Self {
+        match e {
+            StreamEvent::Data(b) => Pumped::Data(b),
+            StreamEvent::Text { text, meta } => Pumped::Text(text, meta),
+            StreamEvent::Exit(exit) => Pumped::StreamExit(exit),
         }
     }
 }
@@ -191,12 +229,17 @@ impl<R: Runtime> SessionRegistry<R> {
                 let (_tx, rx) = mpsc::channel(1);
                 Source::Local(std::mem::replace(&mut pty.events, rx))
             }
+            SessionBackend::Stream { transport, events } => {
+                let (_tx, rx) = mpsc::channel(1);
+                Source::Stream(std::mem::replace(events, rx), transport.clone())
+            }
             SessionBackend::Closed => {
                 tracing::warn!(session_id, "refusing to insert a closed session backend");
                 return;
             }
         };
         let decoder = StreamDecoder::new(Some(&entry.charset));
+        let charset = crate::decoder::resolve_charset(Some(&entry.charset));
         let flags = Arc::new(SessionFlags::default());
         if let Some(conn) = &entry.connection {
             self.shared
@@ -208,7 +251,7 @@ impl<R: Runtime> SessionRegistry<R> {
             .sessions
             .insert(session_id.clone(), Arc::new(Mutex::new(entry)));
         let shared = self.shared.clone();
-        tauri::async_runtime::spawn(pump(shared, session_id, source, decoder, flags));
+        tauri::async_runtime::spawn(pump(shared, session_id, source, decoder, charset, flags));
     }
 
     pub fn get(&self, session_id: &str) -> Option<Arc<Mutex<SessionEntry>>> {
@@ -255,8 +298,76 @@ impl<R: Runtime> SessionRegistry<R> {
         match &guard.backend {
             SessionBackend::Ssh { shell, .. } => shell.write(data).await.map_err(CoreError::from),
             SessionBackend::Local { pty } => pty.write(data).await.map_err(CoreError::from),
+            SessionBackend::Stream { transport, .. } => {
+                let transport = transport.clone();
+                let charset = crate::decoder::resolve_charset(Some(&guard.charset));
+                drop(guard);
+                transport
+                    .write_input(SessionInput::Bytes(data), &InputMeta::user(), charset)
+                    .await
+            }
             SessionBackend::Closed => Err(not_found(session_id)),
         }
+    }
+
+    /// Write renderer input with its `session_write` flags. SSH / local
+    /// sessions encode text with the session charset; stream transports
+    /// apply their protocol rules (and auto-login takeover detection).
+    pub async fn write_input(
+        &self,
+        session_id: &str,
+        input: SessionInput,
+        meta: &InputMeta,
+    ) -> CoreResult<()> {
+        let entry = self.get(session_id).ok_or_else(|| not_found(session_id))?;
+        let guard = entry.lock().await;
+        let charset = crate::decoder::resolve_charset(Some(&guard.charset));
+        if let SessionBackend::Stream { transport, .. } = &guard.backend {
+            let transport = transport.clone();
+            drop(guard);
+            return transport.write_input(input, meta, charset).await;
+        }
+        let data = match input {
+            SessionInput::Bytes(bytes) => bytes,
+            SessionInput::Text(text) => bytes::Bytes::from(encode_input(charset, &text)),
+        };
+        match &guard.backend {
+            SessionBackend::Ssh { shell, .. } => shell.write(data).await.map_err(CoreError::from),
+            SessionBackend::Local { pty } => pty.write(data).await.map_err(CoreError::from),
+            SessionBackend::Stream { .. } | SessionBackend::Closed => Err(not_found(session_id)),
+        }
+    }
+
+    /// Line-mode "user started typing" notification (auto-login takeover).
+    /// Unknown or non-stream sessions are ignored.
+    pub async fn notify_user_input(&self, session_id: &str) {
+        if let Some(transport) = self.transport_of(session_id).await {
+            transport.notify_user_input();
+        }
+    }
+
+    /// The stream transport of a live session.
+    pub async fn transport_of(&self, session_id: &str) -> Option<Arc<dyn StreamTransport>> {
+        let entry = self.get(session_id)?;
+        let guard = entry.lock().await;
+        match &guard.backend {
+            SessionBackend::Stream { transport, .. } => Some(transport.clone()),
+            _ => None,
+        }
+    }
+
+    /// Switch the output decoder / input encoder of a live session
+    /// (`setSessionEncoding`). Returns the normalised charset label.
+    pub async fn set_charset(&self, session_id: &str, label: &str) -> CoreResult<String> {
+        let entry = self.get(session_id).ok_or_else(|| not_found(session_id))?;
+        let normalized = crate::decoder::resolve_charset(Some(label))
+            .label()
+            .to_ascii_lowercase();
+        entry.lock().await.charset = normalized.clone();
+        if let Some(flags) = self.shared.flags.get(session_id) {
+            *flags.charset_change.lock() = Some(normalized.clone());
+        }
+        Ok(normalized)
     }
 
     /// Write text, encoding it with the session charset.
@@ -268,6 +379,17 @@ impl<R: Runtime> SessionRegistry<R> {
         match &guard.backend {
             SessionBackend::Ssh { shell, .. } => shell.write(data).await.map_err(CoreError::from),
             SessionBackend::Local { pty } => pty.write(data).await.map_err(CoreError::from),
+            SessionBackend::Stream { transport, .. } => {
+                let transport = transport.clone();
+                drop(guard);
+                transport
+                    .write_input(
+                        SessionInput::Text(text.to_string()),
+                        &InputMeta::automated(),
+                        charset,
+                    )
+                    .await
+            }
             SessionBackend::Closed => Err(not_found(session_id)),
         }
     }
@@ -278,6 +400,7 @@ impl<R: Runtime> SessionRegistry<R> {
         match &guard.backend {
             SessionBackend::Ssh { shell, .. } => shell.resize(cols, rows).map_err(CoreError::from),
             SessionBackend::Local { pty } => pty.resize(cols, rows).map_err(CoreError::from),
+            SessionBackend::Stream { transport, .. } => transport.resize(cols, rows),
             SessionBackend::Closed => Err(not_found(session_id)),
         }
     }
@@ -308,6 +431,7 @@ impl<R: Runtime> SessionRegistry<R> {
             match &guard.backend {
                 SessionBackend::Ssh { shell, .. } => shell.close(),
                 SessionBackend::Local { pty } => pty.kill(),
+                SessionBackend::Stream { transport, .. } => transport.close(),
                 SessionBackend::Closed => {}
             }
         }
@@ -388,6 +512,21 @@ fn deliver<R: Runtime>(
     text: &str,
     force: bool,
 ) {
+    deliver_with_meta(app, session_id, flags, pending, text, force, None);
+}
+
+/// [`deliver`] with renderer hints. A chunk carrying `meta` is emitted at
+/// once (together with anything buffered) so its hint stays attached.
+fn deliver_with_meta<R: Runtime>(
+    app: &AppHandle<R>,
+    session_id: &str,
+    flags: &SessionFlags,
+    pending: &mut String,
+    text: &str,
+    force: bool,
+    meta: Option<SessionDataMeta>,
+) {
+    let force = force || meta.is_some();
     if !force && flags.paused.load(Ordering::SeqCst) {
         if pending.len() + text.len() > PAUSE_BUFFER_LIMIT {
             if !flags.dropped_output.swap(true, Ordering::SeqCst) {
@@ -412,6 +551,7 @@ fn deliver<R: Runtime>(
         SessionDataEvent {
             session_id: session_id.to_string(),
             data,
+            meta,
         },
     );
 }
@@ -421,11 +561,13 @@ async fn pump<R: Runtime>(
     session_id: String,
     mut source: Source,
     mut decoder: StreamDecoder,
+    mut charset: crate::decoder::Charset,
     flags: Arc<SessionFlags>,
 ) {
     let mut pending = String::new();
     let mut raw: Vec<u8> = Vec::with_capacity(16 * 1024);
     let exit: (Option<i32>, Option<String>);
+    let mut stream_exit: Option<StreamExit> = None;
 
     loop {
         let event = tokio::select! {
@@ -446,16 +588,42 @@ async fn pump<R: Runtime>(
                 exit = (code, signal);
                 break;
             }
+            Some(Pumped::StreamExit(e)) => {
+                stream_exit = Some(e);
+                exit = (None, None);
+                break;
+            }
+            Some(Pumped::Text(text, meta)) => {
+                deliver_with_meta(
+                    &shared.app,
+                    &session_id,
+                    &flags,
+                    &mut pending,
+                    &text,
+                    false,
+                    meta,
+                );
+            }
             Some(Pumped::Data(first)) => {
                 raw.clear();
                 raw.extend_from_slice(&first);
                 let mut deferred_exit: Option<(Option<i32>, Option<String>)> = None;
+                let mut deferred_text: Option<(String, Option<SessionDataMeta>)> = None;
                 while raw.len() < COALESCE_LIMIT {
                     match source.try_recv() {
                         Ok(Pumped::Data(b)) => raw.extend_from_slice(&b),
                         Ok(Pumped::Eof) => {}
                         Ok(Pumped::Exit { code, signal }) => {
                             deferred_exit = Some((code, signal));
+                            break;
+                        }
+                        Ok(Pumped::StreamExit(e)) => {
+                            stream_exit = Some(e);
+                            deferred_exit = Some((None, None));
+                            break;
+                        }
+                        Ok(Pumped::Text(text, meta)) => {
+                            deferred_text = Some((text, meta));
                             break;
                         }
                         Err(TryRecvError::Empty) => break,
@@ -465,8 +633,28 @@ async fn pump<R: Runtime>(
                         }
                     }
                 }
+                if let Some(label) = flags.charset_change.lock().take() {
+                    // Flush the old decoder's partial state with the old
+                    // charset, then decode new bytes with the new one.
+                    let tail = decoder.decode(&[], true);
+                    deliver(&shared.app, &session_id, &flags, &mut pending, &tail, false);
+                    decoder = StreamDecoder::new(Some(&label));
+                    charset = crate::decoder::resolve_charset(Some(&label));
+                }
                 let text = decoder.decode(&raw, false);
+                source.observe(&text, charset);
                 deliver(&shared.app, &session_id, &flags, &mut pending, &text, false);
+                if let Some((text, meta)) = deferred_text {
+                    deliver_with_meta(
+                        &shared.app,
+                        &session_id,
+                        &flags,
+                        &mut pending,
+                        &text,
+                        false,
+                        meta,
+                    );
+                }
                 if let Some(e) = deferred_exit {
                     exit = e;
                     break;
@@ -480,15 +668,42 @@ async fn pump<R: Runtime>(
     deliver(&shared.app, &session_id, &flags, &mut pending, &tail, true);
 
     if !flags.exit_emitted.swap(true, Ordering::SeqCst) {
-        let (code, signal) = exit;
-        let mut event = SessionExitEvent::exited(&session_id, code);
-        if let Some(sig) = signal {
-            event.exit_signal = Some(sig);
-            event.reason = ExitReason::Signaled;
-        }
+        let event = match stream_exit {
+            Some(stream) => stream_exit_event(&session_id, stream),
+            None => {
+                let (code, signal) = exit;
+                let mut event = SessionExitEvent::exited(&session_id, code);
+                if let Some(sig) = signal {
+                    event.exit_signal = Some(sig);
+                    event.reason = ExitReason::Signaled;
+                }
+                event
+            }
+        };
         events::emit(&shared.app, ev::SESSION_EXIT, event);
     }
     shared.remove_and_release(&session_id).await;
+}
+
+/// `netcatty:exit` of a stream backend. A numeric signal goes to `signal`
+/// (node-pty reports numbers), a named one to `exitSignal`.
+pub(crate) fn stream_exit_event(session_id: &str, exit: StreamExit) -> SessionExitEvent {
+    let (signal, exit_signal) = match exit.signal {
+        Some(sig) => match sig.parse::<i32>() {
+            Ok(n) => (Some(n), None),
+            Err(_) => (None, Some(sig)),
+        },
+        None => (None, None),
+    };
+    SessionExitEvent {
+        session_id: session_id.to_string(),
+        exit_code: exit.exit_code,
+        signal,
+        exit_signal,
+        error: exit.error,
+        reason: exit.reason,
+        remote_closed_without_exit_status: None,
+    }
 }
 
 /// Split terminal input into per-line writes for paced (`lineDelayMs`)

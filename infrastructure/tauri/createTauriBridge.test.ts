@@ -383,7 +383,7 @@ test('plugin-backed methods go through invoke("plugin:…") when no plugin globa
   await bridge.openExternal!('https://example.com');
   assert.deepEqual(lastInvoke(fake, 'plugin:opener|open_url').args, { url: 'https://example.com', with: undefined });
   // No Rust counterpart: stays undefined rather than faking success.
-  assert.equal(bridge.startMoshSession, undefined);
+  assert.equal(bridge.cancelZmodem, undefined);
   assert.equal(bridge.checkForUpdate, undefined);
 });
 
@@ -732,4 +732,111 @@ test('a failed pause reports the error and leaves no lease behind', async () => 
   assert.deepEqual(calls, [true, true]);
   await coordinator.release('s1', leaseId, false);
   assert.deepEqual(calls, [true, true, false]);
+});
+
+// ---------------------------------------------------------------------------
+// Telnet, serial, Mosh and EternalTerminal sessions
+// ---------------------------------------------------------------------------
+
+test('protocol session starts map to their commands after the protocol events are subscribed', async () => {
+  const { fake, bridge } = setup();
+  for (const cmd of ['telnet_start', 'serial_start', 'mosh_start', 'et_start']) {
+    fake.respond(cmd, () => ({ sessionId: `${cmd}-id` }));
+  }
+
+  assert.equal(await bridge.startTelnetSession!({ hostname: 'router', port: 23, username: 'admin', cols: 80 }), 'telnet_start-id');
+  assert.deepEqual(lastInvoke(fake, 'telnet_start').args, {
+    payload: { hostname: 'router', port: 23, username: 'admin', cols: 80 },
+  });
+  assert.equal(await bridge.startSerialSession!({ path: '/dev/ttyUSB0', baudRate: 9600 }), 'serial_start-id');
+  assert.deepEqual(lastInvoke(fake, 'serial_start').args, { payload: { path: '/dev/ttyUSB0', baudRate: 9600 } });
+  assert.equal(await bridge.startMoshSession!({ hostname: 'h', username: 'u' }), 'mosh_start-id');
+  assert.equal(await bridge.startEtSession!({ hostname: 'h', etPort: 2022 }), 'et_start-id');
+  assert.deepEqual(lastInvoke(fake, 'et_start').args, { payload: { hostname: 'h', etPort: 2022 } });
+
+  for (const event of [
+    'netcatty:telnet:echo-mode',
+    'netcatty:telnet:auto-login-complete',
+    'netcatty:telnet:auto-login-cancelled',
+    'netcatty:mosh:ready',
+  ]) {
+    assert.equal(fake.listenerCount(event), 1, `${event} subscribed`);
+  }
+});
+
+test('listSerialPorts, getTelnetEchoMode and setSessionEncoding return the backend result', async () => {
+  const { fake, bridge } = setup();
+  const ports = [{ path: '/dev/ttyUSB0', manufacturer: 'FTDI', serialNumber: 'A1', vendorId: '0403', productId: '6001', pnpId: '', type: 'hardware' }];
+  fake.respond('serial_list_ports', () => ports);
+  fake.respond('telnet_get_echo_mode', () => ({ success: true, sessionId: 't1', remoteEcho: true, localEcho: false }));
+  fake.respond('session_set_encoding', () => ({ ok: true, encoding: 'gb18030' }));
+
+  assert.deepEqual(await bridge.listSerialPorts!(), ports);
+  assert.deepEqual(await bridge.getTelnetEchoMode!('t1'), { success: true, sessionId: 't1', remoteEcho: true, localEcho: false });
+  assert.deepEqual(lastInvoke(fake, 'telnet_get_echo_mode').args, { sessionId: 't1' });
+  assert.deepEqual(await bridge.setSessionEncoding!('t1', 'GBK'), { ok: true, encoding: 'gb18030' });
+  assert.deepEqual(lastInvoke(fake, 'session_set_encoding').args, { sessionId: 't1', encoding: 'GBK' });
+});
+
+test('protocol events are filtered per session', async () => {
+  const { fake, bridge } = setup();
+  await flush();
+
+  const echo: unknown[] = [];
+  const complete: unknown[] = [];
+  const cancelled: unknown[] = [];
+  const ready: unknown[] = [];
+  const offEcho = bridge.onTelnetEchoMode!('a', (evt) => echo.push(evt));
+  bridge.onTelnetAutoLoginComplete!('a', (evt) => complete.push(evt));
+  bridge.onTelnetAutoLoginCancelled!('a', (evt) => cancelled.push(evt));
+  bridge.onMoshSessionReady!('a', (evt) => ready.push(evt));
+
+  fake.emit('netcatty:telnet:echo-mode', { sessionId: 'b', remoteEcho: false, localEcho: true });
+  fake.emit('netcatty:telnet:echo-mode', { sessionId: 'a', remoteEcho: true, localEcho: false });
+  fake.emit('netcatty:telnet:auto-login-complete', { sessionId: 'a', bootEpoch: 3 });
+  fake.emit('netcatty:telnet:auto-login-cancelled', { sessionId: 'b' });
+  fake.emit('netcatty:telnet:auto-login-cancelled', { sessionId: 'a' });
+  fake.emit('netcatty:mosh:ready', { sessionId: 'a', bootEpoch: 1 });
+
+  assert.deepEqual(echo, [{ sessionId: 'a', remoteEcho: true, localEcho: false }]);
+  assert.deepEqual(complete, [{ sessionId: 'a', bootEpoch: 3 }]);
+  assert.deepEqual(cancelled, [{ sessionId: 'a' }]);
+  assert.deepEqual(ready, [{ sessionId: 'a', bootEpoch: 1 }]);
+
+  offEcho();
+  fake.emit('netcatty:telnet:echo-mode', { sessionId: 'a', remoteEcho: false, localEcho: false });
+  assert.equal(echo.length, 1);
+});
+
+test('session data meta (Mosh handshake) reaches onSessionData callbacks', async () => {
+  const { fake, bridge } = setup();
+  await flush();
+  const received: Array<[string, unknown]> = [];
+  bridge.onSessionData('m', (data, meta) => received.push([data, meta]));
+  fake.emit('netcatty:data', { sessionId: 'm', data: 'password: ', meta: { moshHandshake: true, moshHandshakeRequiresUserInput: true } });
+  fake.emit('netcatty:data', { sessionId: 'm', data: '$ ' });
+  assert.deepEqual(received, [
+    ['password: ', { moshHandshake: true, moshHandshakeRequiresUserInput: true }],
+    ['$ ', undefined],
+  ]);
+});
+
+test('serial writes carry serialEraseChar and notifySessionUserInput is fire-and-forget', async () => {
+  const { fake, bridge } = setup();
+  bridge.writeToSession('s1', '\x7f', { serialEraseChar: '中' });
+  bridge.notifySessionUserInput!('s1');
+  await flush();
+  assert.deepEqual(lastInvoke(fake, 'session_write').args, {
+    payload: {
+      sessionId: 's1',
+      data: '\x7f',
+      binary: false,
+      automated: false,
+      sensitive: false,
+      pasteRequestId: undefined,
+      serialEraseChar: '中',
+      lineDelayMs: undefined,
+    },
+  });
+  assert.deepEqual(lastInvoke(fake, 'session_notify_user_input').args, { sessionId: 's1' });
 });

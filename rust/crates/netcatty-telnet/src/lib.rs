@@ -16,8 +16,7 @@ pub mod protocol;
 
 pub use autologin::{
     is_auto_login_wake_input, is_command_prompt, is_continue_prompt, is_password_prompt,
-    is_terminal_report_sequence, is_username_prompt, AutoLogin, AutoLoginAction,
-    AutoLoginOptions,
+    is_terminal_report_sequence, is_username_prompt, AutoLogin, AutoLoginAction, AutoLoginOptions,
 };
 pub use protocol::{
     escape_iac, normalize_nvt_newlines, EchoMode, Incoming, Negotiator, NegotiatorOutput, Parser,

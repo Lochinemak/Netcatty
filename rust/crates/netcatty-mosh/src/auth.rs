@@ -139,7 +139,11 @@ pub fn discover_identity_paths(ssh_dir: &Path) -> Vec<PathBuf> {
         .filter(|p| names.iter().any(|n| n == *p))
         .map(|p| p.to_string())
         .collect();
-    ordered.extend(names.into_iter().filter(|n| !PREFERRED.contains(&n.as_str())));
+    ordered.extend(
+        names
+            .into_iter()
+            .filter(|n| !PREFERRED.contains(&n.as_str())),
+    );
     ordered.into_iter().map(|n| ssh_dir.join(n)).collect()
 }
 
@@ -426,7 +430,9 @@ pub(crate) mod tests {
         let plan = plan_mosh_ssh_args(&auth, &mut files, &[], None, false).unwrap();
         let opts = opt_values(&plan.ssh_args);
         assert!(opts.contains(&"PubkeyAuthentication=no".to_string()));
-        assert!(opts.contains(&"PreferredAuthentications=password,keyboard-interactive".to_string()));
+        assert!(
+            opts.contains(&"PreferredAuthentications=password,keyboard-interactive".to_string())
+        );
         assert!(opts.contains(&"StrictHostKeyChecking=ask".to_string()));
         assert!(files.written.is_empty());
     }
@@ -486,16 +492,24 @@ pub(crate) mod tests {
             PathBuf::from("/home/alice/.ssh/id_ed25519"),
             PathBuf::from("/home/alice/.ssh/work"),
         ];
-        let plan =
-            plan_mosh_ssh_args(&auth, &mut FakeFiles::default(), &defaults, Some(&home), false)
-                .unwrap();
+        let plan = plan_mosh_ssh_args(
+            &auth,
+            &mut FakeFiles::default(),
+            &defaults,
+            Some(&home),
+            false,
+        )
+        .unwrap();
         let ids: Vec<&String> = plan
             .ssh_args
             .windows(2)
             .filter(|w| w[0] == "-i")
             .map(|w| &w[1])
             .collect();
-        assert_eq!(ids, vec!["/home/alice/.ssh/work", "/home/alice/.ssh/id_ed25519"]);
+        assert_eq!(
+            ids,
+            vec!["/home/alice/.ssh/work", "/home/alice/.ssh/id_ed25519"]
+        );
         assert_eq!(
             plan.identity_file_paths,
             vec!["/home/alice/.ssh/work", "/home/alice/.ssh/id_ed25519"]

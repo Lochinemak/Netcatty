@@ -108,7 +108,12 @@ pub fn find_on_path(name: &str, path_override: Option<&str>) -> Option<PathBuf> 
     let exts: Vec<String> = if cfg!(windows) {
         let pathext = std::env::var("PATHEXT").unwrap_or_else(|_| ".EXE;.CMD;.BAT;.COM".into());
         std::iter::once(String::new())
-            .chain(pathext.split(';').filter(|e| !e.is_empty()).map(str::to_string))
+            .chain(
+                pathext
+                    .split(';')
+                    .filter(|e| !e.is_empty())
+                    .map(str::to_string),
+            )
             .collect()
     } else {
         vec![String::new()]
@@ -172,7 +177,10 @@ mod tests {
             Some(Path::new("/App/Resources")),
             Some(Path::new("/src/netcatty")),
         );
-        assert_eq!(c[0], Path::new("/App/Resources/mosh").join(Client::Mosh.exe()));
+        assert_eq!(
+            c[0],
+            Path::new("/App/Resources/mosh").join(Client::Mosh.exe())
+        );
         assert!(c[1].starts_with("/src/netcatty/resources/mosh"));
         assert!(c[1].to_string_lossy().contains(&dev_platform_dir()));
         let c = bundled_candidates(Client::Et, Some(Path::new("/R")), None);
@@ -193,7 +201,10 @@ mod tests {
             std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
         }
         let path = bin.to_string_lossy().into_owned();
-        assert_eq!(find_on_path("mosh-client", Some(&path)), Some(bin.join("mosh-client")));
+        assert_eq!(
+            find_on_path("mosh-client", Some(&path)),
+            Some(bin.join("mosh-client"))
+        );
         assert_eq!(
             resolve_client(Client::Mosh, Some(&dir.join("res")), None, Some(&path)),
             Some(res.join("mosh-client"))
@@ -204,8 +215,11 @@ mod tests {
         );
         assert_eq!(resolve_client(Client::Et, None, None, Some(&path)), None);
         // Not executable → ignored.
-        std::fs::set_permissions(bin.join("mosh-client"), std::fs::Permissions::from_mode(0o644))
-            .unwrap();
+        std::fs::set_permissions(
+            bin.join("mosh-client"),
+            std::fs::Permissions::from_mode(0o644),
+        )
+        .unwrap();
         assert_eq!(find_on_path("mosh-client", Some(&path)), None);
         std::fs::remove_dir_all(&dir).unwrap();
     }

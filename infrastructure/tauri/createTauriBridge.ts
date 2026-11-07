@@ -50,6 +50,17 @@ export const TAURI_EVENTS = {
   cloudSyncPasswordAvailable: 'netcatty:cloudsync:password-available',
 } as const;
 
+/**
+ * Events of telnet / serial / Mosh / EternalTerminal sessions (see the
+ * "Telnet, serial, Mosh and EternalTerminal" section of the IPC contract).
+ */
+export const TERMINAL_PROTOCOL_EVENTS = {
+  telnetEchoMode: 'netcatty:telnet:echo-mode',
+  telnetAutoLoginComplete: 'netcatty:telnet:auto-login-complete',
+  telnetAutoLoginCancelled: 'netcatty:telnet:auto-login-cancelled',
+  moshReady: 'netcatty:mosh:ready',
+} as const;
+
 /** Terminal output kept per session until a display listener attaches (JS string length). */
 export const SESSION_BACKLOG_MAX_CHARS = 2 * 1024 * 1024;
 
@@ -103,7 +114,8 @@ interface StartSessionResult { sessionId: string }
 interface OpenSftpResult { sftpId: string; homeDir?: string; reusedConnection?: boolean }
 interface SuccessResult { success: boolean; error?: string }
 
-interface SessionDataEvent { sessionId: string; data: string }
+interface SessionDataEvent { sessionId: string; data: string; meta?: SessionDataMeta }
+type SessionDataMeta = Parameters<SessionDataCallback>[1];
 interface SessionExitEvent {
   sessionId: string;
   exitCode?: number;
@@ -424,7 +436,7 @@ class SessionEventRouter {
     if (!listeners || listeners.size === 0) return;
     for (const cb of Array.from(listeners)) {
       try {
-        cb(event.data);
+        cb(event.data, event.meta);
       } catch (error) {
         warn('session data callback failed', error);
       }
@@ -496,6 +508,10 @@ export function createTauriBridge(options: CreateTauriBridgeOptions = {}): Netca
     hub.ensure(TAURI_EVENTS.authFailed),
   ]).then(() => undefined);
 
+  const protocolEventsReady = Promise.all(
+    Object.values(TERMINAL_PROTOCOL_EVENTS).map((event) => hub.ensure(event)),
+  ).then(() => undefined);
+
   const startSession = async (command: string, payload: Record<string, unknown>): Promise<string> => {
     await sessionEventsReady;
     const result = await invoke<StartSessionResult>(command, { payload });
@@ -549,6 +565,8 @@ export function createTauriBridge(options: CreateTauriBridgeOptions = {}): Netca
           automated: writeOptions?.automated === true,
           sensitive: writeOptions?.sensitive === true,
           pasteRequestId: typeof writeOptions?.pasteRequestId === 'string' ? writeOptions.pasteRequestId : undefined,
+          // Serial Backspace expansion; only sent when set.
+          ...(typeof writeOptions?.serialEraseChar === 'string' ? { serialEraseChar: writeOptions.serialEraseChar } : {}),
           lineDelayMs: Number.isFinite(lineDelayMs) && lineDelayMs > 0 ? lineDelayMs : undefined,
         },
       }));
@@ -671,6 +689,46 @@ export function createTauriBridge(options: CreateTauriBridgeOptions = {}): Netca
       const text = knownHostsToText(hosts);
       return text.length > 0 ? text : null;
     },
+
+    // -----------------------------------------------------------------------
+    // Telnet, serial, Mosh and EternalTerminal sessions. They share the
+    // session commands above (write / resize / close / flow pause); these are
+    // the start commands and protocol events. The protocol events are
+    // subscribed before the start command resolves so an early echo-mode /
+    // auto-login / Mosh-ready event cannot be missed.
+    // -----------------------------------------------------------------------
+    startTelnetSession: async (telnetOptions) => {
+      await protocolEventsReady;
+      return startSession('telnet_start', { ...telnetOptions });
+    },
+    startSerialSession: async (serialOptions) => {
+      await protocolEventsReady;
+      return startSession('serial_start', { ...serialOptions });
+    },
+    listSerialPorts: () => invoke<BridgeResult<'listSerialPorts'>>('serial_list_ports'),
+    startMoshSession: async (moshOptions) => {
+      await protocolEventsReady;
+      return startSession('mosh_start', { ...moshOptions });
+    },
+    startEtSession: async (etOptions) => {
+      await protocolEventsReady;
+      return startSession('et_start', { ...etOptions });
+    },
+    onTelnetEchoMode: (sessionId, cb) =>
+      subscribeFiltered(TERMINAL_PROTOCOL_EVENTS.telnetEchoMode, sessionId, cb),
+    getTelnetEchoMode: (sessionId) =>
+      invoke<BridgeResult<'getTelnetEchoMode'>>('telnet_get_echo_mode', { sessionId }),
+    onTelnetAutoLoginComplete: (sessionId, cb) =>
+      subscribeFiltered(TERMINAL_PROTOCOL_EVENTS.telnetAutoLoginComplete, sessionId, cb),
+    onTelnetAutoLoginCancelled: (sessionId, cb) =>
+      subscribeFiltered(TERMINAL_PROTOCOL_EVENTS.telnetAutoLoginCancelled, sessionId, cb),
+    onMoshSessionReady: (sessionId, cb) =>
+      subscribeFiltered(TERMINAL_PROTOCOL_EVENTS.moshReady, sessionId, cb),
+    notifySessionUserInput: (sessionId) => {
+      fireAndForget('session_notify_user_input', invoke<void>('session_notify_user_input', { sessionId }));
+    },
+    setSessionEncoding: (sessionId, encoding) =>
+      invoke<BridgeResult<'setSessionEncoding'>>('session_set_encoding', { sessionId, encoding }),
 
     // -----------------------------------------------------------------------
     // SSH prompts

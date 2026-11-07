@@ -428,8 +428,7 @@ impl Negotiator {
                 if option == opt::ECHO && was_enabled {
                     out.push(NegotiatorOutput::LocalEcho(false));
                 }
-                if !acknowledges_our_request
-                    && (was_enabled || self.pending_will.contains(&option))
+                if !acknowledges_our_request && (was_enabled || self.pending_will.contains(&option))
                 {
                     send(&mut out, WONT);
                 }
@@ -682,7 +681,10 @@ mod tests {
     #[test]
     fn parser_unescapes_iac_iac() {
         let mut p = Parser::new();
-        assert_eq!(data_of(&p.feed(&[0x61, IAC, IAC, 0x62])), vec![0x61, 0xff, 0x62]);
+        assert_eq!(
+            data_of(&p.feed(&[0x61, IAC, IAC, 0x62])),
+            vec![0x61, 0xff, 0x62]
+        );
     }
 
     #[test]
@@ -696,7 +698,11 @@ mod tests {
     #[test]
     fn parser_complete_subnegotiation() {
         let mut p = Parser::new();
-        let ev = p.feed(&cat(&[&[IAC, SB, opt::TERMINAL_TYPE, 0], b"XTERM", &[IAC, SE]]));
+        let ev = p.feed(&cat(&[
+            &[IAC, SB, opt::TERMINAL_TYPE, 0],
+            b"XTERM",
+            &[IAC, SE],
+        ]));
         assert!(data_of(&ev).is_empty());
         assert_eq!(
             subnegs_of(&ev),
@@ -737,7 +743,11 @@ mod tests {
     #[test]
     fn parser_keeps_unterminated_subnegotiation() {
         let mut p = Parser::new();
-        let mut events = p.feed(&cat(&[b"prefix", &[IAC, SB, opt::TERMINAL_TYPE, 0], b"XTE"]));
+        let mut events = p.feed(&cat(&[
+            b"prefix",
+            &[IAC, SB, opt::TERMINAL_TYPE, 0],
+            b"XTE",
+        ]));
         assert_eq!(data_of(&events), b"prefix");
         assert!(subnegs_of(&events).is_empty());
         events.extend(p.feed(&cat(&[b"RM-256COLOR", &[IAC, SE], b" tail"])));

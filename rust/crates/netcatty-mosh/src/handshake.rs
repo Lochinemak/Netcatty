@@ -608,7 +608,8 @@ mod tests {
             parse_mosh_connect("Welcome\r\nMOSH CONNECT 60001 ABCDEFGHIJKLMNOPQRSTUV==\r\n"),
             Some((60001, KEY.into()))
         );
-        let (port, key) = parse_mosh_connect("MOSH CONNECT 60005 abcdefghijklmnopqrstuv\n").unwrap();
+        let (port, key) =
+            parse_mosh_connect("MOSH CONNECT 60005 abcdefghijklmnopqrstuv\n").unwrap();
         assert_eq!(port, 60005);
         assert_eq!(key.len(), 22);
         assert_eq!(
@@ -641,9 +642,7 @@ mod tests {
             Some((60031, KEY.into()))
         );
         assert_eq!(
-            parse_mosh_connect(
-                "MOSH CONNECT 60033 ABCDEFGHIJKLMNOPQRSTUV\x1b[?25h=\x1b[?25h=\r\n"
-            ),
+            parse_mosh_connect("MOSH CONNECT 60033 ABCDEFGHIJKLMNOPQRSTUV\x1b[?25h=\x1b[?25h=\r\n"),
             Some((60033, KEY.into()))
         );
         assert_eq!(
@@ -711,7 +710,10 @@ mod tests {
     #[test]
     fn sniffer_flush_recovers_unterminated_connect() {
         let mut s = MoshConnectSniffer::new();
-        assert!(s.feed("MOSH CONNECT 60003 ABCDEFGHIJKLMNOPQRSTUV==").parsed.is_none());
+        assert!(s
+            .feed("MOSH CONNECT 60003 ABCDEFGHIJKLMNOPQRSTUV==")
+            .parsed
+            .is_none());
         let r = s.flush();
         assert_eq!(r.parsed, connect(60003, KEY, None));
         assert!(!r.visible.contains("MOSH CONNECT"));
@@ -912,8 +914,12 @@ mod tests {
         assert!(build_mosh_client_args("", "h", 1)
             .unwrap_err()
             .contains("moshClientPath"));
-        assert!(build_mosh_client_args("x", "", 1).unwrap_err().contains("host"));
-        assert!(build_mosh_client_args("x", "h", 0).unwrap_err().contains("port"));
+        assert!(build_mosh_client_args("x", "", 1)
+            .unwrap_err()
+            .contains("host"));
+        assert!(build_mosh_client_args("x", "h", 0)
+            .unwrap_err()
+            .contains("port"));
 
         let mut base = HashMap::new();
         base.insert("LANG".to_string(), "C".to_string());
@@ -926,7 +932,10 @@ mod tests {
         let env = build_mosh_client_env(&HashMap::new(), "k", Some("C"), None);
         assert_eq!(env["TERM"], "xterm-256color");
         let mut stale = HashMap::new();
-        stale.insert("MOSH_FALLBACK_HOST".to_string(), "stale.example".to_string());
+        stale.insert(
+            "MOSH_FALLBACK_HOST".to_string(),
+            "stale.example".to_string(),
+        );
         let env = build_mosh_client_env(&stale, "k", Some("C"), None);
         assert!(!env.contains_key("MOSH_FALLBACK_HOST"));
     }
@@ -936,7 +945,10 @@ mod tests {
         assert_eq!(resolve_lang_from_charset(None), "en_US.UTF-8");
         assert_eq!(resolve_lang_from_charset(Some("UTF-8")), "en_US.UTF-8");
         assert_eq!(resolve_lang_from_charset(Some("utf8")), "en_US.UTF-8");
-        assert_eq!(resolve_lang_from_charset(Some("zh_CN.GB18030")), "zh_CN.GB18030");
+        assert_eq!(
+            resolve_lang_from_charset(Some("zh_CN.GB18030")),
+            "zh_CN.GB18030"
+        );
         let mut env = HashMap::new();
         for k in ["LANG", "LANGUAGE", "LC_ALL", "LC_CTYPE", "PATH"] {
             env.insert(k.to_string(), "x".to_string());

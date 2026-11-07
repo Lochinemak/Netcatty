@@ -256,6 +256,17 @@ impl SerialSession {
             .map_err(|_| SerialError::Closed)
     }
 
+    /// Non-blocking write for callers outside an async context (queued
+    /// behind earlier writes).
+    pub fn try_write(&self, data: Bytes) -> Result<(), SerialError> {
+        if self.closed.load(Ordering::SeqCst) {
+            return Err(SerialError::Closed);
+        }
+        self.write_tx
+            .try_send(data)
+            .map_err(|_| SerialError::Closed)
+    }
+
     /// Close the port; no further events are delivered.
     pub fn close(&self) {
         self.closed.store(true, Ordering::SeqCst);
@@ -311,8 +322,7 @@ async fn open_port(path: String, settings: LineSettings) -> Result<SerialSession
 
 #[cfg(any(unix, windows))]
 fn is_enotty(err: &serialport::Error) -> bool {
-    err.description.contains("Not a typewriter")
-        || err.description.contains("Inappropriate ioctl")
+    err.description.contains("Not a typewriter") || err.description.contains("Inappropriate ioctl")
 }
 
 #[cfg(not(any(unix, windows)))]
@@ -588,12 +598,18 @@ mod tests {
         // Ported from terminalBridge.serialBackspace.test.cjs: one Backspace
         // per encoded byte of the erase character.
         let utf8_len = |s: &str| s.len();
-        assert_eq!(expand_backspace("\x7f", Some("中"), utf8_len), "\x7f\x7f\x7f");
+        assert_eq!(
+            expand_backspace("\x7f", Some("中"), utf8_len),
+            "\x7f\x7f\x7f"
+        );
         assert_eq!(expand_backspace("\x08", Some("中"), |_| 2), "\x08\x08");
         assert_eq!(expand_backspace("\x7f", Some("a"), utf8_len), "\x7f");
         assert_eq!(expand_backspace("\x7f", None, utf8_len), "\x7f");
         assert_eq!(expand_backspace("\x7f", Some(""), utf8_len), "\x7f");
-        assert_eq!(expand_backspace("\x7f\x7f", Some("中"), utf8_len), "\x7f\x7f");
+        assert_eq!(
+            expand_backspace("\x7f\x7f", Some("中"), utf8_len),
+            "\x7f\x7f"
+        );
         assert_eq!(expand_backspace("x", Some("中"), utf8_len), "x");
     }
 

@@ -139,9 +139,9 @@ fn has_username_prompt_before_password(text: &str) -> bool {
     else {
         return false;
     };
-    lines[..last_password]
-        .iter()
-        .any(|line| !last_login_pattern().is_match(line) && username_prompt_pattern().is_match(line))
+    lines[..last_password].iter().any(|line| {
+        !last_login_pattern().is_match(line) && username_prompt_pattern().is_match(line)
+    })
 }
 
 /// Bare CR / LF used to wake a silent serial console before `login:` shows.
@@ -506,7 +506,11 @@ mod tests {
         feed(&mut al, &mut log, &["Username: ", "\r\nPassword: "]);
         assert_eq!(log.writes, vec!["admin\r", "secret\r"]);
         assert_eq!(log.complete, 0);
-        feed(&mut al, &mut log, &["\r\nWelcome\r\nrouter# ", "\r\nrouter# "]);
+        feed(
+            &mut al,
+            &mut log,
+            &["\r\nWelcome\r\nrouter# ", "\r\nrouter# "],
+        );
         assert_eq!(log.complete, 1);
     }
 
@@ -523,7 +527,11 @@ mod tests {
 
     #[test]
     fn password_ready_host_only_asks_username() {
-        let log = run(Some("admin"), Some("secret"), &["Username: ", "\r\nrouter# "]);
+        let log = run(
+            Some("admin"),
+            Some("secret"),
+            &["Username: ", "\r\nrouter# "],
+        );
         assert_eq!(log.writes, vec!["admin\r"]);
         assert_eq!(log.complete, 1);
     }
@@ -541,7 +549,12 @@ mod tests {
             vec!["line-password\r"]
         );
         assert_eq!(
-            run(Some(""), Some("line-password"), &["Username: ", "\r\nPassword: "]).writes,
+            run(
+                Some(""),
+                Some("line-password"),
+                &["Username: ", "\r\nPassword: "]
+            )
+            .writes,
             vec!["\r", "line-password\r"]
         );
         assert_eq!(
@@ -567,7 +580,11 @@ mod tests {
         let log = run(
             Some("admin"),
             Some("secret"),
-            &["Press RETURN to get started.", "Username: ", "\r\nPassword: "],
+            &[
+                "Press RETURN to get started.",
+                "Username: ",
+                "\r\nPassword: ",
+            ],
         );
         assert_eq!(log.writes, vec!["\r", "admin\r", "secret\r"]);
         let log = run(
@@ -746,7 +763,11 @@ mod tests {
     fn expiry_timer_reports_silent_rejection() {
         let mut al = AutoLogin::new(opts(Some("admin"), Some("secret")));
         let mut log = Log::default();
-        feed(&mut al, &mut log, &["Username: ", "\r\nPassword: ", "\r\nUsername: "]);
+        feed(
+            &mut al,
+            &mut log,
+            &["Username: ", "\r\nPassword: ", "\r\nUsername: "],
+        );
         assert!(al.expiry_deadline().is_some());
         assert_eq!(log.incomplete, 0);
         log.record(al.expire());
@@ -757,7 +778,11 @@ mod tests {
     fn expiry_after_completion_is_noop() {
         let mut al = AutoLogin::new(opts(Some("admin"), Some("secret")));
         let mut log = Log::default();
-        feed(&mut al, &mut log, &["Username: ", "\r\nPassword: ", "\r\nrouter# "]);
+        feed(
+            &mut al,
+            &mut log,
+            &["Username: ", "\r\nPassword: ", "\r\nrouter# "],
+        );
         assert_eq!(log.complete, 1);
         assert!(al.expiry_deadline().is_none());
         log.record(al.expire());

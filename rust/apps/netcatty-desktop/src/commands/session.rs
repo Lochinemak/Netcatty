@@ -4,6 +4,7 @@ use super::CmdResult;
 use crate::connect;
 use crate::sessions::{line_delay_ms, split_line_writes, SessionBackend, SessionEntry};
 use crate::state::Ctx;
+use crate::stream::{InputMeta, SessionInput};
 use base64::Engine;
 use netcatty_core::ipc::{
     DiscoveredShell, ExecCommandOptions, ExecResult, LocalSessionOptions, PathValidation,
@@ -269,6 +270,7 @@ pub async fn session_start_local<R: tauri::Runtime>(
         cols: payload.cols.unwrap_or(80),
         rows: payload.rows.unwrap_or(24),
         term: None,
+        ..Default::default()
     };
     let pty = PtySession::spawn(options).await?;
     let label = pty.shell.clone();
@@ -294,14 +296,29 @@ pub async fn session_write<R: tauri::Runtime>(
     state: Ctx<'_, R>,
     payload: WriteToSessionPayload,
 ) -> CmdResult<()> {
+    // Flags stream transports (telnet / serial) need: user input cancels
+    // auto-login, serial Backspace expansion.
+    let meta = InputMeta {
+        automated: payload.automated,
+        serial_erase_char: payload.serial_erase_char.clone(),
+    };
     match plan_write(&payload)? {
         WritePlan::Binary(bytes) => {
             state
                 .sessions
-                .write(&payload.session_id, bytes::Bytes::from(bytes))
+                .write_input(
+                    &payload.session_id,
+                    SessionInput::Bytes(bytes::Bytes::from(bytes)),
+                    &meta,
+                )
                 .await
         }
-        WritePlan::Text(text) => state.sessions.write_text(&payload.session_id, &text).await,
+        WritePlan::Text(text) => {
+            state
+                .sessions
+                .write_input(&payload.session_id, SessionInput::Text(text), &meta)
+                .await
+        }
         WritePlan::Paced { chunks, delay_ms } => {
             if !state.sessions.contains(&payload.session_id) {
                 return Err(CoreError::not_found(format!(
@@ -316,7 +333,11 @@ pub async fn session_write<R: tauri::Runtime>(
                     if index > 0 {
                         tokio::time::sleep(Duration::from_millis(delay_ms)).await;
                     }
-                    if registry.write_text(&session_id, chunk).await.is_err() {
+                    if registry
+                        .write_input(&session_id, SessionInput::Text(chunk.clone()), &meta)
+                        .await
+                        .is_err()
+                    {
                         break;
                     }
                 }
@@ -454,6 +475,11 @@ pub async fn session_pwd<R: tauri::Runtime>(
                 });
             }
             SessionBackend::Ssh { connection, .. } => connection.clone(),
+            SessionBackend::Stream { .. } => {
+                return Ok(PwdResult::fail(
+                    "Current directory is unavailable for this session",
+                ))
+            }
             SessionBackend::Closed => {
                 return Ok(PwdResult::fail("Session not found or not connected"))
             }

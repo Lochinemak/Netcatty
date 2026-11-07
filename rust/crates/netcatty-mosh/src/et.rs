@@ -19,7 +19,7 @@
 //! when verification is off.
 
 use crate::askpass::{
-    password_prompt_matchers, passphrase_prompt_matchers, to_json, Entry, ASKPASS_MAP_ENV,
+    passphrase_prompt_matchers, password_prompt_matchers, to_json, Entry, ASKPASS_MAP_ENV,
     ASKPASS_MARKER_ENV,
 };
 use crate::auth::{host_key_options, vault_pins_for, ExternalSshAuth};
@@ -198,9 +198,14 @@ pub fn plan_et(
             write_secure(&path, &(lines.join("\n") + "\n"), 0o600)?;
             Ok(Some(path))
         };
-        target_authoritative = pin_file(&auth.hostname, auth.port, "authoritative-target-known_hosts")?;
+        target_authoritative = pin_file(
+            &auth.hostname,
+            auth.port,
+            "authoritative-target-known_hosts",
+        )?;
         if let Some(jump) = jump_hosts.first() {
-            jump_authoritative = pin_file(&jump.hostname, jump.port, "authoritative-jump-known_hosts")?;
+            jump_authoritative =
+                pin_file(&jump.hostname, jump.port, "authoritative-jump-known_hosts")?;
         }
     } else {
         let path = file("empty-known_hosts");
@@ -208,7 +213,10 @@ pub fn plan_et(
         empty_known_hosts = Some(path);
     }
     if auth.verify_host_keys && target_authoritative.is_none() {
-        ssh_options.push(format!("UserKnownHostsFile={}", config_path(&known_hosts_path)));
+        ssh_options.push(format!(
+            "UserKnownHostsFile={}",
+            config_path(&known_hosts_path)
+        ));
     }
     ssh_options.extend(host_key_options(
         auth.verify_host_keys,
@@ -302,8 +310,11 @@ pub fn plan_et(
             &path,
         );
     }
-    let preferred =
-        et_preferred_authentications(auth.auth_method(), has_password, use_agent || !identity_paths.is_empty());
+    let preferred = et_preferred_authentications(
+        auth.auth_method(),
+        has_password,
+        use_agent || !identity_paths.is_empty(),
+    );
     if auth.auth_method() == "password" {
         ssh_options.push("PubkeyAuthentication=no".into());
     }
@@ -375,10 +386,19 @@ pub fn plan_et(
                 .identity_file_paths
                 .iter()
                 .filter(|p| !p.is_empty())
-                .map(|p| if jump_agent { public_selector(p) } else { p.clone() })
+                .map(|p| {
+                    if jump_agent {
+                        public_selector(p)
+                    } else {
+                        p.clone()
+                    }
+                })
                 .collect();
             for id in &ids {
-                jump_lines.push(format!("  IdentityFile {}", quote_config_path(Path::new(id))));
+                jump_lines.push(format!(
+                    "  IdentityFile {}",
+                    quote_config_path(Path::new(id))
+                ));
             }
             if !ids.is_empty() && (!jump_agent || jump.identities_only) {
                 jump_lines.push("  IdentitiesOnly yes".into());
@@ -618,12 +638,10 @@ mod tests {
         assert!(o.contains(&"Port=2200".to_string()));
         assert!(o.contains(&"PubkeyAuthentication=no".to_string()));
         assert!(o.iter().all(|v| !v.contains(',')), "{o:?}");
-        let config =
-            std::fs::read_to_string(dir.join("et-ssh-home-s1/.ssh/config")).unwrap();
+        let config = std::fs::read_to_string(dir.join("et-ssh-home-s1/.ssh/config")).unwrap();
         assert!(config.contains("PreferredAuthentications password,keyboard-interactive"));
         assert!(config.contains("Match all"));
-        let wrapper =
-            std::fs::read_to_string(dir.join("et-ssh-home-s1/.ssh/bin/ssh")).unwrap();
+        let wrapper = std::fs::read_to_string(dir.join("et-ssh-home-s1/.ssh/bin/ssh")).unwrap();
         assert!(wrapper.contains("'/usr/bin/ssh' -F"));
         let env: std::collections::HashMap<_, _> = plan.env.iter().cloned().collect();
         assert!(env["PATH"].ends_with(":/usr/bin"));
@@ -658,7 +676,9 @@ mod tests {
         assert!(!plan.args.contains(&"-p".to_string()));
         let o = opts(&plan);
         assert!(o.contains(&"StrictHostKeyChecking=no".to_string()));
-        assert!(o.iter().any(|v| v.starts_with("IdentityFile=") && v.ends_with("s_2-key")));
+        assert!(o
+            .iter()
+            .any(|v| v.starts_with("IdentityFile=") && v.ends_with("s_2-key")));
         assert!(o.contains(&"IdentitiesOnly=yes".to_string()));
         assert!(o.contains(&"PreferredAuthentications=publickey".to_string()));
         // Only comma-free options: no config file, no HOME override.
@@ -693,15 +713,21 @@ mod tests {
             password: Some("jpw".into()),
             ..Default::default()
         };
-        let plan = plan_et(&auth, None, &[jump.clone()], &env_in(&dir), "s3").unwrap();
+        let plan = plan_et(
+            &auth,
+            None,
+            std::slice::from_ref(&jump),
+            &env_in(&dir),
+            "s3",
+        )
+        .unwrap();
         let o = opts(&plan);
         assert!(o.iter().any(|v| v.starts_with("GlobalKnownHostsFile=")));
         assert!(o.contains(&"KnownHostsCommand=none".to_string()));
         let jump_idx = plan.args.iter().position(|a| a == "--jumphost").unwrap();
         assert_eq!(plan.args[jump_idx + 1], "me@bastion");
         assert_eq!(plan.args[jump_idx + 3], "2022");
-        let config =
-            std::fs::read_to_string(dir.join("et-ssh-home-s1/.ssh/config")).unwrap();
+        let config = std::fs::read_to_string(dir.join("et-ssh-home-s1/.ssh/config")).unwrap();
         assert!(config.starts_with("Host target\n  ProxyJump bastion\n"));
         assert!(config.contains("Host bastion\n  User me\n  Port 2222\n"));
         assert!(config.contains("  PubkeyAuthentication no"));
@@ -720,7 +746,10 @@ mod tests {
             et_preferred_authentications("auto", false, false),
             "publickey,password,keyboard-interactive"
         );
-        assert_eq!(et_preferred_authentications("key", false, true), "publickey");
+        assert_eq!(
+            et_preferred_authentications("key", false, true),
+            "publickey"
+        );
         assert_eq!(et_preferred_authentications("key", false, false), "");
     }
 }

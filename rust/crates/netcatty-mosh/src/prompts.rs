@@ -119,7 +119,10 @@ fn is_confirmed_shell_prompt(prompt: &str) -> bool {
     if prompt.is_empty() || is_sensitive_challenge(prompt) {
         return false;
     }
-    if prompt.chars().any(|c| "❯❮→➜➤⟩»›".contains(c) || ('\u{E000}'..='\u{F8FF}').contains(&c)) {
+    if prompt
+        .chars()
+        .any(|c| "❯❮→➜➤⟩»›".contains(c) || ('\u{E000}'..='\u{F8FF}').contains(&c))
+    {
         return true;
     }
     if prompt.ends_with(['$', '#', '%']) {
