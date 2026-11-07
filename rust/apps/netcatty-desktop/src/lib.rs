@@ -70,6 +70,11 @@ pub fn configure_with<R: tauri::Runtime>(
             app.manage(commands::tempdir::TempDirState::load(
                 &netcatty_store::AppPaths::resolve(),
             ));
+            // Tray (+ hidden auto-launch), global hotkey, autostart, notifications.
+            commands::tray::setup(app);
+            commands::hotkey::setup(app);
+            commands::autostart::setup(app);
+            commands::notification::setup(app);
             tracing::info!("netcatty-desktop started");
             Ok(())
         })
@@ -87,8 +92,9 @@ pub fn run() {
         &context.package_info().version.to_string(),
     ));
     configure(tauri::Builder::default())
-        .run(context)
-        .expect("error while running Netcatty");
+        .build(context)
+        .expect("error while building Netcatty")
+        .run(commands::tray::on_run_event);
 }
 
 fn init_tracing() {

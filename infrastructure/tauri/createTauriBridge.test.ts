@@ -908,3 +908,144 @@ test('previewTotp maps to totp_preview', async () => {
   assert.deepEqual(await bridge.previewTotp!({ text: 'otpauth://hotp/x' }), { ok: false, error: 'hotp' });
   assert.deepEqual(lastInvoke(fake, 'totp_preview').args, { payload: { text: 'otpauth://hotp/x' } });
 });
+
+// ---------------------------------------------------------------------------
+// Tray, tray panel, global hotkey, auto launch, system notifications
+// ---------------------------------------------------------------------------
+
+/** Pretend the bridge runs in the window labelled `label`. */
+const setWindowLabel = (label: string) => {
+  const win = (globalThis as unknown as { window: Record<string, unknown> }).window;
+  win.__TAURI_INTERNALS__ = { metadata: { currentWindow: { label } } };
+};
+
+test('hotkey, tray, auto-launch and notification methods map to their commands', async () => {
+  const { fake, bridge } = setup();
+  fake.respond('hotkey_register', () => ({ success: true, enabled: true, accelerator: 'Control+`' }));
+  fake.respond('hotkey_status', () => ({ enabled: true, hotkey: 'Ctrl + `' }));
+  fake.respond('tray_set_close_to_tray', (args) => ({ success: true, enabled: (args as { enabled: boolean }).enabled }));
+  fake.respond('autostart_get', () => ({ success: true, enabled: false, supported: true }));
+  fake.respond('notification_show', () => ({ shown: false, reason: 'focused' }));
+
+  assert.deepEqual(await bridge.registerGlobalHotkey!('Ctrl + `'), { success: true, enabled: true, accelerator: 'Control+`' });
+  assert.deepEqual(lastInvoke(fake, 'hotkey_register').args, { hotkey: 'Ctrl + `' });
+  assert.deepEqual(await bridge.getGlobalHotkeyStatus!(), { enabled: true, hotkey: 'Ctrl + `' });
+  await bridge.unregisterGlobalHotkey!();
+  assert.ok(fake.invokes.some((entry) => entry.cmd === 'hotkey_unregister'));
+
+  assert.deepEqual(await bridge.setCloseToTray!(true), { success: true, enabled: true });
+  await bridge.setShowTrayIcon!(false);
+  assert.deepEqual(lastInvoke(fake, 'tray_set_show_icon').args, { enabled: false });
+  await bridge.isCloseToTray!();
+  await bridge.isShowTrayIcon!();
+  assert.ok(fake.invokes.some((entry) => entry.cmd === 'tray_is_close_to_tray'));
+  assert.ok(fake.invokes.some((entry) => entry.cmd === 'tray_is_show_icon'));
+
+  assert.deepEqual(await bridge.getAutoLaunch!(), { success: true, enabled: false, supported: true });
+  await bridge.setAutoLaunch!(true);
+  assert.deepEqual(lastInvoke(fake, 'autostart_set').args, { enabled: true });
+
+  const data = { sessions: [{ id: 's1', label: 'web', hostLabel: 'Web', status: 'connected' as const }] };
+  await bridge.updateTrayMenuData!(data);
+  assert.deepEqual(lastInvoke(fake, 'tray_update_menu_data').args, { payload: data });
+
+  const notification = { title: 'Approval needed', body: 'Run ls?', sessionId: 's1', dedupeKey: 'k', whenUnfocused: true };
+  assert.deepEqual(await bridge.showSystemNotification!(notification), { shown: false, reason: 'focused' });
+  assert.deepEqual(lastInvoke(fake, 'notification_show').args, { payload: notification });
+});
+
+test('tray panel actions invoke the tray_panel commands', async () => {
+  const { fake, bridge } = setup();
+  fake.respond('tray_panel_start_port_forward', () => ({ success: false, error: 'Main window is not ready' }));
+
+  await bridge.hideTrayPanel!();
+  assert.ok(fake.invokes.some((entry) => entry.cmd === 'tray_panel_hide'));
+  await bridge.jumpToSessionFromTrayPanel!('s1');
+  assert.deepEqual(lastInvoke(fake, 'tray_panel_jump_to_session').args, { sessionId: 's1' });
+  await bridge.connectToHostFromTrayPanel!('h1');
+  assert.deepEqual(lastInvoke(fake, 'tray_panel_connect_to_host').args, { hostId: 'h1' });
+  await bridge.closeSessionFromTrayPanel!('s2');
+  assert.deepEqual(lastInvoke(fake, 'tray_panel_close_session').args, { sessionId: 's2' });
+  assert.deepEqual(await bridge.startPortForwardFromTrayPanel!('r1'), { success: false, error: 'Main window is not ready' });
+  assert.deepEqual(lastInvoke(fake, 'tray_panel_start_port_forward').args, { ruleId: 'r1' });
+});
+
+test('tray actions reach the main window only; focusSession follows its label', async () => {
+  const { fake, bridge } = setup();
+  const focused: string[] = [];
+  const toggles: Array<[string, boolean]> = [];
+  const jumps: string[] = [];
+  const connects: string[] = [];
+  const closes: string[] = [];
+  const offFocus = bridge.onTrayFocusSession!((id) => focused.push(id));
+  const offToggle = bridge.onTrayTogglePortForward!((id, start) => toggles.push([id, start]));
+  bridge.onTrayPanelJumpToSession!((id) => jumps.push(id));
+  bridge.onTrayPanelConnectToHost!((id) => connects.push(id));
+  bridge.onTrayPanelCloseSession!((id) => closes.push(id));
+  await flush();
+
+  fake.emit('netcatty:tray:focusSession', { sessionId: 's1', label: 'main' });
+  fake.emit('netcatty:tray:focusSession', { sessionId: 's2', label: 'settings' });
+  fake.emit('netcatty:tray:togglePortForward', { ruleId: 'r1', start: false });
+  fake.emit('netcatty:trayPanel:startPortForward', 'r2');
+  fake.emit('netcatty:trayPanel:jumpToSession', 's3');
+  fake.emit('netcatty:trayPanel:connectToHost', 'h1');
+  fake.emit('netcatty:trayPanel:closeSession', 's4');
+  assert.deepEqual(focused, ['s1']);
+  assert.deepEqual(toggles, [['r1', false], ['r2', true]]);
+  assert.deepEqual(jumps, ['s3']);
+  assert.deepEqual(connects, ['h1']);
+  assert.deepEqual(closes, ['s4']);
+
+  offToggle();
+  fake.emit('netcatty:trayPanel:startPortForward', 'r3');
+  assert.equal(toggles.length, 2);
+  offFocus();
+
+  // The tray panel window does not act on main-window actions.
+  setWindowLabel('tray-panel');
+  const panelJumps: string[] = [];
+  bridge.onTrayPanelJumpToSession!((id) => panelJumps.push(id));
+  bridge.onTrayTogglePortForward!(() => panelJumps.push('toggle'));
+  await flush();
+  fake.emit('netcatty:trayPanel:jumpToSession', 's5');
+  fake.emit('netcatty:trayPanel:startPortForward', 'r4');
+  assert.deepEqual(panelJumps, []);
+});
+
+test('tray panel menu data is read once on subscribe and then follows pushes', async () => {
+  const { fake, bridge } = setup();
+  setWindowLabel('tray-panel');
+  const current = { sessions: [], portForwardRules: [], hosts: [{ id: 'h1' }] };
+  fake.respond('tray_get_menu_data', () => current);
+  const received: unknown[] = [];
+  let refreshes = 0;
+  bridge.onTrayPanelMenuData!((data) => received.push(data));
+  bridge.onTrayPanelRefresh!(() => {
+    refreshes += 1;
+  });
+  await flush();
+  assert.deepEqual(received, [current]);
+
+  const pushed = { sessions: [{ id: 's1', label: 'a', hostLabel: 'A', status: 'connected' }], portForwardRules: [], hosts: [] };
+  fake.emit('netcatty:trayPanel:setMenuData', pushed);
+  fake.emit('netcatty:trayPanel:refresh', null);
+  assert.deepEqual(received, [current, pushed]);
+  assert.equal(refreshes, 1);
+});
+
+test('tray panel menu data skips the initial read when a push arrived first', async () => {
+  const { fake, bridge } = setup();
+  let release: (value: unknown) => void = () => {};
+  fake.respond('tray_get_menu_data', () => new Promise((resolve) => {
+    release = resolve;
+  }));
+  const received: unknown[] = [];
+  bridge.onTrayPanelMenuData!((data) => received.push(data));
+  await flush();
+  const pushed = { sessions: [], portForwardRules: [], hosts: [] };
+  fake.emit('netcatty:trayPanel:setMenuData', pushed);
+  release({ sessions: [], portForwardRules: [], hosts: [{ id: 'stale' }] });
+  await flush();
+  assert.deepEqual(received, [pushed]);
+});

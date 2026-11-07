@@ -128,6 +128,9 @@ Implemented in Rust:
   for cloud sync / OAuth (system / direct / custom), edit-and-sync file
   watches for files opened with external apps (temp download, application
   picker, open-with), busy-terminal close confirmation
+* Tray icon (native menu on Linux), tray panel window, close-to-tray,
+  global "Quake mode" hotkey, launch at login hidden to the tray
+  (`--hidden`), native notifications with click-to-focus
 * Tauri shell: dialogs, clipboard, opener, event fan-out
 
 Not yet ported (the renderer treats these bridge methods as optional and
@@ -138,8 +141,8 @@ hides the features when they are absent):
 * Mosh / EternalTerminal, telnet and serial sessions, ZMODEM/YMODEM
 * FIDO2 security keys and Windows Hello / app lock
 * Plugin-provided sync providers (they need the plugin runtime)
-* Tray, tray panel, global shortcuts, auto-launch, auto-update, deep links,
-  Explorer context menu
+* Auto-update, deep links, Explorer context menu, the macOS Dock menu
+  (saved hosts), per-variant tray icons (`appIconManager`)
 * Session logging, compressed folder upload,
   system manager (processes/tmux/docker/kubectl), monitor bridge
 * X11 forwarding is requested on the channel but no local X11 proxy is

@@ -9,11 +9,14 @@
 //!   `ArrayBuffer`; binary requests use `tauri::ipc::Request` raw bodies.
 
 pub mod app;
+pub mod autostart;
 pub mod clipboard;
 pub mod diagnostics;
 pub mod filewatch;
 pub mod forward;
+pub mod hotkey;
 pub mod localfs;
+pub mod notification;
 pub mod openwith;
 pub mod rdesktop;
 pub mod session;
@@ -24,6 +27,7 @@ pub mod sync;
 pub mod temp;
 pub mod tempdir;
 pub mod totp;
+pub mod tray;
 pub mod window;
 
 use netcatty_core::CoreError;
@@ -123,6 +127,24 @@ pub fn handler<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + 
         openwith::dialog_confirm_close_busy,
         openwith::sftp_same_host_copy_dir,
         totp::totp_preview,
+        // Tray, tray panel, global hotkey, autostart, notifications.
+        tray::tray_set_show_icon,
+        tray::tray_is_show_icon,
+        tray::tray_set_close_to_tray,
+        tray::tray_is_close_to_tray,
+        tray::tray_update_menu_data,
+        tray::tray_get_menu_data,
+        tray::tray_panel_hide,
+        tray::tray_panel_jump_to_session,
+        tray::tray_panel_connect_to_host,
+        tray::tray_panel_start_port_forward,
+        tray::tray_panel_close_session,
+        hotkey::hotkey_register,
+        hotkey::hotkey_unregister,
+        hotkey::hotkey_status,
+        autostart::autostart_get,
+        autostart::autostart_set,
+        notification::notification_show,
         session::session_start_ssh,
         session::session_test_connection,
         session::session_cancel_test_connection,

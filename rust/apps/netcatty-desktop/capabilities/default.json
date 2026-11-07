@@ -1,10 +1,11 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Capabilities for the Netcatty main and settings windows",
+  "description": "Capabilities for the Netcatty main, settings and tray panel windows",
   "windows": [
     "main",
-    "settings"
+    "settings",
+    "tray-panel"
   ],
   "permissions": [
     "core:default",
