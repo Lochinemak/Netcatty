@@ -15,9 +15,14 @@ import {
   EventHub,
   SessionDataBacklog,
   TauriBridgeError,
+  createChannel,
   invoke,
   invokeBinary,
 } from './tauriApi';
+import {
+  decodeRemoteDesktopBinaryMessage,
+  isRemoteDesktopControlEvent,
+} from '../../domain/remoteDesktop';
 import { pluginClipboard, pluginDialog, pluginOpener } from './plugins';
 import { cancelStagedUpload, stageUploadFile } from './uploadStaging';
 
@@ -198,6 +203,84 @@ const warn = (label: string, error: unknown): void => {
 const fireAndForget = (label: string, promise: Promise<unknown>): void => {
   promise.catch((error: unknown) => warn(`${label} failed`, error));
 };
+
+/**
+ * Decides when a session's output pump is paused. Two things can want it
+ * paused: the renderer's own backpressure (`setSessionFlowPaused`) and any
+ * number of short-lived leases (`acquireSessionFlowPauseLease`). The backend
+ * only knows one boolean, so the pump is paused while either holds and
+ * resumed when neither does; the command is sent only when that changes.
+ */
+export class FlowPauseCoordinator {
+  private readonly sessions = new Map<string, { explicit: boolean; leases: Set<string>; applied: boolean }>();
+
+  constructor(private readonly apply: (sessionId: string, paused: boolean) => Promise<void>) {}
+
+  private state(sessionId: string) {
+    let state = this.sessions.get(sessionId);
+    if (!state) {
+      state = { explicit: false, leases: new Set(), applied: false };
+      this.sessions.set(sessionId, state);
+    }
+    return state;
+  }
+
+  private sync(sessionId: string): Promise<void> {
+    const state = this.sessions.get(sessionId);
+    if (!state) return Promise.resolve();
+    const wanted = state.explicit || state.leases.size > 0;
+    if (!wanted && state.leases.size === 0) this.sessions.delete(sessionId);
+    if (wanted === state.applied) return Promise.resolve();
+    state.applied = wanted;
+    return this.apply(sessionId, wanted);
+  }
+
+  setExplicit(sessionId: string, paused: boolean): Promise<void> {
+    this.state(sessionId).explicit = paused;
+    return this.sync(sessionId);
+  }
+
+  /** Take a lease; resolves with its id once the pump is paused. */
+  async acquire(sessionId: string): Promise<string> {
+    const leaseId = generateId();
+    const state = this.state(sessionId);
+    state.leases.add(leaseId);
+    try {
+      await this.sync(sessionId);
+    } catch (error) {
+      // The pause never took effect: do not leave a lease (or a stale
+      // "applied" flag) behind that would block a later resume.
+      state.leases.delete(leaseId);
+      state.applied = false;
+      if (!state.explicit && state.leases.size === 0) this.sessions.delete(sessionId);
+      throw error;
+    }
+    return leaseId;
+  }
+
+  holds(sessionId: string, leaseId: string): boolean {
+    return this.sessions.get(sessionId)?.leases.has(leaseId) === true;
+  }
+
+  /**
+   * Give a lease back. With `keepPaused` the pump is left as it is (the
+   * session is being replaced and must not be resumed by a stale owner).
+   */
+  release(sessionId: string, leaseId: string, keepPaused: boolean): Promise<void> {
+    const state = this.sessions.get(sessionId);
+    if (!state?.leases.delete(leaseId)) return Promise.resolve();
+    if (keepPaused) {
+      if (!state.explicit && state.leases.size === 0) this.sessions.delete(sessionId);
+      return Promise.resolve();
+    }
+    return this.sync(sessionId);
+  }
+
+  /** Drop all bookkeeping of a closed session. */
+  forget(sessionId: string): void {
+    this.sessions.delete(sessionId);
+  }
+}
 
 const generateId = (): string => {
   const webCrypto = typeof crypto !== 'undefined' ? crypto : undefined;
@@ -442,6 +525,9 @@ export function createTauriBridge(options: CreateTauriBridgeOptions = {}): Netca
     }
   };
 
+  const flowPause = new FlowPauseCoordinator((sessionId, paused) =>
+    invoke<void>('session_set_flow_paused', { sessionId, paused }));
+
   const bridge: TauriBridgeShape = {
     // -----------------------------------------------------------------------
     // Sessions and terminal
@@ -478,11 +564,35 @@ export function createTauriBridge(options: CreateTauriBridgeOptions = {}): Netca
       fireAndForget('session_interrupt', invoke<void>('session_interrupt', { sessionId }));
     },
     setSessionFlowPaused: (sessionId, paused) => {
-      fireAndForget('session_set_flow_paused', invoke<void>('session_set_flow_paused', { sessionId, paused }));
+      fireAndForget('session_set_flow_paused', flowPause.setExplicit(sessionId, paused));
     },
     setSessionFlowPausedAndWait: async (sessionId, paused) => {
       try {
-        await invoke<void>('session_set_flow_paused', { sessionId, paused });
+        await flowPause.setExplicit(sessionId, paused);
+        return { success: true };
+      } catch (error) {
+        return { success: false, error: error instanceof Error ? error.message : String(error) };
+      }
+    },
+    // Pause leases: the terminal takes one around a resize while output is
+    // still being written, so the PTY is not resized under in-flight data.
+    acquireSessionFlowPauseLease: async (sessionId) => {
+      try {
+        return { success: true, leaseId: await flowPause.acquire(sessionId) };
+      } catch (error) {
+        return { success: false, error: error instanceof Error ? error.message : String(error) };
+      }
+    },
+    // `session_set_flow_paused` resolves once the output pump is paused, so a
+    // held lease is already drained on the backend side.
+    waitSessionFlowPauseLease: async (sessionId, leaseId) => (
+      flowPause.holds(sessionId, leaseId)
+        ? { success: true }
+        : { success: false, error: 'Unknown flow pause lease' }
+    ),
+    releaseSessionFlowPauseLease: async (sessionId, leaseId, releaseOptions) => {
+      try {
+        await flowPause.release(sessionId, leaseId, releaseOptions?.keepPaused === true);
         return { success: true };
       } catch (error) {
         return { success: false, error: error instanceof Error ? error.message : String(error) };
@@ -491,7 +601,36 @@ export function createTauriBridge(options: CreateTauriBridgeOptions = {}): Netca
     ackSessionFlow: (sessionId, bytes) => {
       fireAndForget('session_ack_flow', invoke<void>('session_ack_flow', { sessionId, bytes }));
     },
-    closeSession: (sessionId) => invoke<void>('session_close', { sessionId }),
+    closeSession: (sessionId) => {
+      flowPause.forget(sessionId);
+      return invoke<void>('session_close', { sessionId });
+    },
+
+    // -----------------------------------------------------------------------
+    // Remote desktop (VNC / RDP)
+    // -----------------------------------------------------------------------
+    startRemoteDesktopSession: async (desktopOptions, onEvent) => {
+      // Frames are binary messages, everything else is JSON; both arrive on
+      // the per-session channel in backend order.
+      const channel = createChannel<unknown>((message) => {
+        if (message instanceof ArrayBuffer) {
+          const frame = decodeRemoteDesktopBinaryMessage(message);
+          if (frame) onEvent(frame);
+          return;
+        }
+        if (isRemoteDesktopControlEvent(message)) onEvent(message);
+      });
+      const result = await invoke<StartSessionResult>('rdesktop_connect', {
+        payload: { ...desktopOptions },
+        onEvent: channel,
+      });
+      return result.sessionId;
+    },
+    sendRemoteDesktopInput: (sessionId, events) => {
+      if (events.length === 0) return;
+      fireAndForget('rdesktop_input', invoke<void>('rdesktop_input', { payload: { sessionId, events } }));
+    },
+    closeRemoteDesktopSession: (sessionId) => invoke<void>('rdesktop_close', { sessionId }),
 
     onSessionData: (sessionId, cb, dataOptions) =>
       sessions.onData(sessionId, cb, dataOptions?.replayBacklog === true),

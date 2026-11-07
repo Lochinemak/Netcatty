@@ -11,6 +11,7 @@
 pub mod app;
 pub mod forward;
 pub mod localfs;
+pub mod rdesktop;
 pub mod session;
 pub mod sftp;
 pub mod ssh;
@@ -83,6 +84,9 @@ pub fn handler<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + 
         session::local_get_default_shell,
         session::local_discover_shells,
         session::local_validate_path,
+        rdesktop::rdesktop_connect,
+        rdesktop::rdesktop_input,
+        rdesktop::rdesktop_close,
         ssh::ssh_generate_key_pair,
         ssh::ssh_check_agent,
         ssh::ssh_get_default_keys,

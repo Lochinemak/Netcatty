@@ -1,5 +1,6 @@
 import type { Host, TerminalSession } from "./models";
 import { isPluginHostProtocol } from "./pluginConnection";
+import { isRemoteDesktopProtocol } from "./remoteDesktop";
 
 export type SftpConnectedHostEntry = {
   host: Host;
@@ -31,7 +32,7 @@ const isReusableSftpSourceSession = (session: SftpPickerSessionFields): boolean 
   if (session.moshEnabled || session.etEnabled) return false;
   const protocol = session.protocol;
   if (protocol === "serial" || protocol === "local" || protocol === "telnet"
-    || isPluginHostProtocol(protocol)) return false;
+    || isPluginHostProtocol(protocol) || isRemoteDesktopProtocol(protocol)) return false;
   // Missing protocol defaults to SSH (same as host picker filtering).
   return true;
 };

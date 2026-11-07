@@ -2,8 +2,8 @@
 
 This directory holds the Rust rewrite of Netcatty's backend. The Electron main
 process (`electron/`) is replaced by a Tauri 2 application whose Rust side
-provides SSH, SFTP, port forwarding, local terminals, local filesystem access,
-persistence and credential encryption. The React renderer (`components/`,
+provides SSH, SFTP, port forwarding, local terminals, embedded VNC / RDP
+desktops, local filesystem access, persistence and credential encryption. The React renderer (`components/`,
 `application/`, `domain/`, `infrastructure/`) is reused unchanged: a small
 adapter (`infrastructure/tauri/`) implements the existing `window.netcatty`
 bridge contract on top of Tauri commands and events.
@@ -20,6 +20,7 @@ rust/
 │   ├── netcatty-forward       local / remote / dynamic (SOCKS5) port forwarding
 │   ├── netcatty-pty           local shells (portable-pty) + shell discovery
 │   ├── netcatty-localfs       local file browser operations, tree scans
+│   ├── netcatty-rdesktop      embedded remote desktops: VNC (vnc-rs) and RDP (IronRDP)
 │   ├── netcatty-store         JSON key/value store, OS-keychain credential cipher, vault backups
 │   └── netcatty-sync          cloud sync transports: GitHub, Google Drive, OneDrive, WebDAV, S3, OAuth callback
 └── apps/
@@ -101,6 +102,16 @@ Implemented in Rust:
   runtime snapshot and status events the UI expects
 * Local terminals with shell discovery and cwd detection
 * Local file browser operations and tree scans with progress
+* Embedded remote desktops (hosts with protocol `vnc` / `rdp`): the backend
+  decodes the remote framebuffer and streams RGBA rectangles over a per-session
+  Tauri channel; the renderer paints them on a canvas inside a regular pane, so
+  desktops split and move between tabs like terminals.
+  * VNC: no-auth and VNC password authentication; Raw / CopyRect / ZRLE
+    encodings; pointer, wheel and keyboard input; remote → local clipboard text.
+  * RDP: TLS + NLA (CredSSP with NTLM) logon with user name, password and
+    optional domain; keyboard (scancodes, Unicode fallback), mouse and wheel.
+    The server certificate is not validated (RDP hosts are normally
+    self-signed), matching mstsc's "connect anyway".
 * JSON document store, AES-256-GCM credential encryption keyed from the OS
   keychain, vault backups
 * Cloud sync transports (`netcatty-sync`): GitHub Gist device flow, Google
@@ -123,6 +134,11 @@ hides the features when they are absent):
   system manager (processes/tmux/docker/kubectl), monitor bridge
 * X11 forwarding is requested on the channel but no local X11 proxy is
   started yet
+* Remote desktop gaps: Kerberos-only RDP accounts, RDP clipboard / audio /
+  drive redirection, dynamic RDP resize (the desktop keeps the size requested
+  at connect time and is scaled to the pane), VNC Tight/JPEG encoding and
+  Apple Remote Desktop authentication, local → remote clipboard, connecting
+  through an SSH jump host or proxy
 
 The `electron/` directory is untouched; `npm run dev` still runs the Electron
 build so both backends can be compared while the port matures.

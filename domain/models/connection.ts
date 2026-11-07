@@ -51,7 +51,9 @@ export interface EnvVar {
 }
 
 // Protocol type for connections
-export type BuiltInHostProtocol = 'ssh' | 'telnet' | 'mosh' | 'et' | 'local' | 'serial';
+// 'vnc' and 'rdp' are graphical (remote desktop) sessions: they render a
+// canvas instead of a terminal. See `domain/remoteDesktop.ts`.
+export type BuiltInHostProtocol = 'ssh' | 'telnet' | 'mosh' | 'et' | 'local' | 'serial' | 'vnc' | 'rdp';
 export type PluginHostProtocol = `plugin:${string}`;
 export type HostProtocol = BuiltInHostProtocol | PluginHostProtocol;
 export type PluginConfigurationValue =
@@ -275,6 +277,9 @@ export interface Host {
   telnetPassword?: string; // Telnet-specific password
   // Serial-specific configuration (for protocol='serial' hosts)
   serialConfig?: SerialConfig;
+  // RDP logon domain (for protocol='rdp' hosts). VNC and RDP hosts reuse
+  // `port`, `username` and `password` for their own connection.
+  rdpDomain?: string;
   // SFTP specific configuration
   sftpSudo?: boolean; // Use sudo for SFTP operations (requires password)
   // Remote file browser protocol: Auto tries SFTP then falls back to SCP-mode

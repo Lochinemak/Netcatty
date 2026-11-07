@@ -8,6 +8,7 @@ import { resolveHostDefaultLocalShell } from '../../domain/localShellHost';
 import { getAvailablePaneMagnificationController } from '../../domain/paneMagnification';
 import { sanitizeHostIconFields } from '../../domain/hostIcon';
 import { resolveEffectiveTerminalProtocol } from '../../domain/terminalProtocol';
+import { isRemoteDesktopProtocol } from '../../domain/remoteDesktop';
 import { getTerminalPassthroughActions } from '../state/useGlobalHotkeys';
 import { getSettingsChromeSnapshot } from '../state/settingsChromeStore';
 import { isHostTreeWorkTabSurface } from './workTabSurface';
@@ -211,7 +212,9 @@ export function handleTrayPanelConnectImpl(getCtx: AppContextGetter, hostId: str
       // Local-shell vault hosts carry no SSH credentials, so log the system
       // user like local terminals do (see handleConnectToHostImpl) instead of
       // 'root' or an inherited group SSH username.
-      username: protocol === 'local' ? username : (resolvedAuth.username || 'root'),
+      username: protocol === 'local'
+        ? username
+        : isRemoteDesktopProtocol(protocol) ? (resolvedAuth.username ?? '') : (resolvedAuth.username || 'root'),
       protocol,
       ...getLogHostVisualSnapshot(effectiveHost),
       startTime: Date.now(),
@@ -1217,7 +1220,9 @@ export function handleConnectToHostImpl(getCtx: AppContextGetter, host: Host, hi
       // Local-shell vault hosts carry no SSH credentials, so log the system
       // user like local terminals do (see handleCreateLocalTerminalImpl)
       // instead of 'root' or an inherited group SSH username.
-      username: protocol === 'local' ? username : (resolvedAuth.username || 'root'),
+      username: protocol === 'local'
+        ? username
+        : isRemoteDesktopProtocol(protocol) ? (resolvedAuth.username ?? '') : (resolvedAuth.username || 'root'),
       protocol,
       ...getLogHostVisualSnapshot(effectiveHost),
       startTime: Date.now(),

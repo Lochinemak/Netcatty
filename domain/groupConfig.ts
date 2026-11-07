@@ -1,4 +1,5 @@
 import type { GroupConfig, Host } from './models';
+import { isRemoteDesktopHost } from './remoteDesktop';
 import { migrateDeprecatedFontOverride } from '../infrastructure/config/fonts';
 import {
   getActiveGlobalDefaultProxyProfileId,
@@ -279,6 +280,12 @@ export function applyGroupDefaults(
   // local CMD/PowerShell/POSIX shell be treated as a network-device CLI
   // (no normal autocomplete, network semantics for AI/command execution).
   const isLocalShellHost = host.protocol === 'local';
+  // VNC / RDP hosts reuse `port`, `username` and `password` for the desktop
+  // connection itself. Group defaults describe the group's SSH hosts: an
+  // inherited SSH password would be sent to the desktop server as the VNC or
+  // RDP password, and the SSH port (22) would replace 5900 / 3389. SSH
+  // transports, startup commands and device types do not apply either.
+  const isRemoteDesktop = isRemoteDesktopHost(host);
   // X11 forwarding only applies to plain SSH. Use the host value when it is
   // set, otherwise the group transport, so a group Mosh/ET/Telnet default
   // does not also turn X11 on.
@@ -291,6 +298,7 @@ export function applyGroupDefaults(
     if (shouldSkipGroupSshCredentialBundle && SSH_CREDENTIAL_KEYS.has(key)) continue;
     if (isSerialHost && SSH_CREDENTIAL_KEYS.has(key)) continue;
     if (isLocalShellHost && (SSH_CREDENTIAL_KEYS.has(key) || SSH_ONLY_TRANSPORT_KEYS.has(key) || key === 'startupCommand' || key === 'deviceType')) continue;
+    if (isRemoteDesktop && (SSH_CREDENTIAL_KEYS.has(key) || SSH_ONLY_TRANSPORT_KEYS.has(key) || key === 'port' || key === 'protocol' || key === 'startupCommand' || key === 'deviceType' || key === 'telnetEnabled')) continue;
     if (key === 'x11Forwarding' && !inheritsX11Forwarding) continue;
     if (key === 'password' && effective.savePassword === false) continue;
     if (key === 'telnetIdentityId' && hostHasManualTelnetCredentials) continue;

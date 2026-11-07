@@ -9,6 +9,7 @@ members = [
   "crates/netcatty-localfs",
   "crates/netcatty-store",
   "crates/netcatty-sync",
+  "crates/netcatty-rdesktop",
   "crates/netcatty-e2e",
   "apps/netcatty-desktop",
 ]
@@ -30,6 +31,7 @@ netcatty-pty = { path = "crates/netcatty-pty" }
 netcatty-localfs = { path = "crates/netcatty-localfs" }
 netcatty-store = { path = "crates/netcatty-store" }
 netcatty-sync = { path = "crates/netcatty-sync" }
+netcatty-rdesktop = { path = "crates/netcatty-rdesktop" }
 
 # async runtime
 tokio = { version = "1.54", features = ["full"] }

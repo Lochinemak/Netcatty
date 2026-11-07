@@ -509,19 +509,40 @@ fn cloud_sync_password_and_oauth_commands() {
     let available = collect(&h.app, "netcatty:cloudsync:password-available");
 
     // Session master password: set → persisted encrypted → get → clear.
-    assert_eq!(ok(invoke(&h.webview, "cloudsync_password_get", json!({}))), Value::Null);
     assert_eq!(
-        ok(invoke(&h.webview, "cloudsync_password_set", json!({ "password": "hunter2" }))),
+        ok(invoke(&h.webview, "cloudsync_password_get", json!({}))),
+        Value::Null
+    );
+    assert_eq!(
+        ok(invoke(
+            &h.webview,
+            "cloudsync_password_set",
+            json!({ "password": "hunter2" })
+        )),
         json!(true)
     );
-    assert!(wait_for(&available, Duration::from_secs(2), |seen| seen.len() == 1));
+    assert!(wait_for(&available, Duration::from_secs(2), |seen| seen
+        .len()
+        == 1));
     let persisted = std::fs::read_to_string(h._data_dir.path().join("cloud-sync-session.enc"))
         .expect("password persisted");
-    assert!(persisted.starts_with("enc:v2:"), "persisted encrypted: {persisted}");
+    assert!(
+        persisted.starts_with("enc:v2:"),
+        "persisted encrypted: {persisted}"
+    );
     assert!(!persisted.contains("hunter2"));
-    assert_eq!(ok(invoke(&h.webview, "cloudsync_password_get", json!({}))), json!("hunter2"));
-    assert_eq!(ok(invoke(&h.webview, "cloudsync_password_clear", json!({}))), json!(true));
-    assert_eq!(ok(invoke(&h.webview, "cloudsync_password_get", json!({}))), Value::Null);
+    assert_eq!(
+        ok(invoke(&h.webview, "cloudsync_password_get", json!({}))),
+        json!("hunter2")
+    );
+    assert_eq!(
+        ok(invoke(&h.webview, "cloudsync_password_clear", json!({}))),
+        json!(true)
+    );
+    assert_eq!(
+        ok(invoke(&h.webview, "cloudsync_password_get", json!({}))),
+        Value::Null
+    );
     assert!(!h._data_dir.path().join("cloud-sync-session.enc").exists());
 
     // OAuth loopback: prepare returns a loopback redirect URI; cancel is
@@ -530,7 +551,11 @@ fn cloud_sync_password_and_oauth_commands() {
     let redirect = prepared["redirectUri"].as_str().unwrap();
     assert!(redirect.starts_with("http://127.0.0.1:") && redirect.ends_with("/oauth/callback"));
     let session_id = prepared["sessionId"].as_str().unwrap().to_owned();
-    ok(invoke(&h.webview, "oauth_cancel_callback", json!({ "sessionId": session_id })));
+    ok(invoke(
+        &h.webview,
+        "oauth_cancel_callback",
+        json!({ "sessionId": session_id }),
+    ));
     let err = invoke(
         &h.webview,
         "oauth_await_callback",
@@ -549,7 +574,12 @@ fn cloud_sync_password_and_oauth_commands() {
     )
     .unwrap_err();
     assert_eq!(err["message"], "Missing syncedFile");
-    let err = invoke(&h.webview, "google_drive_find_sync_file", json!({ "payload": {} })).unwrap_err();
+    let err = invoke(
+        &h.webview,
+        "google_drive_find_sync_file",
+        json!({ "payload": {} }),
+    )
+    .unwrap_err();
     assert_eq!(err["message"], "Missing accessToken");
     let err = invoke(
         &h.webview,
@@ -558,5 +588,79 @@ fn cloud_sync_password_and_oauth_commands() {
     )
     .unwrap_err();
     assert_eq!(err["message"], "Missing deviceCode");
-    ok(invoke(&h.webview, "github_device_flow_cancel", json!({ "pollId": "unknown" })));
+    ok(invoke(
+        &h.webview,
+        "github_device_flow_cancel",
+        json!({ "pollId": "unknown" }),
+    ));
+}
+
+#[test]
+fn remote_desktop_commands() {
+    let h = build_app();
+    // A channel argument crosses the IPC boundary as `__CHANNEL__:<id>`.
+    let channel = "__CHANNEL__:7";
+
+    let err = invoke(
+        &h.webview,
+        "rdesktop_connect",
+        json!({ "payload": { "protocol": "ssh", "hostname": "127.0.0.1" }, "onEvent": channel }),
+    )
+    .expect_err("only vnc and rdp are remote desktop protocols");
+    assert_eq!(err["code"], "INVALID_ARGUMENT", "error payload: {err}");
+
+    let err = invoke(
+        &h.webview,
+        "rdesktop_connect",
+        json!({ "payload": { "protocol": "vnc", "hostname": " " }, "onEvent": channel }),
+    )
+    .expect_err("hostname is required");
+    assert_eq!(err["code"], "INVALID_ARGUMENT");
+
+    // Port 1 refuses the connection: the command still resolves, the failure
+    // is reported on the channel and the session unregisters itself.
+    let started = ok(invoke(
+        &h.webview,
+        "rdesktop_connect",
+        json!({
+            "payload": { "sessionId": "rd-1", "protocol": "vnc", "hostname": "127.0.0.1", "port": 1 },
+            "onEvent": channel,
+        }),
+    ));
+    assert_eq!(started["sessionId"], "rd-1");
+
+    // Input and close for a finished or unknown session are accepted.
+    ok(invoke(
+        &h.webview,
+        "rdesktop_input",
+        json!({ "payload": { "sessionId": "rd-1", "events": [
+            { "type": "pointer", "x": 1, "y": 2, "buttons": 0 },
+            { "type": "key", "down": true, "keysym": 97, "scancode": 30 },
+        ] } }),
+    ));
+    ok(invoke(
+        &h.webview,
+        "rdesktop_close",
+        json!({ "sessionId": "rd-1" }),
+    ));
+    ok(invoke(
+        &h.webview,
+        "rdesktop_close",
+        json!({ "sessionId": "nope" }),
+    ));
+
+    // Once the refused session has unregistered, its id can be used again.
+    let reusable = (0..100).any(|_| {
+        std::thread::sleep(Duration::from_millis(50));
+        invoke(
+            &h.webview,
+            "rdesktop_connect",
+            json!({
+                "payload": { "sessionId": "rd-1", "protocol": "vnc", "hostname": "127.0.0.1", "port": 1 },
+                "onEvent": channel,
+            }),
+        )
+        .is_ok()
+    });
+    assert!(reusable, "a finished session must free its id");
 }

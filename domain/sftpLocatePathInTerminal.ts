@@ -47,7 +47,7 @@ export function canLocateSftpPathInTerminal(
   if (!resolveInteractiveTerminalCdIntent(options.path)) return false;
 
   const protocol = options.protocol ?? "ssh";
-  if (protocol === "telnet" || protocol === "serial") return false;
+  if (protocol === "telnet" || protocol === "serial" || protocol === "vnc" || protocol === "rdp") return false;
   if (protocol === "local" && (options.shellType === "powershell" || options.shellType === "cmd")) {
     return false;
   }

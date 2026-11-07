@@ -1,4 +1,5 @@
 import { isPluginHostProtocol } from "./pluginConnection";
+import { isRemoteDesktopProtocol } from "./remoteDesktop";
 
 export type DualPaneSftpTab = {
   id: string;
@@ -50,6 +51,8 @@ export function canOpenDualPaneSftp(host: { protocol?: string }): boolean {
   // from one would try to SSH into localhost with empty credentials.
   if (protocol === "local") return false;
   if (isPluginHostProtocol(protocol)) return false;
+  // VNC / RDP desktops have no SSH channel to run SFTP over.
+  if (isRemoteDesktopProtocol(protocol)) return false;
   return true;
 }
 

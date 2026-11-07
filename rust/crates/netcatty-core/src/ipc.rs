@@ -944,3 +944,197 @@ mod tests {
         assert!(v.get("error").is_none());
     }
 }
+
+// ---------------------------------------------------------------------------
+// Remote desktop (VNC / RDP)
+// ---------------------------------------------------------------------------
+
+/// `startRemoteDesktopSession` options.
+#[derive(Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteDesktopOptions {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
+    /// `"vnc"` or `"rdp"`.
+    pub protocol: String,
+    pub hostname: String,
+    /// Defaults to the protocol's well-known port (5900 / 3389).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub port: Option<u16>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub username: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub password: Option<String>,
+    /// RDP logon domain.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub domain: Option<String>,
+    /// Desktop size to request (RDP). Defaults to 1280×800.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub width: Option<u16>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub height: Option<u16>,
+}
+
+impl std::fmt::Debug for RemoteDesktopOptions {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // The password must never reach a log line.
+        f.debug_struct("RemoteDesktopOptions")
+            .field("session_id", &self.session_id)
+            .field("protocol", &self.protocol)
+            .field("hostname", &self.hostname)
+            .field("port", &self.port)
+            .field("username", &self.username)
+            .field("password", &self.password.as_ref().map(|_| "<redacted>"))
+            .field("domain", &self.domain)
+            .field("width", &self.width)
+            .field("height", &self.height)
+            .finish()
+    }
+}
+
+/// One input event of `sendRemoteDesktopInput`. Coordinates are remote
+/// desktop pixels.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub enum RemoteDesktopInputEvent {
+    /// `buttons`: bit 0 left, bit 1 middle, bit 2 right.
+    Pointer {
+        x: u16,
+        y: u16,
+        buttons: u8,
+    },
+    /// Wheel notches; positive `deltaY` scrolls up, positive `deltaX` right.
+    #[serde(rename_all = "camelCase")]
+    Wheel {
+        x: u16,
+        y: u16,
+        #[serde(default)]
+        delta_x: i16,
+        #[serde(default)]
+        delta_y: i16,
+    },
+    /// `keysym`: X11 keysym (VNC). `scancode`: PC set-1 scancode, `0xE000`
+    /// or-ed in for extended keys (RDP). 0 means "no mapping".
+    Key {
+        down: bool,
+        #[serde(default)]
+        keysym: u32,
+        #[serde(default)]
+        scancode: u16,
+    },
+    Clipboard {
+        text: String,
+    },
+    /// Ask for a full repaint.
+    Refresh,
+}
+
+/// `sendRemoteDesktopInput` payload: a batch, applied in order.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteDesktopInputPayload {
+    pub session_id: String,
+    pub events: Vec<RemoteDesktopInputEvent>,
+}
+
+/// Control message of a remote desktop session, delivered as JSON on the
+/// session's channel. Pixel data travels as binary messages on the same
+/// channel (see `rust/docs/ipc-contract.md`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub enum RemoteDesktopControlEvent {
+    Connected {
+        width: u16,
+        height: u16,
+    },
+    Resize {
+        width: u16,
+        height: u16,
+    },
+    Clipboard {
+        text: String,
+    },
+    Bell,
+    /// Always the last message. `error` is absent for a deliberate close.
+    Closed {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        error: Option<String>,
+    },
+}
+
+#[cfg(test)]
+mod remote_desktop_tests {
+    use super::*;
+
+    #[test]
+    fn input_events_use_the_renderer_wire_shape() {
+        let payload: RemoteDesktopInputPayload = serde_json::from_str(
+            r#"{"sessionId":"s1","events":[
+                {"type":"pointer","x":3,"y":4,"buttons":1},
+                {"type":"wheel","x":3,"y":4,"deltaY":-2},
+                {"type":"key","down":true,"keysym":97,"scancode":30},
+                {"type":"clipboard","text":"hi"},
+                {"type":"refresh"}
+            ]}"#,
+        )
+        .unwrap();
+        assert_eq!(payload.session_id, "s1");
+        assert_eq!(
+            payload.events,
+            vec![
+                RemoteDesktopInputEvent::Pointer {
+                    x: 3,
+                    y: 4,
+                    buttons: 1
+                },
+                RemoteDesktopInputEvent::Wheel {
+                    x: 3,
+                    y: 4,
+                    delta_x: 0,
+                    delta_y: -2
+                },
+                RemoteDesktopInputEvent::Key {
+                    down: true,
+                    keysym: 97,
+                    scancode: 30
+                },
+                RemoteDesktopInputEvent::Clipboard { text: "hi".into() },
+                RemoteDesktopInputEvent::Refresh,
+            ]
+        );
+    }
+
+    #[test]
+    fn control_events_serialize_with_a_type_tag() {
+        assert_eq!(
+            serde_json::to_string(&RemoteDesktopControlEvent::Connected {
+                width: 800,
+                height: 600
+            })
+            .unwrap(),
+            r#"{"type":"connected","width":800,"height":600}"#
+        );
+        assert_eq!(
+            serde_json::to_string(&RemoteDesktopControlEvent::Closed { error: None }).unwrap(),
+            r#"{"type":"closed"}"#
+        );
+        assert_eq!(
+            serde_json::to_string(&RemoteDesktopControlEvent::Closed {
+                error: Some("boom".into())
+            })
+            .unwrap(),
+            r#"{"type":"closed","error":"boom"}"#
+        );
+    }
+
+    #[test]
+    fn options_debug_redacts_the_password() {
+        let options = RemoteDesktopOptions {
+            protocol: "rdp".into(),
+            hostname: "h".into(),
+            password: Some("hunter2".into()),
+            ..Default::default()
+        };
+        assert!(!format!("{options:?}").contains("hunter2"));
+    }
+}

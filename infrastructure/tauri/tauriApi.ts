@@ -118,6 +118,21 @@ export async function invokeBinary<T = void>(
   }
 }
 
+/**
+ * Create a backend → renderer channel for one command invocation. Pass the
+ * returned object as a command argument; `onMessage` receives parsed JSON for
+ * JSON messages and an `ArrayBuffer` for raw ones, in the order they were sent.
+ */
+export function createChannel<T>(onMessage: (message: T) => void): NetcattyTauriChannel<T> {
+  const Channel = getTauriGlobal().core?.Channel;
+  if (!Channel) {
+    throw new TauriBridgeError('UNSUPPORTED', 'Tauri core.Channel is unavailable');
+  }
+  const channel = new Channel<T>();
+  channel.onmessage = onMessage;
+  return channel;
+}
+
 export async function listen<T>(event: string, cb: (payload: T) => void): Promise<() => void> {
   const eventApi = getTauriGlobal().event;
   if (!eventApi?.listen) {

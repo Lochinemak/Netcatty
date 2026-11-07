@@ -16,6 +16,9 @@ import {
 import { STORAGE_KEY_VAULT_HOST_PANEL_WIDTH } from "@/infrastructure/config/storageKeys.ts";
 import { VaultHostListSection } from "./VaultHostListSection";
 import { LocalShellHostDetailsPanel } from "../LocalShellHostDetailsPanel";
+import { RemoteDesktopHostDetailsPanel } from "../RemoteDesktopHostDetailsPanel";
+import { isRemoteDesktopProtocol } from "../../domain/remoteDesktop";
+import { Monitor } from "lucide-react";
 import { VaultImportProgressPanel } from "./ImportVaultDialog";
 import {
   VaultHeaderSearch,
@@ -204,6 +207,7 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
     handleImportFileSelected,
     handleNewHost,
     handleNewLocalShellHost,
+    handleNewRemoteDesktopHost,
     handleCancelLocalShellHost,
     handleSaveLocalShellHost,
     handleProtocolSelect,
@@ -1024,6 +1028,20 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
                     <Button
                       variant="ghost"
                       className="justify-start gap-2"
+                      onClick={() => handleNewRemoteDesktopHost("rdp")}
+                    >
+                      <Monitor size={14} className="shrink-0" /> {t("vault.hosts.newRdpHost")}
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      className="justify-start gap-2"
+                      onClick={() => handleNewRemoteDesktopHost("vnc")}
+                    >
+                      <Monitor size={14} className="shrink-0" /> {t("vault.hosts.newVncHost")}
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      className="justify-start gap-2"
                       onClick={() => {
                         setTargetParentPath(selectedGroupPath);
                         setNewFolderName("");
@@ -1501,7 +1519,8 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
           {/* Host Details Panel */}
           {currentSection === "hosts" &&
             isHostPanelOpen &&
-            editingHost?.protocol !== "serial" && (
+            editingHost?.protocol !== "serial" &&
+            !isRemoteDesktopProtocol(editingHost?.protocol) && (
               <HostDetailsPanel
                 initialData={editingHost}
                 availableKeys={keys}
@@ -1580,6 +1599,39 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
                 {...vaultHostPanelResizeProps}
               />
             )}
+
+          {/* Remote Desktop Host Details Panel - VNC / RDP hosts, new drafts included */}
+          {currentSection === "hosts" &&
+            isHostPanelOpen &&
+            editingHost &&
+            isRemoteDesktopProtocol(editingHost.protocol) && (() => {
+              const closePanel = () => {
+                setIsHostPanelOpen(false);
+                setEditingHost(null);
+                setNewHostGroupPath(null);
+              };
+              return (
+                <RemoteDesktopHostDetailsPanel
+                  key={editingHost.id}
+                  initialData={editingHost}
+                  protocol={editingHost.protocol}
+                  isNew={!hosts.some((entry: { id: string }) => entry.id === editingHost.id)}
+                  groups={allGroupPaths}
+                  onSave={(host) => {
+                    onUpdateHosts((prevHosts) => upsertHostById(prevHosts, host));
+                    closePanel();
+                  }}
+                  onSaveAndConnect={(host) => {
+                    onUpdateHosts((prevHosts) => upsertHostById(prevHosts, host));
+                    closePanel();
+                    handleHostConnect(host);
+                  }}
+                  onCancel={closePanel}
+                  layout="inline"
+                  {...vaultHostPanelResizeProps}
+                />
+              );
+            })()}
 
           {/* Local Shell Host Details Panel - for editing/saving local shell (CMD) hosts */}
           {currentSection === "hosts" &&

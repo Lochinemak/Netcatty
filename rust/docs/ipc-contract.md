@@ -61,6 +61,43 @@ Events:
 | `netcatty:auth:failed` | `{ sessionId, error, hostname }` emitted before the start command rejects with `AUTH_FAILED`. |
 | `netcatty:chain:progress` | `ChainProgressEvent` per jump hop. |
 
+## Remote desktop (VNC / RDP)
+
+Graphical sessions for hosts whose protocol is `vnc` or `rdp`. They are not
+terminal sessions: none of the `session_*` commands apply to them.
+
+| Command | Args | Returns | Notes |
+| --- | --- | --- | --- |
+| `rdesktop_connect` | `payload: RemoteDesktopOptions`, `onEvent: Channel` | `{ sessionId }` | Resolves as soon as the session task is running, **before** the connection is established. `INVALID_ARGUMENT` for an unknown protocol, an empty hostname or a `sessionId` that is still running. `port` defaults to 5900 / 3389, the requested desktop size to 1280×800 (clamped to 200–8192). `username` / `domain` are RDP only. |
+| `rdesktop_input` | `payload: { sessionId, events: RemoteDesktopInputEvent[] }` | `void` | Events are applied in order. Unknown or finished sessions are ignored (input races with the session ending). |
+| `rdesktop_close` | `sessionId` | `void` | Idempotent. `closed` is still delivered on the channel. |
+
+`RemoteDesktopInputEvent` (tagged by `type`, coordinates in remote pixels):
+
+| `type` | Fields |
+| --- | --- |
+| `pointer` | `x, y, buttons` — mask: bit 0 left, bit 1 middle, bit 2 right |
+| `wheel` | `x, y, deltaX, deltaY` — whole notches; positive `deltaY` scrolls up, positive `deltaX` right |
+| `key` | `down, keysym, scancode` — `keysym` is the X11 keysym (used by VNC); `scancode` the PC set-1 scancode with `0xE000` or-ed in for extended keys (used by RDP, which falls back to the Unicode character of `keysym` when it is 0) |
+| `clipboard` | `text` — offered to the remote side (VNC only) |
+| `refresh` | — full repaint |
+
+Output does not use the global event bus. Everything a session emits arrives,
+in order, on the `tauri::ipc::Channel` passed as `onEvent`:
+
+* **JSON messages** — `RemoteDesktopControlEvent`, tagged by `type`:
+  `connected { width, height }`, `resize { width, height }` (reallocate the
+  canvas; a repaint follows), `clipboard { text }`, `bell`, and
+  `closed { error? }`. `closed` is sent exactly once and is always the last
+  message; `error` is absent for a deliberate close and carries the reason for
+  a failed connect or a dropped session.
+* **Binary messages** (`ArrayBuffer`), first byte is the tag, integers are
+  `u16` little endian:
+  * `1` frame: `[1][x][y][width][height]` followed by `width * height * 4`
+    bytes of RGBA (rows top to bottom, alpha always 255);
+  * `2` copy rectangle: `[2][srcX][srcY][dstX][dstY][width][height]` — copy
+    that region of the current framebuffer.
+
 ## SSH prompts (host key, keyboard-interactive, passphrase)
 
 Rust emits a request event and waits (5 min) for the matching response
@@ -252,6 +289,8 @@ adapter (`window.__TAURI__.dialog`, `.clipboardManager`, `.opener`).
 | `writeToSession(id, data, opts)` | `session_write` (fire-and-forget) |
 | `resizeSession`, `interruptSession`, `setSessionFlowPaused`, `ackSessionFlow`, `closeSession` | `session_resize`, `session_interrupt`, `session_set_flow_paused`, `session_ack_flow`, `session_close` |
 | `onSessionData(id, cb)` / `onSessionExit(id, cb)` | listen `netcatty:data` / `netcatty:exit`, filter by `sessionId`; return unlisten |
+| `startRemoteDesktopSession(o, onEvent)` | `rdesktop_connect` with a `Channel`; binary messages are decoded into `frame` / `copyRect` events |
+| `sendRemoteDesktopInput(id, events)` / `closeRemoteDesktopSession(id)` | `rdesktop_input` (fire-and-forget) / `rdesktop_close` |
 | `execCommand(o)` | `session_exec` |
 | `getSessionPwd`, `getSessionRemoteInfo` | `session_pwd`, `session_remote_info` |
 | `generateKeyPair`, `checkSshAgent`, `getDefaultKeys`, `readKnownHosts` | `ssh_*` |

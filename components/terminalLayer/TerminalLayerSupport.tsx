@@ -37,6 +37,8 @@ import type { GroupConfig, Host, Identity, KnownHost, ProxyProfile, SSHKey, Snip
 import type { ExecutorContext } from '../../infrastructure/ai/cattyAgent/executor';
 import type { AISession } from '../../infrastructure/ai/types';
 import Terminal from '../Terminal';
+import { RemoteDesktopPane } from '../remoteDesktop/RemoteDesktopPane';
+import { isRemoteDesktopProtocol } from '../../domain/remoteDesktop';
 import { removePaneVisible, setPaneVisible } from '../terminal/paneVisibilityStore';
 import type { TerminalBroadcastInputOptions } from '../terminal/terminalHelpers';
 import type { TerminalContextReader } from '../../domain/terminalContextRead';
@@ -1661,6 +1663,25 @@ const TerminalPane: React.FC<TerminalPaneProps> = memo(({
       onClick={handlePaneClick}
       onFocusCapture={handlePaneClick}
     >
+      {isRemoteDesktopProtocol(host.protocol) ? (
+        // VNC / RDP sessions are graphical: they share the pane slot (layout,
+        // focus, drag between tabs) but must never reach the xterm-backed
+        // Terminal, whose start-up would fall through to an SSH connection.
+        <RemoteDesktopPane
+          host={host}
+          protocol={host.protocol}
+          sessionId={session.id}
+          keys={keys}
+          identities={identities}
+          isVisible={terminalInputProps.isVisible}
+          isFocused={terminalInputProps.isFocused}
+          inWorkspace={keepsWorkspacePresentation}
+          sessionDisplayName={sessionDisplayName}
+          onStatusChange={onStatusChange}
+          onCloseSession={onCloseSession}
+          onDetachPointerDown={inActiveWorkspace ? handleDetachPointerDown : undefined}
+        />
+      ) : (
       <Terminal
         host={host}
         keys={keys}
@@ -1754,6 +1775,7 @@ const TerminalPane: React.FC<TerminalPaneProps> = memo(({
         onDetachDragStart={inActiveWorkspace ? handleDetachDragStart : undefined}
         onDetachDragEnd={inActiveWorkspace ? handleDetachDragEnd : undefined}
       />
+      )}
     </div>
   );
 }, terminalPanePropsAreEqual);

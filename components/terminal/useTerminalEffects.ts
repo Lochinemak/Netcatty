@@ -2,6 +2,7 @@
 import { useRef } from 'react';
 import { publishTerminalSelectionTarget } from '../../infrastructure/plugins/terminalSelectionRegistry';
 import type { TerminalSettings } from '../../types';
+import { isRemoteDesktopProtocol } from '../../domain/remoteDesktop';
 import { publishPluginTerminalRuntimeLifecycleEvent } from '../../application/state/pluginTerminalRuntimeLifecycle';
 import { markTerminalCommandCompletionPending } from './runtime/promptLineBreak';
 import { resolveFontWeightBold } from '../../lib/fontWeightAvailability';
@@ -883,6 +884,12 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
           setProgressLogs(["Initializing EternalTerminal connection..."]);
           await sessionStarters.startEt(term, bootStartOptions);
           if (!bootStillActive()) return;
+        } else if (isRemoteDesktopProtocol(effectiveTerminalProtocol)) {
+          // VNC / RDP sessions render through RemoteDesktopPane. Reaching a
+          // terminal means a caller skipped that branch; starting SSH against
+          // a desktop host with its desktop password would be wrong.
+          setStatus("disconnected");
+          return;
         } else {
           const resolvedAuth = resolveHostAuth({ host, keys, identities });
           const hasPassword = !!resolvedAuth.password;

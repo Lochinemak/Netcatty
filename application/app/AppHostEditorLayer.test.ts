@@ -82,8 +82,8 @@ test('editor overlay leaves the work surface interactive outside the panel', () 
 
   assert.match(source, /pointer-events-none absolute inset-0 z-40/);
   assert.match(source, /\[&>\*\]:pointer-events-auto/);
-  assert.equal((source.match(/className="pointer-events-auto"/g) ?? []).length, 3);
-  assert.equal((source.match(/layout="overlay"/g) ?? []).length, 3);
+  assert.equal((source.match(/className="pointer-events-auto"/g) ?? []).length, 4);
+  assert.equal((source.match(/layout="overlay"/g) ?? []).length, 4);
 });
 
 test('editor host panels share vault resize width persistence', () => {
@@ -92,7 +92,7 @@ test('editor host panels share vault resize width persistence', () => {
   assert.match(source, /STORAGE_KEY_VAULT_HOST_PANEL_WIDTH/);
   assert.match(source, /resizable:\s*true/);
   assert.match(source, /\{\.\.\.hostPanelResizeProps\}/);
-  assert.equal((source.match(/\{\.\.\.hostPanelResizeProps\}/g) ?? []).length, 3);
+  assert.equal((source.match(/\{\.\.\.hostPanelResizeProps\}/g) ?? []).length, 4);
 });
 
 test('editor stays mounted while another app surface is active', () => {
