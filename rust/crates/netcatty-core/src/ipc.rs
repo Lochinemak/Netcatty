@@ -58,6 +58,8 @@ pub mod events {
     pub const LANGUAGE_CHANGED: &str = "netcatty:language-changed";
     /// `{ label, fullscreen }` — the window entered / left fullscreen.
     pub const WINDOW_FULLSCREEN_CHANGED: &str = "netcatty:window:fullscreen-changed";
+    /// No payload — vault backups were created / trimmed / cleared.
+    pub const VAULT_BACKUPS_CHANGED: &str = "netcatty:vault-backups:changed";
 }
 
 // ---------------------------------------------------------------------------

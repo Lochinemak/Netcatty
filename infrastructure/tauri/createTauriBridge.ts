@@ -52,6 +52,7 @@ export const TAURI_EVENTS = {
   settingsChanged: 'netcatty:settings:changed',
   languageChanged: 'netcatty:language-changed',
   windowFullscreenChanged: 'netcatty:window:fullscreen-changed',
+  vaultBackupsChanged: 'netcatty:vault-backups:changed',
 } as const;
 
 /** Terminal output kept per session until a display listener attaches (JS string length). */
@@ -1097,6 +1098,20 @@ export function createTauriBridge(options: CreateTauriBridgeOptions = {}): Netca
         cb(event.payload);
       });
     },
+
+    // -----------------------------------------------------------------------
+    // Local vault backups (Electron record format; payload encrypted with the
+    // credential cipher instead of safeStorage)
+    // -----------------------------------------------------------------------
+    getVaultBackupCapabilities: () =>
+      invoke<BridgeResult<'getVaultBackupCapabilities'>>('vault_backup_capabilities'),
+    createVaultBackup: (payload) => invoke<BridgeResult<'createVaultBackup'>>('vault_backup_create', { payload }),
+    listVaultBackups: () => invoke<BridgeResult<'listVaultBackups'>>('vault_backup_list'),
+    readVaultBackup: (payload) => invoke<BridgeResult<'readVaultBackup'>>('vault_backup_read', { payload }),
+    trimVaultBackups: (payload) => invoke<BridgeResult<'trimVaultBackups'>>('vault_backup_trim', { payload }),
+    clearVaultBackups: () => invoke<BridgeResult<'clearVaultBackups'>>('vault_backup_clear'),
+    openVaultBackupDir: () => invoke<BridgeResult<'openVaultBackupDir'>>('vault_backup_open_dir'),
+    onVaultBackupsChanged: (handler) => hub.subscribe<unknown>(TAURI_EVENTS.vaultBackupsChanged, () => handler()),
 
     // -----------------------------------------------------------------------
     // Crash logs / diagnostics (Rust panics and logDiagnostic entries)

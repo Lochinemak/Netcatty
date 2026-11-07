@@ -818,3 +818,29 @@ test('crash logs, diagnostics and clipboard extras map to their commands', async
   await bridge.readClipboardFiles!();
   assert.ok(fake.invokes.some((entry) => entry.cmd === 'clipboard_read_files'));
 });
+
+test('vault backups map to the vault_backup commands and change events', async () => {
+  const { fake, bridge } = setup();
+  fake.respond('vault_backup_capabilities', () => ({ encryptionAvailable: true }));
+  fake.respond('vault_backup_trim', () => ({ deletedCount: 1, keptCount: 2 }));
+  assert.deepEqual(await bridge.getVaultBackupCapabilities!(), { encryptionAvailable: true });
+
+  const createPayload = {
+    payload: { hosts: [] } as unknown as Parameters<NonNullable<NetcattyBridge['createVaultBackup']>>[0]['payload'],
+    reason: 'before_restore' as const,
+    maxCount: 5,
+  };
+  await bridge.createVaultBackup!(createPayload);
+  assert.deepEqual(lastInvoke(fake, 'vault_backup_create').args, { payload: createPayload });
+  await bridge.readVaultBackup!({ id: 'b1' });
+  assert.deepEqual(lastInvoke(fake, 'vault_backup_read').args, { payload: { id: 'b1' } });
+  assert.deepEqual(await bridge.trimVaultBackups!({ maxCount: 2 }), { deletedCount: 1, keptCount: 2 });
+
+  let changed = 0;
+  const off = bridge.onVaultBackupsChanged!(() => { changed += 1; });
+  await flush();
+  fake.emit('netcatty:vault-backups:changed', null);
+  off();
+  fake.emit('netcatty:vault-backups:changed', null);
+  assert.equal(changed, 1);
+});

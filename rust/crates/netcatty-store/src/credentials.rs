@@ -161,7 +161,7 @@ impl CredentialCipher {
     }
 }
 
-fn fill_random(buf: &mut [u8]) -> Result<(), String> {
+pub(crate) fn fill_random(buf: &mut [u8]) -> Result<(), String> {
     use rand::TryRng;
     rand::rngs::SysRng
         .try_fill_bytes(buf)

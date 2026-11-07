@@ -1,470 +1,699 @@
-//! Vault backups (mirrors `vaultBackupBridge.cjs`).
+//! Local vault backups (Electron: `vaultBackupBridge.cjs`).
 //!
-//! Files are named `vault-<YYYYMMDD-HHMMSS>-<ms>[-<reason>].json` (UTC) so
-//! the directory sorts chronologically in any file browser and `createdAt`
-//! can be recovered from the name alone when the file was copied around.
+//! Same record format and behaviour as Electron so the renderer's backup UI
+//! works unchanged:
+//! * one JSON file per backup, `vault-backup-<createdAt>-<id>.json`, mode
+//!   0600, written atomically (tmp file + fsync + rename + dir fsync);
+//! * the payload is encrypted — Electron uses `safeStorage-v1`, this build
+//!   uses the credential cipher (`cipher-v2`, AES-256-GCM `enc:v2:` string);
+//!   legacy `plain-json-v1` records are still readable, nothing is ever
+//!   written in plain text;
+//! * a create whose payload fingerprint equals the newest backup's is a
+//!   no-op (`created: false`); retention keeps the newest `maxCount`
+//!   (1–100, default 20);
+//! * mutations are serialized and `createdAt` is strictly increasing.
 
-use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime, TimeZone, Utc};
+use crate::credentials::CredentialCipher;
 use netcatty_core::{CoreError, CoreResult};
 use serde::{Deserialize, Serialize};
+use serde_json::{Map, Value};
+use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicI64, Ordering};
 
-const FILE_PREFIX: &str = "vault-";
-const FILE_EXT: &str = ".json";
-const MAX_REASON_LEN: usize = 32;
+pub const BACKUP_FILE_PREFIX: &str = "vault-backup-";
+pub const BACKUP_FILE_EXT: &str = ".json";
+pub const MIN_MAX_COUNT: u64 = 1;
+pub const MAX_MAX_COUNT: u64 = 100;
+pub const DEFAULT_MAX_COUNT: u64 = 20;
+pub const MAX_PAYLOAD_BYTES: usize = 25 * 1024 * 1024;
+const MAX_BACKUP_FILE_BYTES: u64 = (MAX_PAYLOAD_BYTES as u64) * 2;
+const ENCODING_CIPHER: &str = "cipher-v2";
+const ENCODING_PLAIN: &str = "plain-json-v1";
+const ENCODING_SAFE_STORAGE: &str = "safeStorage-v1";
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub const ERR_ENCRYPTION_UNAVAILABLE: &str =
+    "Secure storage is unavailable on this platform; vault backups cannot be created or read safely.";
+
+/// Serializes create / trim / clear (Electron's `mutationLock`).
+static MUTATION_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+/// Strictly increasing `createdAt` (Electron's `lastCreatedAt`).
+static LAST_CREATED_AT: AtomicI64 = AtomicI64::new(0);
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-pub struct BackupInfo {
-    pub file_name: String,
-    pub path: String,
-    pub created_at: i64,
-    pub size: u64,
+pub struct BackupPreview {
+    pub host_count: usize,
+    pub key_count: usize,
+    pub snippet_count: usize,
+    pub note_count: usize,
+    pub identity_count: usize,
+    pub port_forwarding_rule_count: usize,
+}
+
+/// On-disk record.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BackupRecord {
+    #[serde(default)]
+    format_version: u32,
+    id: String,
+    #[serde(default)]
+    created_at: i64,
+    #[serde(default)]
+    reason: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub reason: Option<String>,
+    sync_data_version: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    source_app_version: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    target_app_version: Option<String>,
+    #[serde(default)]
+    fingerprint: String,
+    #[serde(default)]
+    preview: BackupPreview,
+    #[serde(default)]
+    payload_encoding: String,
+    #[serde(default)]
+    payload_data: String,
 }
 
-pub struct BackupStore {
-    pub dir: PathBuf,
-    /// Maximum backups kept by [`BackupStore::trim`] (default 20).
-    pub keep: usize,
+/// What the renderer sees (`toBackupSummary`).
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BackupSummary {
+    pub id: String,
+    pub created_at: i64,
+    pub reason: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sync_data_version: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_app_version: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub target_app_version: Option<String>,
+    pub preview: BackupPreview,
+    pub fingerprint: String,
 }
 
-impl BackupStore {
-    pub fn new(dir: PathBuf) -> Self {
-        Self { dir, keep: 20 }
+impl From<&BackupRecord> for BackupSummary {
+    fn from(r: &BackupRecord) -> Self {
+        Self {
+            id: r.id.clone(),
+            created_at: r.created_at,
+            reason: r.reason.clone(),
+            sync_data_version: r.sync_data_version,
+            source_app_version: r.source_app_version.clone(),
+            target_app_version: r.target_app_version.clone(),
+            preview: r.preview.clone(),
+            fingerprint: r.fingerprint.clone(),
+        }
     }
+}
 
-    /// Write `payload` (already serialized vault JSON) as
-    /// `vault-<timestamp>[-<reason>].json` and trim old backups.
-    pub async fn create(&self, payload: &str, reason: Option<&str>) -> CoreResult<BackupInfo> {
-        tokio::fs::create_dir_all(&self.dir)
-            .await
-            .map_err(|err| io_error("create", &self.dir, err))?;
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateOptions {
+    pub payload: Option<Value>,
+    pub reason: Option<Value>,
+    pub source_app_version: Option<Value>,
+    pub target_app_version: Option<Value>,
+    pub sync_data_version: Option<Value>,
+    pub max_count: Option<Value>,
+}
 
-        let reason = reason.and_then(sanitize_reason);
-        let mut created_at = Utc::now().timestamp_millis();
-        let (file_name, path) = loop {
-            let file_name = build_file_name(created_at, reason.as_deref());
-            let path = self.dir.join(&file_name);
-            match tokio::fs::try_exists(&path).await {
-                Ok(true) => created_at += 1,
-                _ => break (file_name, path),
+#[derive(Debug, Clone, Serialize)]
+pub struct CreateResult {
+    pub created: bool,
+    pub backup: BackupSummary,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ReadResult {
+    pub backup: BackupSummary,
+    pub payload: Value,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct TrimResult {
+    pub deleted_count: usize,
+    pub kept_count: usize,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ClearResult {
+    pub deleted_count: usize,
+}
+
+// ---------------------------------------------------------------------------
+// Pure helpers
+// ---------------------------------------------------------------------------
+
+/// Keys sorted, top-level `syncedAt` zeroed (Electron's
+/// `normalizePayloadForHash`; array order is significant).
+fn normalize_for_hash(value: &Value, is_root: bool) -> Value {
+    match value {
+        Value::Array(items) => {
+            Value::Array(items.iter().map(|v| normalize_for_hash(v, false)).collect())
+        }
+        Value::Object(map) => {
+            let mut keys: Vec<&String> = map.keys().collect();
+            keys.sort();
+            let mut out = Map::new();
+            for key in keys {
+                let item = if is_root && key == "syncedAt" {
+                    Value::from(0)
+                } else {
+                    normalize_for_hash(&map[key], false)
+                };
+                out.insert(key.clone(), item);
             }
-        };
-
-        let tmp_path = self
-            .dir
-            .join(format!("{file_name}.tmp-{}", std::process::id()));
-        if let Err(err) = write_durably(&tmp_path, payload.as_bytes()).await {
-            let _ = tokio::fs::remove_file(&tmp_path).await;
-            return Err(io_error("write", &tmp_path, err));
+            Value::Object(out)
         }
-        if let Err(err) = tokio::fs::rename(&tmp_path, &path).await {
-            let _ = tokio::fs::remove_file(&tmp_path).await;
-            return Err(io_error("rename", &path, err));
-        }
-        sync_dir(&self.dir).await;
+        other => other.clone(),
+    }
+}
 
-        let info = BackupInfo {
-            file_name,
-            path: path.to_string_lossy().into_owned(),
-            created_at,
-            size: payload.len() as u64,
-            reason,
-        };
+pub fn fingerprint(payload: &Value) -> String {
+    hex::encode(Sha256::digest(
+        normalize_for_hash(payload, true).to_string().as_bytes(),
+    ))
+}
 
-        if let Err(err) = self.trim().await {
-            tracing::warn!(error = %err, "failed to trim vault backups after create");
+pub fn build_preview(payload: &Value) -> BackupPreview {
+    let count = |key: &str| {
+        payload
+            .get(key)
+            .and_then(Value::as_array)
+            .map_or(0, Vec::len)
+    };
+    BackupPreview {
+        host_count: count("hosts"),
+        key_count: count("keys"),
+        snippet_count: count("snippets"),
+        note_count: count("notes"),
+        identity_count: count("identities"),
+        port_forwarding_rule_count: count("portForwardingRules"),
+    }
+}
+
+pub fn sanitize_max_count(raw: Option<&Value>) -> usize {
+    let numeric = match raw {
+        Some(Value::Number(n)) => n.as_f64(),
+        Some(Value::String(s)) => s.trim().parse::<f64>().ok(),
+        _ => None,
+    };
+    match numeric {
+        Some(n) if n.is_finite() && n > 0.0 => {
+            (n.floor() as u64).clamp(MIN_MAX_COUNT, MAX_MAX_COUNT) as usize
         }
-        Ok(info)
+        _ => DEFAULT_MAX_COUNT as usize,
+    }
+}
+
+fn sanitize_reason(raw: Option<&Value>) -> String {
+    match raw.and_then(Value::as_str) {
+        Some(r @ ("app_version_change" | "before_restore")) => r.to_owned(),
+        _ => "before_restore".to_owned(),
+    }
+}
+
+fn sanitize_version(raw: Option<&Value>) -> Option<String> {
+    let trimmed = raw.and_then(Value::as_str)?.trim();
+    let valid = (1..=64).contains(&trimmed.len())
+        && trimmed
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '+' | '-'));
+    valid.then(|| trimmed.to_owned())
+}
+
+fn sanitize_sync_data_version(raw: Option<&Value>) -> Option<u64> {
+    let n = raw.and_then(Value::as_f64)?;
+    (n.is_finite() && n >= 1.0).then(|| n.floor() as u64)
+}
+
+// ---------------------------------------------------------------------------
+// Store
+// ---------------------------------------------------------------------------
+
+pub struct BackupStore<'a> {
+    dir: PathBuf,
+    cipher: &'a CredentialCipher,
+}
+
+struct Entry {
+    record: BackupRecord,
+    path: PathBuf,
+}
+
+fn io_err(context: &str, err: impl std::fmt::Display) -> CoreError {
+    CoreError::io(format!("{context}: {err}"))
+}
+
+#[cfg(unix)]
+fn create_private_dir(dir: &Path) -> std::io::Result<()> {
+    use std::os::unix::fs::DirBuilderExt;
+    std::fs::DirBuilder::new()
+        .recursive(true)
+        .mode(0o700)
+        .create(dir)
+}
+
+#[cfg(not(unix))]
+fn create_private_dir(dir: &Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(dir)
+}
+
+fn sync_dir(dir: &Path) {
+    #[cfg(unix)]
+    if let Ok(handle) = std::fs::File::open(dir) {
+        if let Err(err) = handle.sync_all() {
+            tracing::warn!(%err, "vault backup directory fsync failed");
+        }
+    }
+    #[cfg(not(unix))]
+    let _ = dir;
+}
+
+impl<'a> BackupStore<'a> {
+    pub fn new(dir: PathBuf, cipher: &'a CredentialCipher) -> Self {
+        Self { dir, cipher }
     }
 
-    /// All backups, newest first.
-    pub async fn list(&self) -> CoreResult<Vec<BackupInfo>> {
-        let mut dir = match tokio::fs::read_dir(&self.dir).await {
-            Ok(dir) => dir,
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-            Err(err) => return Err(io_error("list", &self.dir, err)),
-        };
-        let mut backups = Vec::new();
-        while let Some(entry) = dir
-            .next_entry()
-            .await
-            .map_err(|err| io_error("list", &self.dir, err))?
-        {
-            let name = entry.file_name();
-            let Some(name) = name.to_str() else { continue };
-            let Some(parsed) = parse_file_name(name) else {
-                continue;
-            };
-            let Ok(meta) = entry.metadata().await else {
-                continue;
-            };
-            if !meta.is_file() {
+    pub fn dir(&self) -> &Path {
+        &self.dir
+    }
+
+    pub fn encryption_available(&self) -> bool {
+        self.cipher.available()
+    }
+
+    fn list_entries(&self) -> CoreResult<Vec<Entry>> {
+        create_private_dir(&self.dir).map_err(|e| io_err("create backup dir", e))?;
+        let read_dir = std::fs::read_dir(&self.dir).map_err(|e| io_err("read backup dir", e))?;
+        let mut entries = Vec::new();
+        for item in read_dir.flatten() {
+            let name = item.file_name().to_string_lossy().into_owned();
+            if !item.file_type().is_ok_and(|t| t.is_file())
+                || !name.starts_with(BACKUP_FILE_PREFIX)
+                || !name.ends_with(BACKUP_FILE_EXT)
+            {
                 continue;
             }
-            let created_at = parsed
-                .created_at
-                .or_else(|| meta.modified().ok().map(system_time_ms))
-                .unwrap_or(0);
-            backups.push(BackupInfo {
-                file_name: name.to_string(),
-                path: entry.path().to_string_lossy().into_owned(),
-                created_at,
-                size: meta.len(),
-                reason: parsed.reason,
-            });
-        }
-        backups.sort_by(|a, b| {
-            b.created_at
-                .cmp(&a.created_at)
-                .then_with(|| b.file_name.cmp(&a.file_name))
-        });
-        Ok(backups)
-    }
-
-    /// Read one backup by file name. Names must be plain backup file names
-    /// (no path separators, no `..`).
-    pub async fn read(&self, file_name: &str) -> CoreResult<String> {
-        validate_file_name(file_name)?;
-        let path = self.dir.join(file_name);
-        tokio::fs::read_to_string(&path)
-            .await
-            .map_err(|err| io_error("read", &path, err))
-    }
-
-    /// Delete everything beyond the `keep` newest backups. Returns the number
-    /// of deleted files.
-    pub async fn trim(&self) -> CoreResult<usize> {
-        let backups = self.list().await?;
-        let mut deleted = 0;
-        for backup in backups.iter().skip(self.keep) {
-            match tokio::fs::remove_file(&backup.path).await {
-                Ok(()) => deleted += 1,
-                Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+            let path = item.path();
+            match Self::read_record(&path) {
+                Ok(record) => entries.push(Entry { record, path }),
                 Err(err) => {
-                    tracing::warn!(path = %backup.path, error = %err, "failed to delete old vault backup")
+                    tracing::warn!(path = %path.display(), %err, "failed to parse vault backup")
                 }
             }
         }
-        if deleted > 0 {
-            sync_dir(&self.dir).await;
-        }
-        Ok(deleted)
+        entries.sort_by(|a, b| {
+            b.record
+                .created_at
+                .cmp(&a.record.created_at)
+                .then_with(|| b.record.id.cmp(&a.record.id))
+        });
+        Ok(entries)
     }
 
-    /// Delete every backup (and interrupted temp files). Returns the number
-    /// of deleted files.
-    pub async fn clear(&self) -> CoreResult<usize> {
-        let mut dir = match tokio::fs::read_dir(&self.dir).await {
-            Ok(dir) => dir,
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(0),
-            Err(err) => return Err(io_error("list", &self.dir, err)),
+    fn read_record(path: &Path) -> CoreResult<BackupRecord> {
+        let size = std::fs::metadata(path)
+            .map_err(|e| io_err("stat vault backup", e))?
+            .len();
+        if size > MAX_BACKUP_FILE_BYTES {
+            return Err(CoreError::invalid(format!(
+                "Vault backup payload exceeds maximum allowed size ({size} > {MAX_PAYLOAD_BYTES})."
+            )));
+        }
+        let raw = std::fs::read_to_string(path).map_err(|e| io_err("read vault backup", e))?;
+        let record: BackupRecord = serde_json::from_str(&raw).map_err(|_| {
+            CoreError::invalid(format!("Invalid vault backup record: {}", path.display()))
+        })?;
+        if record.id.is_empty() {
+            return Err(CoreError::invalid(format!(
+                "Invalid vault backup record: {}",
+                path.display()
+            )));
+        }
+        Ok(record)
+    }
+
+    fn decode(&self, record: &BackupRecord) -> CoreResult<Value> {
+        let json = match record.payload_encoding.as_str() {
+            ENCODING_CIPHER => {
+                if !self.cipher.available() {
+                    return Err(CoreError::unsupported(ERR_ENCRYPTION_UNAVAILABLE));
+                }
+                self.cipher.decrypt(&record.payload_data)?
+            }
+            ENCODING_PLAIN => record.payload_data.clone(),
+            ENCODING_SAFE_STORAGE => {
+                return Err(CoreError::unsupported(
+                    "This backup was encrypted by the Electron build's safeStorage and cannot be read here.",
+                ))
+            }
+            other => {
+                return Err(CoreError::invalid(format!("Unsupported vault backup encoding: {other}")))
+            }
         };
+        serde_json::from_str(&json)
+            .map_err(|e| CoreError::invalid(format!("Corrupt vault backup payload: {e}")))
+    }
+
+    fn prune(entries: &[Entry], max_count: usize) -> TrimResult {
+        let mut deleted = 0;
+        for entry in entries.iter().skip(max_count) {
+            match std::fs::remove_file(&entry.path) {
+                Ok(()) => deleted += 1,
+                Err(err) => {
+                    tracing::warn!(path = %entry.path.display(), %err, "failed to delete old vault backup")
+                }
+            }
+        }
+        TrimResult {
+            deleted_count: deleted,
+            kept_count: entries.len().min(max_count),
+        }
+    }
+
+    pub async fn create(&self, options: CreateOptions) -> CoreResult<CreateResult> {
+        let _guard = MUTATION_LOCK.lock().await;
+        let payload = match options.payload {
+            Some(p @ Value::Object(_)) => p,
+            _ => return Err(CoreError::invalid("Missing vault backup payload.")),
+        };
+        let raw = payload.to_string();
+        if raw.len() > MAX_PAYLOAD_BYTES {
+            return Err(CoreError::invalid(format!(
+                "Vault backup payload exceeds maximum allowed size ({} > {MAX_PAYLOAD_BYTES}).",
+                raw.len()
+            )));
+        }
+        if !self.cipher.available() {
+            return Err(CoreError::unsupported(ERR_ENCRYPTION_UNAVAILABLE));
+        }
+
+        let existing = self.list_entries()?;
+        let fingerprint = fingerprint(&payload);
+        if let Some(latest) = existing.first() {
+            if latest.record.fingerprint == fingerprint {
+                return Ok(CreateResult {
+                    created: false,
+                    backup: BackupSummary::from(&latest.record),
+                });
+            }
+        }
+
+        let mut created_at = chrono::Utc::now().timestamp_millis();
+        let last = LAST_CREATED_AT.load(Ordering::SeqCst);
+        if created_at <= last {
+            created_at = last + 1;
+        }
+        LAST_CREATED_AT.store(created_at, Ordering::SeqCst);
+        let id = uuid_v4();
+        let record = BackupRecord {
+            format_version: 1,
+            id: id.clone(),
+            created_at,
+            reason: sanitize_reason(options.reason.as_ref()),
+            sync_data_version: sanitize_sync_data_version(options.sync_data_version.as_ref()),
+            source_app_version: sanitize_version(options.source_app_version.as_ref()),
+            target_app_version: sanitize_version(options.target_app_version.as_ref()),
+            fingerprint,
+            preview: build_preview(&payload),
+            payload_encoding: ENCODING_CIPHER.to_owned(),
+            payload_data: self.cipher.encrypt(&raw)?,
+        };
+
+        let path = self.dir.join(format!(
+            "{BACKUP_FILE_PREFIX}{created_at}-{id}{BACKUP_FILE_EXT}"
+        ));
+        let body = format!(
+            "{}\n",
+            serde_json::to_string_pretty(&record)
+                .map_err(|e| CoreError::internal(e.to_string()))?
+        );
+        write_atomic(&path, body.as_bytes())?;
+        sync_dir(&self.dir);
+
+        let summary = BackupSummary::from(&record);
+        let mut entries = vec![Entry { record, path }];
+        entries.extend(existing);
+        Self::prune(&entries, sanitize_max_count(options.max_count.as_ref()));
+        Ok(CreateResult {
+            created: true,
+            backup: summary,
+        })
+    }
+
+    pub fn list(&self) -> CoreResult<Vec<BackupSummary>> {
+        Ok(self
+            .list_entries()?
+            .iter()
+            .map(|e| BackupSummary::from(&e.record))
+            .collect())
+    }
+
+    pub fn read(&self, id: &str) -> CoreResult<ReadResult> {
+        if id.is_empty() {
+            return Err(CoreError::invalid("Missing vault backup id."));
+        }
+        let entries = self.list_entries()?;
+        let entry = entries
+            .iter()
+            .find(|e| e.record.id == id)
+            .ok_or_else(|| CoreError::not_found("Vault backup not found."))?;
+        Ok(ReadResult {
+            backup: BackupSummary::from(&entry.record),
+            payload: self.decode(&entry.record)?,
+        })
+    }
+
+    pub async fn trim(&self, max_count: Option<&Value>) -> CoreResult<TrimResult> {
+        let _guard = MUTATION_LOCK.lock().await;
+        let entries = self.list_entries()?;
+        Ok(Self::prune(&entries, sanitize_max_count(max_count)))
+    }
+
+    /// Remove every backup file, including unreadable ones and interrupted
+    /// `*.json.tmp-*` writes; unrelated files are kept.
+    pub async fn clear(&self) -> CoreResult<ClearResult> {
+        let _guard = MUTATION_LOCK.lock().await;
+        create_private_dir(&self.dir).map_err(|e| io_err("create backup dir", e))?;
         let mut deleted = 0;
         let mut failed = 0;
-        while let Some(entry) = dir
-            .next_entry()
-            .await
-            .map_err(|err| io_error("list", &self.dir, err))?
-        {
-            let name = entry.file_name();
-            let Some(name) = name.to_str() else { continue };
-            let is_backup = name.starts_with(FILE_PREFIX)
-                && (name.ends_with(FILE_EXT) || name.contains(&format!("{FILE_EXT}.tmp-")));
-            if !is_backup {
+        let read_dir = std::fs::read_dir(&self.dir).map_err(|e| io_err("read backup dir", e))?;
+        for item in read_dir.flatten() {
+            let name = item.file_name().to_string_lossy().into_owned();
+            let Ok(kind) = item.file_type() else { continue };
+            if !(kind.is_file() || kind.is_symlink()) || !name.starts_with(BACKUP_FILE_PREFIX) {
                 continue;
             }
-            let is_file = entry
-                .file_type()
-                .await
-                .map(|t| t.is_file() || t.is_symlink())
-                .unwrap_or(false);
-            if !is_file {
+            if !name.ends_with(BACKUP_FILE_EXT)
+                && !name.contains(&format!("{BACKUP_FILE_EXT}.tmp-"))
+            {
                 continue;
             }
-            match tokio::fs::remove_file(entry.path()).await {
+            match std::fs::remove_file(item.path()) {
                 Ok(()) => deleted += 1,
                 Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
-                Err(err) => {
-                    failed += 1;
-                    tracing::warn!(path = %entry.path().display(), error = %err, "failed to delete vault backup");
-                }
+                Err(_) => failed += 1,
             }
         }
-        sync_dir(&self.dir).await;
+        sync_dir(&self.dir);
         if failed > 0 {
             return Err(CoreError::io(format!(
                 "Could not delete {failed} vault backup file(s)."
             )));
         }
-        Ok(deleted)
+        Ok(ClearResult {
+            deleted_count: deleted,
+        })
     }
 }
 
-struct ParsedName {
-    created_at: Option<i64>,
-    reason: Option<String>,
-}
-
-fn build_file_name(created_at_ms: i64, reason: Option<&str>) -> String {
-    let stamp = Utc
-        .timestamp_millis_opt(created_at_ms)
-        .single()
-        .map(|dt| dt.format("%Y%m%d-%H%M%S").to_string())
-        .unwrap_or_else(|| "00000000-000000".to_string());
-    let ms = created_at_ms.rem_euclid(1000);
-    match reason {
-        Some(reason) => format!("{FILE_PREFIX}{stamp}-{ms:03}-{reason}{FILE_EXT}"),
-        None => format!("{FILE_PREFIX}{stamp}-{ms:03}{FILE_EXT}"),
-    }
-}
-
-/// Parse `vault-YYYYMMDD-HHMMSS-mmm[-reason].json`. Returns `None` for
-/// files that are not backups at all; a backup with an unparsable
-/// timestamp still yields `Some` with `created_at: None`.
-fn parse_file_name(name: &str) -> Option<ParsedName> {
-    let stem = name.strip_prefix(FILE_PREFIX)?.strip_suffix(FILE_EXT)?;
-    if stem.is_empty() {
-        return None;
-    }
-    let mut parts = stem.splitn(4, '-');
-    let date = parts.next().unwrap_or("");
-    let time = parts.next().unwrap_or("");
-    let ms = parts.next().unwrap_or("");
-    let reason = parts.next().filter(|r| !r.is_empty()).map(str::to_string);
-
-    let created_at = (|| {
-        let date = NaiveDate::parse_from_str(date, "%Y%m%d").ok()?;
-        let time = NaiveTime::parse_from_str(time, "%H%M%S").ok()?;
-        let ms: u32 = ms.parse().ok().filter(|v| *v < 1000)?;
-        let naive = NaiveDateTime::new(date, time);
-        let dt: DateTime<Utc> = Utc.from_utc_datetime(&naive);
-        Some(dt.timestamp_millis() + i64::from(ms))
+/// tmp file (0600) + fsync + rename.
+fn write_atomic(path: &Path, bytes: &[u8]) -> CoreResult<()> {
+    use std::io::Write;
+    let tmp = PathBuf::from(format!("{}.tmp-{}", path.display(), uuid_v4()));
+    let result = (|| -> std::io::Result<()> {
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let mut file = options.open(&tmp)?;
+        file.write_all(bytes)?;
+        file.sync_all()?;
+        drop(file);
+        std::fs::rename(&tmp, path)
     })();
-
-    Some(ParsedName { created_at, reason })
+    result.map_err(|err| {
+        let _ = std::fs::remove_file(&tmp);
+        io_err("write vault backup", err)
+    })
 }
 
-fn sanitize_reason(raw: &str) -> Option<String> {
-    let mut out = String::with_capacity(raw.len());
-    let mut last_dash = true;
-    for ch in raw.chars().flat_map(char::to_lowercase) {
-        let mapped = if ch.is_ascii_alphanumeric() { ch } else { '-' };
-        if mapped == '-' {
-            if last_dash {
-                continue;
-            }
-            last_dash = true;
-        } else {
-            last_dash = false;
-        }
-        out.push(mapped);
-        if out.len() >= MAX_REASON_LEN {
-            break;
-        }
+fn uuid_v4() -> String {
+    let mut bytes = [0u8; 16];
+    if crate::credentials::fill_random(&mut bytes).is_err() {
+        // Uniqueness only (file names); fall back to time-derived bytes.
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_nanos());
+        bytes.copy_from_slice(&nanos.to_le_bytes());
     }
-    let trimmed = out.trim_matches('-');
-    if trimmed.is_empty() {
-        None
-    } else {
-        Some(trimmed.to_string())
-    }
-}
-
-fn validate_file_name(name: &str) -> CoreResult<()> {
-    if name.is_empty()
-        || name.contains('/')
-        || name.contains('\\')
-        || name.contains("..")
-        || name.contains('\0')
-        || !name.starts_with(FILE_PREFIX)
-        || !name.ends_with(FILE_EXT)
-    {
-        return Err(CoreError::invalid("invalid vault backup file name"));
-    }
-    Ok(())
-}
-
-fn system_time_ms(time: std::time::SystemTime) -> i64 {
-    match time.duration_since(std::time::UNIX_EPOCH) {
-        Ok(d) => d.as_millis() as i64,
-        Err(e) => -(e.duration().as_millis() as i64),
-    }
-}
-
-async fn write_durably(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
-    use tokio::io::AsyncWriteExt;
-    let mut options = tokio::fs::OpenOptions::new();
-    options.write(true).create(true).truncate(true);
-    #[cfg(unix)]
-    options.mode(0o600);
-    let mut file = options.open(path).await?;
-    file.write_all(bytes).await?;
-    file.flush().await?;
-    file.sync_all().await?;
-    Ok(())
-}
-
-/// Best-effort directory fsync so a rename is durable (no-op on Windows).
-async fn sync_dir(dir: &Path) {
-    #[cfg(unix)]
-    {
-        if let Ok(handle) = tokio::fs::File::open(dir).await {
-            if let Err(err) = handle.sync_all().await {
-                tracing::debug!(path = %dir.display(), error = %err, "directory fsync failed");
-            }
-        }
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = dir;
-    }
-}
-
-fn io_error(action: &str, path: &Path, err: std::io::Error) -> CoreError {
-    let mut core = CoreError::from(err);
-    core.message = format!("failed to {action} {}: {}", path.display(), core.message);
-    core
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    let hex = hex::encode(bytes);
+    format!(
+        "{}-{}-{}-{}-{}",
+        &hex[0..8],
+        &hex[8..12],
+        &hex[12..16],
+        &hex[16..20],
+        &hex[20..32]
+    )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use netcatty_core::ErrorCode;
+    use serde_json::json;
 
-    #[test]
-    fn file_name_round_trips() {
-        let ts = 1_762_180_501_123; // 2025-11-03T14:35:01.123Z
-        let name = build_file_name(ts, Some("before-restore"));
-        assert_eq!(name, "vault-20251103-143501-123-before-restore.json");
-        let parsed = parse_file_name(&name).unwrap();
-        assert_eq!(parsed.created_at, Some(ts));
-        assert_eq!(parsed.reason.as_deref(), Some("before-restore"));
-
-        let plain = build_file_name(ts, None);
-        assert_eq!(plain, "vault-20251103-143501-123.json");
-        let parsed = parse_file_name(&plain).unwrap();
-        assert_eq!(parsed.created_at, Some(ts));
-        assert_eq!(parsed.reason, None);
-
-        assert!(parse_file_name("other.json").is_none());
-        assert!(parse_file_name("vault-.json").is_none());
-        let odd = parse_file_name("vault-garbage.json").unwrap();
-        assert_eq!(odd.created_at, None);
+    fn store<'a>(dir: &Path, cipher: &'a CredentialCipher) -> BackupStore<'a> {
+        BackupStore::new(dir.join("backups"), cipher)
     }
 
-    #[test]
-    fn reason_is_sanitized() {
-        assert_eq!(
-            sanitize_reason("App Version Change").as_deref(),
-            Some("app-version-change")
-        );
-        assert_eq!(
-            sanitize_reason("before_restore").as_deref(),
-            Some("before-restore")
-        );
-        assert_eq!(
-            sanitize_reason("../../etc/passwd").as_deref(),
-            Some("etc-passwd")
-        );
-        assert_eq!(sanitize_reason("!!!"), None);
-        assert!(sanitize_reason(&"x".repeat(100)).unwrap().len() <= MAX_REASON_LEN);
+    fn payload(hosts: usize, synced_at: i64) -> Value {
+        json!({
+            "hosts": (0..hosts).map(|i| json!({ "id": i, "label": format!("h{i}") })).collect::<Vec<_>>(),
+            "keys": [{}], "snippets": [], "identities": [{}, {}],
+            "syncedAt": synced_at,
+        })
+    }
+
+    fn options(payload: Value, max_count: Option<u64>) -> CreateOptions {
+        CreateOptions {
+            payload: Some(payload),
+            reason: Some(json!("app_version_change")),
+            source_app_version: Some(json!("1.2.0")),
+            target_app_version: Some(json!("bad version!")),
+            sync_data_version: Some(json!(3.7)),
+            max_count: max_count.map(Value::from),
+        }
     }
 
     #[tokio::test]
-    async fn create_list_read_trim_clear() {
+    async fn create_dedupes_lists_reads_trims_and_clears() {
         let dir = tempfile::tempdir().unwrap();
-        let mut store = BackupStore::new(dir.path().join("backups"));
-        store.keep = 3;
+        let cipher = CredentialCipher::with_key([7; 32]);
+        let store = store(dir.path(), &cipher);
 
-        assert!(store.list().await.unwrap().is_empty());
+        let first = store.create(options(payload(2, 1), None)).await.unwrap();
+        assert!(first.created);
+        assert_eq!(first.backup.preview.host_count, 2);
+        assert_eq!(first.backup.preview.identity_count, 2);
+        assert_eq!(first.backup.reason, "app_version_change");
+        assert_eq!(first.backup.source_app_version.as_deref(), Some("1.2.0"));
+        assert_eq!(first.backup.target_app_version, None);
+        assert_eq!(first.backup.sync_data_version, Some(3));
 
-        let mut created = Vec::new();
-        for i in 0..5 {
-            let payload = format!("{{\"i\":{i}}}");
-            let reason = if i % 2 == 0 {
-                Some("app_version_change")
-            } else {
-                None
-            };
-            let info = store.create(&payload, reason).await.unwrap();
-            assert!(info.file_name.starts_with("vault-"));
-            assert!(info.file_name.ends_with(".json"));
-            assert_eq!(info.size, payload.len() as u64);
-            if i % 2 == 0 {
-                assert_eq!(info.reason.as_deref(), Some("app-version-change"));
-                assert!(info.file_name.contains("-app-version-change.json"));
-            } else {
-                assert_eq!(info.reason, None);
-            }
-            created.push(info);
-        }
+        // Same content, different top-level syncedAt → deduped.
+        let again = store.create(options(payload(2, 999), None)).await.unwrap();
+        assert!(!again.created);
+        assert_eq!(again.backup.id, first.backup.id);
 
-        // Trimmed to `keep` after each create; newest first.
-        let listed = store.list().await.unwrap();
-        assert_eq!(listed.len(), 3);
-        assert_eq!(listed[0].file_name, created[4].file_name);
-        assert_eq!(listed[1].file_name, created[3].file_name);
-        assert_eq!(listed[2].file_name, created[2].file_name);
-        assert!(listed
-            .windows(2)
-            .all(|w| w[0].created_at >= w[1].created_at));
-
-        let content = store.read(&created[4].file_name).await.unwrap();
-        assert_eq!(content, "{\"i\":4}");
+        let second = store.create(options(payload(3, 1), None)).await.unwrap();
+        assert!(second.created && second.backup.created_at > first.backup.created_at);
+        let listed = store.list().unwrap();
         assert_eq!(
-            store.read(&created[0].file_name).await.unwrap_err().code,
-            ErrorCode::NotFound
+            listed.iter().map(|b| b.id.clone()).collect::<Vec<_>>(),
+            vec![second.backup.id.clone(), first.backup.id.clone()]
         );
 
-        // No temp files were left behind.
-        let leftovers: Vec<String> = std::fs::read_dir(&store.dir)
+        // Payload is stored encrypted and reads back intact.
+        let file = std::fs::read_dir(store.dir())
             .unwrap()
-            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
-            .filter(|n| n.contains(".tmp"))
-            .collect();
-        assert!(leftovers.is_empty(), "{leftovers:?}");
+            .next()
+            .unwrap()
+            .unwrap()
+            .path();
+        let raw = std::fs::read_to_string(file).unwrap();
+        assert!(raw.contains("\"payloadEncoding\": \"cipher-v2\"") && !raw.contains("h0"));
+        let read = store.read(&first.backup.id).unwrap();
+        assert_eq!(read.payload, payload(2, 1));
+        assert_eq!(
+            store.read("nope").unwrap_err().message,
+            "Vault backup not found."
+        );
 
-        store.keep = 1;
-        assert_eq!(store.trim().await.unwrap(), 2);
-        assert_eq!(store.list().await.unwrap().len(), 1);
-        assert_eq!(store.trim().await.unwrap(), 0);
+        assert_eq!(
+            store.trim(Some(&json!(1))).await.unwrap(),
+            TrimResult {
+                deleted_count: 1,
+                kept_count: 1
+            }
+        );
+        assert_eq!(store.list().unwrap()[0].id, second.backup.id);
 
-        std::fs::write(store.dir.join("unrelated.txt"), "keep me").unwrap();
-        std::fs::write(store.dir.join("vault-x.json.tmp-123"), "partial").unwrap();
-        assert_eq!(store.clear().await.unwrap(), 2);
-        assert!(store.list().await.unwrap().is_empty());
-        assert!(store.dir.join("unrelated.txt").exists());
-        assert_eq!(store.clear().await.unwrap(), 0);
+        std::fs::write(store.dir().join("vault-backup-x.json.tmp-1"), "partial").unwrap();
+        std::fs::write(store.dir().join("unrelated.txt"), "keep").unwrap();
+        assert_eq!(
+            store.clear().await.unwrap(),
+            ClearResult { deleted_count: 2 }
+        );
+        assert!(store.list().unwrap().is_empty());
+        assert!(store.dir().join("unrelated.txt").exists());
     }
 
     #[tokio::test]
-    async fn read_rejects_path_traversal() {
+    async fn create_prunes_to_max_count_and_validates() {
         let dir = tempfile::tempdir().unwrap();
-        let store = BackupStore::new(dir.path().to_path_buf());
-        std::fs::write(dir.path().join("secret.txt"), "nope").unwrap();
-        for name in [
-            "../secret.txt",
-            "..\\secret.txt",
-            "/etc/passwd",
-            "sub/vault-20250101-000000-000.json",
-            "vault-..json",
-            "secret.txt",
-            "",
-        ] {
-            let err = store.read(name).await.unwrap_err();
-            assert_eq!(err.code, ErrorCode::InvalidArgument, "{name}");
+        let cipher = CredentialCipher::with_key([1; 32]);
+        let store = store(dir.path(), &cipher);
+        for i in 0..4 {
+            store.create(options(payload(i, 0), Some(2))).await.unwrap();
         }
+        assert_eq!(store.list().unwrap().len(), 2);
+        let err = store.create(CreateOptions::default()).await.unwrap_err();
+        assert_eq!(err.message, "Missing vault backup payload.");
+
+        let plain = CredentialCipher::unavailable();
+        let locked = BackupStore::new(dir.path().join("other"), &plain);
+        let err = locked
+            .create(options(payload(1, 0), None))
+            .await
+            .unwrap_err();
+        assert_eq!(err.message, ERR_ENCRYPTION_UNAVAILABLE);
     }
 
-    #[tokio::test]
-    async fn list_on_missing_dir_is_empty_and_clear_is_zero() {
-        let dir = tempfile::tempdir().unwrap();
-        let store = BackupStore::new(dir.path().join("nope"));
-        assert!(store.list().await.unwrap().is_empty());
-        assert_eq!(store.trim().await.unwrap(), 0);
-        assert_eq!(store.clear().await.unwrap(), 0);
+    #[test]
+    fn helpers_match_electron() {
+        assert_eq!(sanitize_max_count(None), 20);
+        assert_eq!(sanitize_max_count(Some(&json!(0))), 20);
+        assert_eq!(sanitize_max_count(Some(&json!(500))), 100);
+        assert_eq!(sanitize_max_count(Some(&json!(3.9))), 3);
+        assert_eq!(sanitize_reason(Some(&json!("weird"))), "before_restore");
+        assert_eq!(
+            sanitize_version(Some(&json!(" 1.2.0-beta+1 "))).as_deref(),
+            Some("1.2.0-beta+1")
+        );
+        assert_eq!(sanitize_sync_data_version(Some(&json!(0))), None);
+        // Key order and top-level syncedAt do not change the fingerprint;
+        // nested syncedAt does.
+        assert_eq!(
+            fingerprint(&json!({"a": 1, "b": 2, "syncedAt": 5})),
+            fingerprint(&json!({"b": 2, "a": 1, "syncedAt": 9}))
+        );
+        assert_ne!(
+            fingerprint(&json!({"x": {"syncedAt": 1}})),
+            fingerprint(&json!({"x": {"syncedAt": 2}}))
+        );
+        assert_eq!(uuid_v4().len(), 36);
     }
 }

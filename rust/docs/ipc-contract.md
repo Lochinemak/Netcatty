@@ -226,10 +226,21 @@ Events: `netcatty:portforward:status` → `PortForwardStatusEvent`;
 | `credentials_available` | — | `boolean` |
 | `credentials_encrypt` | `plaintext` | `string` (`enc:v2:...`) |
 | `credentials_decrypt` | `value` | `string` |
-| `vault_backup_create` | `payload: string, reason?` | `BackupInfo` |
-| `vault_backup_list` | — | `BackupInfo[]` |
-| `vault_backup_read` | `fileName` | `string` |
-| `vault_backup_trim` / `vault_backup_clear` | — | `number` |
+| `vault_backup_capabilities` | — | `{ encryptionAvailable }` |
+| `vault_backup_create` | `payload: { payload, reason?, sourceAppVersion?, targetAppVersion?, syncDataVersion?, maxCount? }` | `{ created, backup }` (`created: false` when the newest backup has the same fingerprint) |
+| `vault_backup_list` | — | backup summaries, newest first |
+| `vault_backup_read` | `payload: { id }` | `{ backup, payload }` |
+| `vault_backup_trim` | `payload: { maxCount }` | `{ deletedCount, keptCount }` |
+| `vault_backup_clear` | — | `{ deletedCount }` |
+| `vault_backup_open_dir` | — | `{ success, path }` |
+
+Vault backups follow `vaultBackupBridge.cjs`: one
+`vault-backup-<createdAt>-<id>.json` record per backup (0600, atomic write),
+fingerprint dedupe (top-level `syncedAt` ignored), retention 1–100 (default
+20), payload encrypted with the credential cipher (`payloadEncoding:
+"cipher-v2"`; Electron's `safeStorage-v1` records cannot be read, legacy
+`plain-json-v1` can). Creates / trims / clears emit
+`netcatty:vault-backups:changed`.
 
 ## Cloud sync
 

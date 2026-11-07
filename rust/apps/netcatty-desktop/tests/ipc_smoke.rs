@@ -736,3 +736,38 @@ fn settings_window_and_cross_window_events() {
             .any(|v| v == &json!({ "source": "main", "payload": { "key": "k", "value": 1 } }))
     ));
 }
+
+#[test]
+fn vault_backups_round_trip() {
+    let h = build_app();
+    let changed = collect(&h.app, "netcatty:vault-backups:changed");
+    assert_eq!(
+        ok(invoke(&h.webview, "vault_backup_capabilities", json!({}))),
+        json!({ "encryptionAvailable": true })
+    );
+    let payload = json!({ "hosts": [{ "id": "h1" }], "syncedAt": 1 });
+    let created = ok(invoke(
+        &h.webview,
+        "vault_backup_create",
+        json!({ "payload": { "payload": payload, "reason": "before_restore" } }),
+    ));
+    assert_eq!(created["created"], json!(true));
+    assert_eq!(created["backup"]["preview"]["hostCount"], json!(1));
+    assert!(wait_for(&changed, Duration::from_secs(2), |seen| seen
+        .len()
+        == 1));
+    let id = created["backup"]["id"].clone();
+
+    let listed = ok(invoke(&h.webview, "vault_backup_list", json!({})));
+    assert_eq!(listed.as_array().unwrap().len(), 1);
+    let read = ok(invoke(
+        &h.webview,
+        "vault_backup_read",
+        json!({ "payload": { "id": id } }),
+    ));
+    assert_eq!(read["payload"], payload);
+    assert_eq!(
+        ok(invoke(&h.webview, "vault_backup_clear", json!({}))),
+        json!({ "deletedCount": 1 })
+    );
+}

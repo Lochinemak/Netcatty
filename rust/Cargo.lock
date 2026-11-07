@@ -4058,6 +4058,7 @@ dependencies = [
  "base64 0.23.1",
  "chrono",
  "dirs",
+ "hex",
  "keyring",
  "netcatty-core",
  "parking_lot 0.13.0",
