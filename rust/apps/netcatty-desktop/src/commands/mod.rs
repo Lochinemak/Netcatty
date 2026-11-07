@@ -16,14 +16,17 @@ pub mod filewatch;
 pub mod forward;
 pub mod hotkey;
 pub mod localfs;
+pub mod mosh;
 pub mod notification;
 pub mod openwith;
 pub mod rdesktop;
+pub mod serial;
 pub mod session;
 pub mod sftp;
 pub mod ssh;
 pub mod store;
 pub mod sync;
+pub mod telnet;
 pub mod temp;
 pub mod tempdir;
 pub mod totp;
@@ -259,6 +262,15 @@ pub fn handler<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + 
         sync::s3_upload,
         sync::s3_download,
         sync::s3_delete,
+        // Telnet / serial / Mosh / EternalTerminal sessions.
+        telnet::telnet_start,
+        telnet::telnet_get_echo_mode,
+        telnet::session_notify_user_input,
+        telnet::session_set_encoding,
+        serial::serial_start,
+        serial::serial_list_ports,
+        mosh::mosh_start,
+        mosh::et_start,
     ]
 }
 

@@ -1,0 +1,21 @@
+[package]
+name = "netcatty-serial"
+description = "Serial port sessions (serialport crate), port listing and Windows named-pipe consoles"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+netcatty-core = { workspace = true }
+tokio = { workspace = true }
+bytes = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+serde = { workspace = true }
+# No `libudev` feature: Linux ports are enumerated from sysfs, so the build
+# needs no system library.
+serialport = { version = "4.7", default-features = false }
+
+[dev-dependencies]
+serde_json = { workspace = true }

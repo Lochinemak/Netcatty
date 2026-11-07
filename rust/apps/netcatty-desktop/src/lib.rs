@@ -10,6 +10,7 @@
 //! * `events` emits renderer-facing events using the channel names in
 //!   [`netcatty_core::ipc::events`].
 
+pub mod askpass;
 pub mod commands;
 pub mod connect;
 pub mod decoder;
@@ -17,6 +18,7 @@ pub mod events;
 pub mod prompts;
 pub mod sessions;
 pub mod state;
+pub mod stream;
 
 use netcatty_store::CredentialCipher;
 use tauri::Manager;

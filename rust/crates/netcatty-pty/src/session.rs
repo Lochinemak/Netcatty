@@ -39,6 +39,12 @@ pub struct LocalPtyOptions {
     pub rows: u16,
     /// `TERM` (defaults to `xterm-256color`).
     pub term: Option<String>,
+    /// Inherited environment variables to drop (external clients such as
+    /// the Mosh bootstrap `ssh` must not forward the local locale).
+    pub env_remove: Vec<String>,
+    /// Do not force a UTF-8 locale when none is set (see
+    /// `apply_locale_defaults`).
+    pub skip_locale_defaults: bool,
 }
 
 #[derive(Debug)]
@@ -111,6 +117,9 @@ impl PtySession {
         if let Some(cwd) = &cwd {
             cmd.cwd(cwd);
         }
+        for key in &options.env_remove {
+            cmd.env_remove(key);
+        }
         for (key, value) in &options.env {
             if key.is_empty() || key.contains('=') || key.contains('\0') || value.contains('\0') {
                 tracing::warn!(key = %key, "ignoring invalid environment variable for local terminal");
@@ -126,7 +135,7 @@ impl PtySession {
             .unwrap_or(DEFAULT_TERM);
         cmd.env("TERM", term);
         cmd.env("COLORTERM", "truecolor");
-        if cfg!(unix) {
+        if cfg!(unix) && !options.skip_locale_defaults {
             apply_locale_defaults(&mut cmd);
         }
 

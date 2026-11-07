@@ -44,8 +44,12 @@ pub mod events {
     pub const SFTP_GLOBAL_TRANSFER: &str = "netcatty:sftp:global-transfer";
     /// `TelnetEchoModeEvent`.
     pub const TELNET_ECHO_MODE: &str = "netcatty:telnet:echo-mode";
-    /// `{ sessionId }`.
+    /// `{ sessionId, bootEpoch? }` (telnet and serial sessions).
     pub const TELNET_AUTO_LOGIN_COMPLETE: &str = "netcatty:telnet:auto-login-complete";
+    /// `{ sessionId, bootEpoch? }` — the user took over / login stalled.
+    pub const TELNET_AUTO_LOGIN_CANCELLED: &str = "netcatty:telnet:auto-login-cancelled";
+    /// `{ sessionId, bootEpoch? }` — Mosh swapped to `mosh-client`.
+    pub const MOSH_READY: &str = "netcatty:mosh:ready";
     /// `LocalTreeProgressEvent`.
     pub const LOCAL_TREE_PROGRESS: &str = "netcatty:local:tree-progress";
     /// No payload — the cloud sync master password became available
@@ -402,6 +406,10 @@ pub struct WriteToSessionPayload {
     pub sensitive: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub line_delay_ms: Option<u64>,
+    /// Serial sessions: character a single Backspace erases on a
+    /// byte-oriented device (one Backspace per encoded byte).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub serial_erase_char: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -428,6 +436,21 @@ pub struct StartSessionResult {
 pub struct SessionDataEvent {
     pub session_id: String,
     pub data: String,
+    /// Renderer hints for this chunk (Mosh bootstrap output).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub meta: Option<SessionDataMeta>,
+}
+
+/// `meta` of `onSessionData` callbacks.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionDataMeta {
+    /// Output of the Mosh SSH bootstrap PTY (the session is not ready yet).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mosh_handshake: Option<bool>,
+    /// The bootstrap waits on input Netcatty cannot answer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mosh_handshake_requires_user_input: Option<bool>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

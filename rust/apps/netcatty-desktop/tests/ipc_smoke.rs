@@ -983,3 +983,502 @@ fn tray_hotkey_and_autostart_commands() {
         );
     }
 }
+
+// ---------------------------------------------------------------------------
+// Telnet / serial / Mosh / EternalTerminal sessions
+// ---------------------------------------------------------------------------
+
+/// Read from `stream` until `needle` has been seen (or panic after 10 s).
+fn read_until(stream: &mut std::net::TcpStream, seen: &mut Vec<u8>, needle: &[u8]) {
+    use std::io::Read;
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let mut buf = [0u8; 1024];
+    while !seen.windows(needle.len()).any(|w| w == needle) {
+        assert!(
+            Instant::now() < deadline,
+            "timed out waiting for {needle:?}; got {seen:?}"
+        );
+        match stream.read(&mut buf) {
+            Ok(0) => panic!("client closed while waiting for {needle:?}"),
+            Ok(n) => seen.extend_from_slice(&buf[..n]),
+            Err(e)
+                if e.kind() == std::io::ErrorKind::WouldBlock
+                    || e.kind() == std::io::ErrorKind::TimedOut => {}
+            Err(e) => panic!("read failed: {e}"),
+        }
+    }
+}
+
+#[test]
+fn telnet_session_against_fake_server() {
+    use std::io::Write;
+    const IAC: u8 = 255;
+    const WILL: u8 = 251;
+    const WONT: u8 = 252;
+    const DO: u8 = 253;
+    const SB: u8 = 250;
+    const SE: u8 = 240;
+    const ECHO: u8 = 1;
+    const NAWS: u8 = 31;
+
+    let h = build_app();
+    let data = collect(&h.app, "netcatty:data");
+    let exits = collect(&h.app, "netcatty:exit");
+    let echo = collect(&h.app, "netcatty:telnet:echo-mode");
+    let complete = collect(&h.app, "netcatty:telnet:auto-login-complete");
+
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let (server_tx, server_rx) = std::sync::mpsc::channel::<Vec<u8>>();
+    let (step_tx, step_rx) = std::sync::mpsc::channel::<&'static str>();
+    let server = std::thread::spawn(move || {
+        let (mut s, _) = listener.accept().unwrap();
+        s.set_read_timeout(Some(Duration::from_millis(100)))
+            .unwrap();
+        let mut seen = Vec::new();
+        // Negotiate NAWS + echo, then prompt for credentials.
+        s.write_all(&[IAC, DO, NAWS, IAC, WILL, ECHO]).unwrap();
+        s.write_all(b"\r\nUsername: ").unwrap();
+        read_until(&mut s, &mut seen, b"admin\r\n");
+        s.write_all(b"\r\nPassword: ").unwrap();
+        read_until(&mut s, &mut seen, b"secret\r\n");
+        s.write_all(b"\r\nWelcome\r\nrouter# ").unwrap();
+        // Wait for the test to type a command and resize.
+        assert_eq!(step_rx.recv().unwrap(), "typed");
+        read_until(&mut s, &mut seen, b"show ver\r\n");
+        read_until(&mut s, &mut seen, &[IAC, SB, NAWS, 0, 132, 0, 43, IAC, SE]);
+        s.write_all(&[IAC, WONT, ECHO]).unwrap();
+        assert_eq!(step_rx.recv().unwrap(), "close");
+        server_tx.send(seen).unwrap();
+        // Half-close and drain so the client sees a clean EOF (an RST
+        // would be reported as an error exit, like in Electron).
+        s.shutdown(std::net::Shutdown::Write).unwrap();
+        let mut sink = [0u8; 256];
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while Instant::now() < deadline {
+            match std::io::Read::read(&mut s, &mut sink) {
+                Ok(0) => break,
+                Ok(_) => {}
+                Err(e)
+                    if e.kind() == std::io::ErrorKind::WouldBlock
+                        || e.kind() == std::io::ErrorKind::TimedOut => {}
+                Err(_) => break,
+            }
+        }
+    });
+
+    let started = ok(invoke(
+        &h.webview,
+        "telnet_start",
+        json!({ "payload": {
+            "sessionId": "tel-1",
+            "hostname": "127.0.0.1",
+            "port": port,
+            "username": "admin",
+            "password": "secret",
+            "cols": 100,
+            "rows": 30,
+            "bootEpoch": 7
+        } }),
+    ));
+    assert_eq!(started["sessionId"], "tel-1");
+
+    assert!(
+        wait_for(&complete, Duration::from_secs(10), |events| {
+            events
+                .iter()
+                .any(|e| session_id_of(e) == Some("tel-1") && e["bootEpoch"] == 7)
+        }),
+        "auto-login-complete not emitted: {:?}",
+        complete.lock().unwrap()
+    );
+    assert!(wait_for(&data, Duration::from_secs(10), |events| {
+        let all: String = events
+            .iter()
+            .filter(|e| session_id_of(e) == Some("tel-1"))
+            .filter_map(|e| e["data"].as_str())
+            .collect();
+        // Telnet commands never leak into the terminal output.
+        all.contains("Username: ") && all.contains("router# ") && !all.contains('\u{1f}')
+    }));
+    assert!(wait_for(&echo, Duration::from_secs(5), |events| {
+        events.iter().any(|e| {
+            session_id_of(e) == Some("tel-1") && e["remoteEcho"] == true && e["localEcho"] == false
+        })
+    }));
+    let mode = ok(invoke(
+        &h.webview,
+        "telnet_get_echo_mode",
+        json!({ "sessionId": "tel-1" }),
+    ));
+    assert_eq!(mode["success"], true);
+    assert_eq!(mode["sessionId"], "tel-1");
+    assert_eq!(mode["remoteEcho"], true);
+    let missing = ok(invoke(
+        &h.webview,
+        "telnet_get_echo_mode",
+        json!({ "sessionId": "nope" }),
+    ));
+    assert_eq!(missing["success"], false);
+    assert_eq!(missing["error"], "Telnet echo mode unavailable");
+
+    ok(invoke(
+        &h.webview,
+        "session_write",
+        json!({ "payload": { "sessionId": "tel-1", "data": "show ver\r" } }),
+    ));
+    ok(invoke(
+        &h.webview,
+        "session_resize",
+        json!({ "payload": { "sessionId": "tel-1", "cols": 132, "rows": 43 } }),
+    ));
+    step_tx.send("typed").unwrap();
+    assert!(wait_for(&echo, Duration::from_secs(5), |events| {
+        events
+            .iter()
+            .any(|e| session_id_of(e) == Some("tel-1") && e["remoteEcho"] == false)
+    }));
+    step_tx.send("close").unwrap();
+    let seen = server_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+    server.join().unwrap();
+    // Client negotiation: DO SGA, WILL TTYPE, WILL NAWS, then the size.
+    assert!(seen.windows(3).any(|w| w == [IAC, DO, 3]));
+    assert!(seen
+        .windows(9)
+        .any(|w| w == [IAC, SB, NAWS, 0, 100, 0, 30, IAC, SE]));
+
+    assert!(wait_for(&exits, Duration::from_secs(10), |events| {
+        events.iter().any(|e| session_id_of(e) == Some("tel-1"))
+    }));
+    let exit = exits
+        .lock()
+        .unwrap()
+        .iter()
+        .find(|e| session_id_of(e) == Some("tel-1"))
+        .cloned()
+        .unwrap();
+    assert_eq!(exit["reason"], "closed", "{exit}");
+    assert_eq!(exit["exitCode"], 0, "{exit}");
+}
+
+#[test]
+fn telnet_connect_errors_match_electron() {
+    let h = build_app();
+    // Bind then drop: nothing listens on this port any more.
+    let port = {
+        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        l.local_addr().unwrap().port()
+    };
+    let err = invoke(
+        &h.webview,
+        "telnet_start",
+        json!({ "payload": { "hostname": "127.0.0.1", "port": port } }),
+    )
+    .expect_err("connection must be refused");
+    assert_eq!(err["code"], "NETWORK", "{err}");
+    assert!(
+        err["message"]
+            .as_str()
+            .unwrap()
+            .starts_with("Failed to connect: "),
+        "{err}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn serial_session_over_pty_pair() {
+    use serialport::SerialPort;
+    use std::io::{Read, Write};
+
+    let h = build_app();
+    let data = collect(&h.app, "netcatty:data");
+    let exits = collect(&h.app, "netcatty:exit");
+    let cancelled = collect(&h.app, "netcatty:telnet:auto-login-cancelled");
+
+    let listed = ok(invoke(&h.webview, "serial_list_ports", json!({})));
+    assert!(listed.is_array());
+
+    let (mut master, slave) = serialport::TTYPort::pair().expect("pty pair");
+    let path = slave.name().unwrap();
+    drop(slave);
+    master.set_timeout(Duration::from_millis(100)).unwrap();
+
+    let started = ok(invoke(
+        &h.webview,
+        "serial_start",
+        json!({ "payload": {
+            "sessionId": "ser-1",
+            "path": path,
+            "baudRate": 9600,
+            "username": "root",
+            "charset": "gb18030"
+        } }),
+    ));
+    assert_eq!(started["sessionId"], "ser-1");
+
+    let read_master = |master: &mut serialport::TTYPort, needle: &[u8]| {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let mut seen = Vec::new();
+        let mut buf = [0u8; 256];
+        while !seen.windows(needle.len()).any(|w| w == needle) {
+            assert!(Instant::now() < deadline, "timed out: {seen:?}");
+            if let Ok(n) = master.read(&mut buf) {
+                seen.extend_from_slice(&buf[..n]);
+            }
+        }
+        seen
+    };
+    // Device output decoded with GB18030, and the auto-login answers.
+    master.write_all(b"\xd6\xd0 login: ").unwrap();
+    read_master(&mut master, b"root\r");
+    assert!(wait_for(&data, Duration::from_secs(5), |events| {
+        events.iter().any(|e| {
+            session_id_of(e) == Some("ser-1") && e["data"].as_str().unwrap_or("").contains('中')
+        })
+    }));
+    // No password saved and the device asks for one: reported as cancelled.
+    master.write_all(b"\r\nPassword: ").unwrap();
+    assert!(wait_for(&cancelled, Duration::from_secs(5), |events| {
+        events.iter().any(|e| session_id_of(e) == Some("ser-1"))
+    }));
+
+    // Byte-oriented backspace: one DEL per encoded byte of the erase char.
+    ok(invoke(
+        &h.webview,
+        "session_write",
+        json!({ "payload": { "sessionId": "ser-1", "data": "\u{7f}", "serialEraseChar": "中" } }),
+    ));
+    read_master(&mut master, b"\x7f\x7f");
+    ok(invoke(
+        &h.webview,
+        "session_notify_user_input",
+        json!({ "sessionId": "ser-1" }),
+    ));
+    let enc = ok(invoke(
+        &h.webview,
+        "session_set_encoding",
+        json!({ "sessionId": "ser-1", "encoding": "UTF-8" }),
+    ));
+    assert_eq!(enc, json!({ "ok": true, "encoding": "utf-8" }));
+    ok(invoke(
+        &h.webview,
+        "session_close",
+        json!({ "sessionId": "ser-1" }),
+    ));
+    assert!(wait_for(&exits, Duration::from_secs(5), |events| {
+        events
+            .iter()
+            .any(|e| session_id_of(e) == Some("ser-1") && e["reason"] == "closed")
+    }));
+}
+
+#[test]
+fn serial_open_failure_message() {
+    let h = build_app();
+    let err = invoke(
+        &h.webview,
+        "serial_start",
+        json!({ "payload": { "path": "/definitely/not/a/serial/port" } }),
+    )
+    .expect_err("missing device must fail");
+    assert!(
+        err["message"]
+            .as_str()
+            .unwrap()
+            .starts_with("Failed to open serial port: "),
+        "{err}"
+    );
+}
+
+/// Write an executable script into `dir`.
+#[cfg(unix)]
+fn write_script(dir: &std::path::Path, name: &str, body: &str) {
+    use std::os::unix::fs::PermissionsExt;
+    let path = dir.join(name);
+    std::fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn mosh_handshake_swaps_to_mosh_client() {
+    let h = build_app();
+    let data = collect(&h.app, "netcatty:data");
+    let exits = collect(&h.app, "netcatty:exit");
+    let ready = collect(&h.app, "netcatty:mosh:ready");
+
+    let bin = tempfile::tempdir().unwrap();
+    // Fake ssh: prompt for the password, then print the protocol lines.
+    write_script(
+        bin.path(),
+        "ssh",
+        "printf 'alice@h password: '; read pw; \
+         printf '\\r\\nbanner %s\\r\\nMOSH IP 127.0.0.1\\r\\nMOSH CONNECT 60001 ABCDEFGHIJKLMNOPQRSTUV==\\r\\n' \"$pw\"",
+    );
+    // Fake mosh-client: report what it was started with, echo one line.
+    write_script(
+        bin.path(),
+        "mosh-client",
+        "printf 'client %s %s key=%s noinit=%s\\r\\n' \"$1\" \"$2\" \"$MOSH_KEY\" \"$MOSH_NO_TERM_INIT\"; read line; printf 'got %s\\r\\n' \"$line\"",
+    );
+    let path = format!("{}:/usr/bin:/bin", bin.path().display());
+
+    ok(invoke(
+        &h.webview,
+        "mosh_start",
+        json!({ "payload": {
+            "sessionId": "mosh-1",
+            "hostname": "h.example",
+            "username": "alice",
+            "password": "pw123",
+            "authMethod": "password",
+            "verifyHostKeys": false,
+            "env": { "PATH": path },
+            "bootEpoch": 2
+        } }),
+    ));
+    assert!(
+        wait_for(&ready, Duration::from_secs(15), |events| {
+            events
+                .iter()
+                .any(|e| session_id_of(e) == Some("mosh-1") && e["bootEpoch"] == 2)
+        }),
+        "no mosh ready; data: {:?}",
+        data.lock().unwrap()
+    );
+    assert!(wait_for(&data, Duration::from_secs(10), |events| {
+        events.iter().any(|e| {
+            session_id_of(e) == Some("mosh-1")
+                && e["data"]
+                    .as_str()
+                    .unwrap_or("")
+                    .contains("client 127.0.0.1 60001 key=ABCDEFGHIJKLMNOPQRSTUV== noinit=1")
+        })
+    }));
+    {
+        let events = data.lock().unwrap();
+        let mine: Vec<&Value> = events
+            .iter()
+            .filter(|e| session_id_of(e) == Some("mosh-1"))
+            .collect();
+        // Bootstrap output is tagged and the saved password was typed.
+        assert!(mine.iter().any(|e| e["meta"]["moshHandshake"] == true
+            && e["data"].as_str().unwrap_or("").contains("banner pw123")));
+        let all: String = mine.iter().filter_map(|e| e["data"].as_str()).collect();
+        assert!(!all.contains("MOSH CONNECT"), "{all:?}");
+        assert!(!all.contains("MOSH IP"), "{all:?}");
+    }
+    ok(invoke(
+        &h.webview,
+        "session_write",
+        json!({ "payload": { "sessionId": "mosh-1", "data": "hello\r" } }),
+    ));
+    assert!(
+        wait_for(&exits, Duration::from_secs(10), |events| {
+            events
+                .iter()
+                .any(|e| session_id_of(e) == Some("mosh-1") && e["reason"] == "exited")
+        }),
+        "exits: {:?} data: {:?}",
+        exits.lock().unwrap(),
+        data.lock().unwrap()
+    );
+    let all: String = data
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|e| session_id_of(e) == Some("mosh-1"))
+        .filter_map(|e| e["data"].as_str())
+        .collect();
+    assert!(all.contains("got hello"), "{all:?}");
+}
+
+#[cfg(unix)]
+#[test]
+fn mosh_handshake_failure_reports_error() {
+    let h = build_app();
+    let exits = collect(&h.app, "netcatty:exit");
+    let bin = tempfile::tempdir().unwrap();
+    write_script(
+        bin.path(),
+        "ssh",
+        "echo 'mosh-server: command not found'; exit 127",
+    );
+    write_script(bin.path(), "mosh-client", "exit 0");
+    let path = format!("{}:/usr/bin:/bin", bin.path().display());
+    ok(invoke(
+        &h.webview,
+        "mosh_start",
+        json!({ "payload": { "sessionId": "mosh-2", "hostname": "h", "env": { "PATH": path } } }),
+    ));
+    assert!(
+        wait_for(&exits, Duration::from_secs(10), |events| {
+            events.iter().any(|e| {
+                session_id_of(e) == Some("mosh-2")
+                    && e["reason"] == "error"
+                    && e["error"]
+                        == "Mosh SSH startup failed: no MOSH CONNECT from mosh-server (UDP client not started)"
+            })
+        }),
+        "{:?}",
+        exits.lock().unwrap()
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn et_session_runs_client_with_planned_args() {
+    let h = build_app();
+    let data = collect(&h.app, "netcatty:data");
+    let exits = collect(&h.app, "netcatty:exit");
+    let bin = tempfile::tempdir().unwrap();
+    write_script(
+        bin.path(),
+        "et",
+        "printf 'et-args:%s\\r\\n' \"$*\"; printf 'telemetry=%s\\r\\n' \"$ET_NO_TELEMETRY\"; sleep 0.2; exit 3",
+    );
+    let path = format!("{}:/usr/bin:/bin", bin.path().display());
+    ok(invoke(
+        &h.webview,
+        "et_start",
+        json!({ "payload": {
+            "sessionId": "et-1",
+            "hostname": "et.example",
+            "username": "carol",
+            "etPort": 2023,
+            "env": { "PATH": path }
+        } }),
+    ));
+    assert!(
+        wait_for(&exits, Duration::from_secs(10), |events| {
+            events.iter().any(|e| {
+                session_id_of(e) == Some("et-1") && e["reason"] == "error" && e["exitCode"] == 3
+            })
+        }),
+        "{:?}",
+        exits.lock().unwrap()
+    );
+    let all: String = data
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|e| session_id_of(e) == Some("et-1"))
+        .filter_map(|e| e["data"].as_str())
+        .collect();
+    assert!(all.contains("et-args:-p 2023 --ssh-option"), "{all:?}");
+    assert!(all.contains("carol@et.example"), "{all:?}");
+    assert!(all.contains("telemetry=1"), "{all:?}");
+
+    // Missing client: Electron's error text.
+    let err = invoke(
+        &h.webview,
+        "et_start",
+        json!({ "payload": { "hostname": "h", "env": { "PATH": "/nonexistent" } } }),
+    )
+    .expect_err("et must be missing");
+    assert!(err["message"]
+        .as_str()
+        .unwrap()
+        .starts_with("Bundled et client not found."));
+}
