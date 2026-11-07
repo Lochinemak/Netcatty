@@ -214,6 +214,25 @@ pub async fn notification_show<R: Runtime>(
     }
 }
 
+/// Best-effort backend notification without a click target (file-watch
+/// sync results, like Electron's `showSystemNotification` helper there).
+pub fn show_simple<R: Runtime>(app: &AppHandle<R>, title: &str, body: &str) {
+    if app
+        .try_state::<tauri_plugin_notification::Notification<R>>()
+        .is_none()
+        || !matches!(
+            app.notification().permission_state(),
+            Ok(PermissionState::Granted)
+        )
+    {
+        return;
+    }
+    let body = sanitize_notification_text(&Value::String(body.to_owned()), BODY_MAX);
+    if let Err(err) = app.notification().builder().title(title).body(body).show() {
+        tracing::debug!(%err, "notification failed");
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

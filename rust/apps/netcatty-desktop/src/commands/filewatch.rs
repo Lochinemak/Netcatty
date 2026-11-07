@@ -89,6 +89,11 @@ fn changed(previous: Stamp, current: Stamp) -> bool {
         }
 }
 
+/// Last component of a remote (POSIX) path.
+fn remote_file_name(remote_path: &str) -> &str {
+    remote_path.rsplit('/').next().unwrap_or(remote_path)
+}
+
 /// Best-effort delete with retries for files still held open (Windows).
 pub async fn cleanup_temp_file(path: String) -> bool {
     for delay in std::iter::once(0).chain(CLEANUP_RETRY_DELAYS_MS) {
@@ -211,6 +216,14 @@ async fn run_watch<R: Runtime>(
             }
             match outcome {
                 Ok(warning) => {
+                    let file_name = remote_file_name(&info.remote_path);
+                    super::notification::show_simple(
+                        &app,
+                        "Netcatty",
+                        warning
+                            .as_deref()
+                            .unwrap_or(&format!("File synced to remote: {file_name}")),
+                    );
                     let mut payload = serde_json::json!({
                         "watchId": info.watch_id,
                         "localPath": info.local_path,
@@ -229,6 +242,14 @@ async fn run_watch<R: Runtime>(
                         continue;
                     }
                     tracing::warn!(path = %info.local_path, %error, "file watch sync failed");
+                    super::notification::show_simple(
+                        &app,
+                        "Netcatty",
+                        &format!(
+                            "Failed to sync {}: {error}",
+                            remote_file_name(&info.remote_path)
+                        ),
+                    );
                     crate::events::emit(
                         &app,
                         EVENT_ERROR,

@@ -355,8 +355,8 @@ local temp file every second; a newer mtime or a size change is debounced
 500 ms and uploaded with the transfer engine (`run_transfer`, no
 global-transfer events). Syncs of one watch are serialized; deleting the
 local file stops the watch; `sftp_close` stops the session's watches and
-deletes its registered temp files. Max 256 watches. No OS notification is
-shown on sync (Electron shows one).
+deletes its registered temp files. Max 256 watches. Sync results also show
+a native notification, as in Electron.
 
 | Command | Args | Returns |
 | --- | --- | --- |
