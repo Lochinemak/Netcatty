@@ -126,7 +126,8 @@ Implemented in Rust:
   clipboard file lists and images, temp directory management (info, clear,
   custom root), Electron-compatible local vault backups, app-level HTTP proxy
   for cloud sync / OAuth (system / direct / custom), edit-and-sync file
-  watches for files opened with external apps
+  watches for files opened with external apps (temp download, application
+  picker, open-with), busy-terminal close confirmation
 * Tauri shell: dialogs, clipboard, opener, event fan-out
 
 Not yet ported (the renderer treats these bridge methods as optional and

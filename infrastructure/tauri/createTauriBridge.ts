@@ -771,6 +771,18 @@ export function createTauriBridge(options: CreateTauriBridgeOptions = {}): Netca
       }),
 
     // -----------------------------------------------------------------------
+    // Open remote files with external applications
+    // -----------------------------------------------------------------------
+    selectApplication: () => invoke<BridgeResult<'selectApplication'>>('app_select_application'),
+    openWithApplication: (filePath, appPath) =>
+      invoke<boolean>('app_open_with_application', { filePath, appPath }),
+    downloadSftpToTempWithProgress: (sftpId, remotePath, fileName, encoding, transferId) =>
+      invoke<BridgeResult<'downloadSftpToTempWithProgress'>>('sftp_download_to_temp', {
+        sftpId, remotePath, fileName, encoding, transferId,
+      }),
+    confirmCloseBusy: (payload) => invoke<boolean>('dialog_confirm_close_busy', { payload }),
+
+    // -----------------------------------------------------------------------
     // Edit-and-sync: watch a downloaded temp file and upload saves
     // -----------------------------------------------------------------------
     startFileWatch: (localPath, remotePath, sftpId, encoding) =>

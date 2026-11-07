@@ -883,3 +883,21 @@ test('file watches map to the filewatch commands and events', async () => {
   fake.emit('netcatty:filewatch:synced', payload);
   assert.deepEqual(synced, [payload]);
 });
+
+test('open-with helpers and the busy-close confirmation map to their commands', async () => {
+  const { fake, bridge } = setup();
+  fake.respond('sftp_download_to_temp', () => ({ localPath: '/t/1_1_a.txt', cancelled: false }));
+  fake.respond('app_open_with_application', () => true);
+  fake.respond('dialog_confirm_close_busy', () => false);
+
+  assert.deepEqual(
+    await bridge.downloadSftpToTempWithProgress!('sftp-1', '/srv/a.txt', 'a.txt', undefined, 'download-temp-1'),
+    { localPath: '/t/1_1_a.txt', cancelled: false },
+  );
+  assert.deepEqual(lastInvoke(fake, 'sftp_download_to_temp').args, {
+    sftpId: 'sftp-1', remotePath: '/srv/a.txt', fileName: 'a.txt', encoding: undefined, transferId: 'download-temp-1',
+  });
+  assert.equal(await bridge.openWithApplication!('/t/1_1_a.txt', '/Applications/TextEdit.app'), true);
+  assert.equal(await bridge.confirmCloseBusy!({ command: 'vim' }), false);
+  assert.deepEqual(lastInvoke(fake, 'dialog_confirm_close_busy').args, { payload: { command: 'vim' } });
+});

@@ -61,6 +61,24 @@ pub fn current<R: Runtime>(app: &AppHandle<R>) -> PathBuf {
     custom.unwrap_or_else(|| app.state::<crate::state::AppState<R>>().paths.temp_dir())
 }
 
+/// `<temp>/<timestamp>_<counter>_<fileName>` with path-hostile characters
+/// replaced (Electron's `getTempFilePath`). The directory is created.
+pub fn temp_file_path<R: Runtime>(app: &AppHandle<R>, file_name: &str) -> PathBuf {
+    use std::sync::atomic::{AtomicU32, Ordering};
+    static COUNTER: AtomicU32 = AtomicU32::new(0);
+    let dir = current(app);
+    let _ = std::fs::create_dir_all(&dir);
+    let counter = (COUNTER.fetch_add(1, Ordering::Relaxed) + 1) % 1_000_000;
+    let safe: String = file_name
+        .chars()
+        .map(|c| match c {
+            '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*' => '_',
+            c => c,
+        })
+        .collect();
+    dir.join(format!("{}_{counter}_{safe}", netcatty_core::ids::now_ms()))
+}
+
 /// Electron's `validateTempRoot`: returns the managed directory to use.
 pub fn validate_temp_root(input: &str) -> Result<PathBuf, String> {
     let trimmed = input.trim();

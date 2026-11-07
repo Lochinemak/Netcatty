@@ -335,6 +335,17 @@ tool-output store). The effective temp dir is the custom root when set, else
 
 `chooseTempDir` is the dialog plugin's directory picker.
 
+## Open with external applications
+
+`commands/openwith.rs` (Electron: handlers in `main/registerBridges.cjs`).
+
+| Command | Args | Returns |
+| --- | --- | --- |
+| `app_select_application` | — | `{ path, name } \| null` (native picker: `.app` on macOS, executables on Windows) |
+| `app_open_with_application` | `filePath, appPath` | `true` once launched (`open -a` on macOS); rejects when the app cannot start |
+| `sftp_download_to_temp` | `sftpId, remotePath, fileName, encoding?, transferId` | `{ localPath, cancelled }`; progress on `netcatty:sftp:global-transfer` under `transferId`, partial file removed on error / cancel |
+| `dialog_confirm_close_busy` | `payload: { command, title?, message?, cancelLabel?, closeLabel? }` | `bool` (`true` only for Close) |
+
 ## File watch (edit and sync)
 
 `commands/filewatch.rs` (Electron: `fileWatcherBridge.cjs`). A watch polls the

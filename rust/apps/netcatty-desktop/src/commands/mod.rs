@@ -14,6 +14,7 @@ pub mod diagnostics;
 pub mod filewatch;
 pub mod forward;
 pub mod localfs;
+pub mod openwith;
 pub mod rdesktop;
 pub mod session;
 pub mod sftp;
@@ -114,6 +115,11 @@ pub fn handler<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + 
         filewatch::filewatch_list,
         filewatch::filewatch_register_temp_file,
         filewatch::filewatch_unregister_temp_file,
+        // Open with external applications / native confirmations.
+        openwith::app_select_application,
+        openwith::app_open_with_application,
+        openwith::sftp_download_to_temp,
+        openwith::dialog_confirm_close_busy,
         session::session_start_ssh,
         session::session_test_connection,
         session::session_cancel_test_connection,
