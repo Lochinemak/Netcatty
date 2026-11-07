@@ -845,3 +845,288 @@ fn file_watch_polls_reports_and_cleans_up() {
     );
     assert!(!file.exists());
 }
+
+/// Session logs: a manual recording and an automatic log both capture live
+/// PTY output through the session pump tap; prepare / stop / status /
+/// clear-all follow the Electron contract.
+#[cfg(unix)]
+#[test]
+fn session_logs_record_live_session_output() {
+    use netcatty_desktop_lib::commands::sessionlog::SessionLogState;
+    use tauri::Manager;
+
+    let h = build_app();
+    let data = collect(&h.app, "netcatty:data");
+    let exits = collect(&h.app, "netcatty:exit");
+    let logs_dir = tempfile::tempdir().unwrap();
+    let auto_dir = logs_dir.path().join("auto");
+    let manual_path = logs_dir.path().join("manual").join("recording.log");
+
+    let id = ok(invoke(
+        &h.webview,
+        "session_start_local",
+        json!({ "payload": {
+            "shell": "/bin/sh", "cols": 80, "rows": 24,
+            "sessionLog": { "enabled": true, "directory": auto_dir, "format": "txt" }
+        } }),
+    ))["sessionId"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let status = |id: &str| {
+        ok(invoke(
+            &h.webview,
+            "session_log_manual_status",
+            json!({ "payload": { "sessionId": id } }),
+        ))
+    };
+    // The automatic log is openable; nothing is recorded manually yet.
+    assert_eq!(
+        status(&id),
+        json!({ "success": true, "isLogging": false, "hasSessionLog": true })
+    );
+    assert_eq!(
+        status(" "),
+        json!({ "success": false, "isLogging": false, "hasSessionLog": false, "error": "Missing sessionId" })
+    );
+
+    // Renderer-supplied paths and unknown tokens are refused.
+    let refused = ok(invoke(
+        &h.webview,
+        "session_log_manual_start",
+        json!({ "payload": { "sessionId": id, "filePath": "/etc/passwd" } }),
+    ));
+    assert_eq!(
+        refused,
+        json!({ "success": false, "started": false, "error": "Session log path must be chosen via the save dialog" })
+    );
+    let expired = ok(invoke(
+        &h.webview,
+        "session_log_manual_start",
+        json!({ "payload": { "sessionId": id, "selectionToken": "nope" } }),
+    ));
+    assert_eq!(expired["error"], "Invalid or expired session log selection");
+
+    // Stand in for the save dialog, then start recording with the token.
+    let token = h.app.state::<SessionLogState>().register_selection(
+        &id,
+        manual_path.clone(),
+        netcatty_sessionlog::LogFormat::Raw,
+        Some("main".into()),
+    );
+    let started = ok(invoke(
+        &h.webview,
+        "session_log_manual_start",
+        json!({ "payload": { "sessionId": id, "selectionToken": token, "initialLine": "$ " } }),
+    ));
+    assert_eq!(
+        started,
+        json!({ "success": true, "started": true, "filePath": manual_path })
+    );
+    assert_eq!(
+        status(&id),
+        json!({ "success": true, "isLogging": true, "hasSessionLog": true })
+    );
+    let again = ok(invoke(
+        &h.webview,
+        "session_log_manual_start",
+        json!({ "payload": { "sessionId": id, "selectionToken": token } }),
+    ));
+    assert_eq!(again["error"], "Session log is already active");
+
+    ok(invoke(
+        &h.webview,
+        "session_write",
+        json!({ "payload": { "sessionId": id, "data": "echo hello-$((40+2))-log\n" } }),
+    ));
+    assert!(wait_for(&data, Duration::from_secs(10), |events| events
+        .iter()
+        .any(|e| e["data"]
+            .as_str()
+            .is_some_and(|d| d.contains("hello-42-log")))));
+
+    // Prepare flushes the live recording (the manual log wins over the
+    // automatic one) without stopping it.
+    let prepared = ok(invoke(
+        &h.webview,
+        "session_log_prepare",
+        json!({ "payload": { "sessionId": id } }),
+    ));
+    assert_eq!(
+        prepared,
+        json!({ "success": true, "filePath": manual_path })
+    );
+    let content = std::fs::read_to_string(&manual_path).unwrap();
+    assert!(content.starts_with("$ "), "{content:?}");
+    assert!(content.contains("hello-42-log"), "{content:?}");
+
+    // Clear-all keeps the live automatic log (and its host folder).
+    let cleared = ok(invoke(
+        &h.webview,
+        "session_log_clear_dir",
+        json!({ "directory": auto_dir }),
+    ));
+    assert_eq!(
+        cleared,
+        json!({ "success": true, "deletedCount": 0, "failedCount": 0 })
+    );
+
+    let stopped = ok(invoke(
+        &h.webview,
+        "session_log_manual_stop",
+        json!({ "payload": { "sessionId": id } }),
+    ));
+    assert_eq!(
+        stopped,
+        json!({ "success": true, "stopped": true, "filePath": manual_path })
+    );
+    assert_eq!(
+        ok(invoke(
+            &h.webview,
+            "session_log_manual_stop",
+            json!({ "payload": { "sessionId": id } }),
+        )),
+        json!({ "success": true, "stopped": false })
+    );
+    assert_eq!(
+        status(&id),
+        json!({ "success": true, "isLogging": false, "hasSessionLog": true })
+    );
+
+    // Closing the session finalizes the automatic txt log.
+    ok(invoke(
+        &h.webview,
+        "session_close",
+        json!({ "sessionId": id }),
+    ));
+    assert!(wait_for(&exits, Duration::from_secs(10), |events| events
+        .iter()
+        .any(|e| session_id_of(e) == Some(id.as_str()))));
+    let host_dir = auto_dir.join("Local");
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let auto_log = loop {
+        let found = std::fs::read_dir(&host_dir).ok().and_then(|entries| {
+            entries
+                .flatten()
+                .map(|e| e.path())
+                .find(|p| p.extension().is_some_and(|e| e == "txt"))
+        });
+        if let Some(path) =
+            found.filter(|p| std::fs::read_to_string(p).is_ok_and(|c| c.contains("hello-42-log")))
+        {
+            break path;
+        }
+        assert!(Instant::now() < deadline, "automatic log was not written");
+        std::thread::sleep(Duration::from_millis(50));
+    };
+    assert!(!std::fs::read_to_string(&auto_log).unwrap().contains('\x1b'));
+
+    // Once nothing is live, clear-all removes the host folder as one artifact.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        let cleared = ok(invoke(
+            &h.webview,
+            "session_log_clear_dir",
+            json!({ "directory": auto_dir }),
+        ));
+        if cleared["deletedCount"] == 1 {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "auto log stayed active: {cleared}"
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    assert!(!host_dir.exists());
+}
+
+#[test]
+fn session_log_file_commands() {
+    let h = build_app();
+    let dir = tempfile::tempdir().unwrap();
+
+    let saved = ok(invoke(
+        &h.webview,
+        "session_log_auto_save",
+        json!({ "payload": {
+            "terminalData": "a\x1b[31mb\x1b[0m\r\n", "hostLabel": "web/01", "hostname": "h",
+            "hostId": "id", "startTime": 0, "format": "txt", "directory": dir.path()
+        } }),
+    ));
+    assert_eq!(saved["success"], true);
+    let path = std::path::PathBuf::from(saved["filePath"].as_str().unwrap());
+    assert_eq!(path.parent().unwrap().file_name().unwrap(), "web_01");
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), "ab");
+    assert_eq!(
+        ok(invoke(
+            &h.webview,
+            "session_log_auto_save",
+            json!({ "payload": { "terminalData": "", "directory": dir.path() } }),
+        )),
+        json!({ "success": false, "error": "Missing terminal data or directory" })
+    );
+
+    let missing = dir.path().join("missing");
+    let opened = ok(invoke(
+        &h.webview,
+        "session_log_open_dir",
+        json!({ "directory": missing }),
+    ));
+    assert_eq!(opened["success"], false);
+    assert!(opened["error"].as_str().unwrap().starts_with("ENOENT"));
+    assert_eq!(
+        ok(invoke(
+            &h.webview,
+            "session_log_open_dir",
+            json!({ "directory": "" })
+        )),
+        json!({ "success": false, "error": "No directory specified" })
+    );
+
+    assert_eq!(
+        ok(invoke(
+            &h.webview,
+            "session_log_clear_dir",
+            json!({ "directory": missing }),
+        )),
+        json!({ "success": true, "deletedCount": 0, "failedCount": 0 })
+    );
+    assert_eq!(
+        ok(invoke(&h.webview, "session_log_clear_dir", json!({}))),
+        json!({ "success": false, "deletedCount": 0, "failedCount": 0, "error": "No directory specified" })
+    );
+    assert_eq!(
+        ok(invoke(
+            &h.webview,
+            "session_log_clear_dir",
+            json!({ "directory": dir.path() }),
+        )),
+        json!({ "success": true, "deletedCount": 1, "failedCount": 0 })
+    );
+
+    assert_eq!(
+        ok(invoke(
+            &h.webview,
+            "session_log_prepare",
+            json!({ "payload": { "sessionId": "unknown" } }),
+        )),
+        json!({ "success": false, "error": "No saved log is available for this session" })
+    );
+    assert_eq!(
+        ok(invoke(
+            &h.webview,
+            "session_log_reveal",
+            json!({ "payload": {} }),
+        )),
+        json!({ "success": false, "error": "Missing sessionId" })
+    );
+
+    let err = invoke(
+        &h.webview,
+        "session_log_export",
+        json!({ "payload": { "terminalData": "", "hostLabel": "h", "startTime": 0, "format": "txt" } }),
+    )
+    .expect_err("empty export must be rejected");
+    assert_eq!(err["message"], "No terminal data to export");
+}

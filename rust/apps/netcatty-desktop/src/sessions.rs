@@ -361,6 +361,9 @@ impl<R: Runtime> Shared<R> {
 
     /// Remove every trace of a session and release its connection.
     async fn remove_and_release(&self, session_id: &str) {
+        // Session-log hook: finalize the session's automatic log (idempotent;
+        // runs before the entry is removed).
+        crate::commands::sessionlog::session_ended(&self.app, session_id);
         self.flags.remove(session_id);
         self.connections.remove(session_id);
         let Some((_, entry)) = self.sessions.remove(session_id) else {
@@ -388,6 +391,10 @@ fn deliver<R: Runtime>(
     text: &str,
     force: bool,
 ) {
+    // Session-log tap: every decoded chunk of every session kind goes through
+    // here exactly once, before flow-control buffering (paused output is
+    // logged too). Only buffers; never blocks on I/O.
+    crate::commands::sessionlog::tap_output(app, session_id, text);
     if !force && flags.paused.load(Ordering::SeqCst) {
         if pending.len() + text.len() > PAUSE_BUFFER_LIMIT {
             if !flags.dropped_output.swap(true, Ordering::SeqCst) {

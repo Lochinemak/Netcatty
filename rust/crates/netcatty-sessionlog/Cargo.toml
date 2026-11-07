@@ -1,0 +1,16 @@
+[package]
+name = "netcatty-sessionlog"
+description = "Session logs: terminal output sanitizer (txt / html), file naming and live log streams"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+chrono = { workspace = true }
+parking_lot = { workspace = true }
+regex = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"

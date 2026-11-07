@@ -3894,6 +3894,7 @@ dependencies = [
  "netcatty-localfs",
  "netcatty-pty",
  "netcatty-rdesktop",
+ "netcatty-sessionlog",
  "netcatty-sftp",
  "netcatty-ssh",
  "netcatty-store",
@@ -4002,6 +4003,17 @@ dependencies = [
  "tokio-util",
  "tracing",
  "vnc-rs",
+]
+
+[[package]]
+name = "netcatty-sessionlog"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "parking_lot 0.13.0",
+ "regex",
+ "tempfile",
+ "tracing",
 ]
 
 [[package]]

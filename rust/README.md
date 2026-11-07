@@ -21,6 +21,7 @@ rust/
 │   ├── netcatty-pty           local shells (portable-pty) + shell discovery
 │   ├── netcatty-localfs       local file browser operations, tree scans
 │   ├── netcatty-rdesktop      embedded remote desktops: VNC (vnc-rs) and RDP (IronRDP)
+│   ├── netcatty-sessionlog    session logs: terminal replay to txt / html, live log streams
 │   ├── netcatty-store         JSON key/value store, OS-keychain credential cipher, vault backups
 │   └── netcatty-sync          cloud sync transports: GitHub, Google Drive, OneDrive, WebDAV, S3, OAuth callback
 └── apps/
@@ -127,6 +128,10 @@ Implemented in Rust:
   custom root), Electron-compatible local vault backups, app-level HTTP proxy
   for cloud sync / OAuth (system / direct / custom), edit-and-sync file
   watches for files opened with external apps
+* Session logs: export (txt / raw / html), auto-save, logs directory open /
+  clear, manual "record session log" and automatic per-session logs streamed
+  live from the session pump, with Electron's file naming and a byte-for-byte
+  port of its terminal-to-text / HTML sanitizer (`netcatty-sessionlog`)
 * Tauri shell: dialogs, clipboard, opener, event fan-out
 
 Not yet ported (the renderer treats these bridge methods as optional and
@@ -139,7 +144,7 @@ hides the features when they are absent):
 * Plugin-provided sync providers (they need the plugin runtime)
 * Tray, tray panel, global shortcuts, auto-launch, auto-update, deep links,
   Explorer context menu
-* Session logging, compressed folder upload,
+* Compressed folder upload,
   system manager (processes/tmux/docker/kubectl), monitor bridge
 * X11 forwarding is requested on the channel but no local X11 proxy is
   started yet

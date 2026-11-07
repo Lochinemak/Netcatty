@@ -146,6 +146,16 @@ pub async fn session_start_ssh<R: tauri::Runtime>(
         .filter(|c| !c.trim().is_empty())
         .unwrap_or_else(|| crate::decoder::DEFAULT_CHARSET.to_string());
 
+    // Session-log hook (before the output pump starts).
+    let hostname = payload.hostname.trim();
+    let log_label = payload.host_label.as_deref().filter(|l| !l.is_empty());
+    super::sessionlog::session_starting(
+        &state.app,
+        &session_id,
+        payload.session_log.as_ref(),
+        log_label.unwrap_or(hostname),
+        hostname,
+    );
     state.sessions.insert(SessionEntry {
         session_id: session_id.clone(),
         host_id: payload.host_id.clone(),
@@ -272,6 +282,14 @@ pub async fn session_start_local<R: tauri::Runtime>(
     };
     let pty = PtySession::spawn(options).await?;
     let label = pty.shell.clone();
+    // Session-log hook (before the output pump starts).
+    super::sessionlog::session_starting(
+        &state.app,
+        &session_id,
+        payload.session_log.as_ref(),
+        "Local",
+        "localhost",
+    );
     state.sessions.insert(SessionEntry {
         session_id: session_id.clone(),
         host_id: None,
@@ -294,6 +312,15 @@ pub async fn session_write<R: tauri::Runtime>(
     state: Ctx<'_, R>,
     payload: WriteToSessionPayload,
 ) -> CmdResult<()> {
+    if !payload.binary {
+        // Session-log hook: sudo-autofill markers and `logRewrite` echoes.
+        super::sessionlog::session_input(
+            &state.app,
+            &payload.session_id,
+            &payload.data,
+            payload.log_rewrite.as_ref(),
+        );
+    }
     match plan_write(&payload)? {
         WritePlan::Binary(bytes) => {
             state
