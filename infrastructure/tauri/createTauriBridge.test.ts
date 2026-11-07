@@ -844,3 +844,14 @@ test('vault backups map to the vault_backup commands and change events', async (
   fake.emit('netcatty:vault-backups:changed', null);
   assert.equal(changed, 1);
 });
+
+test('temp directory management maps to the tempdir commands', async () => {
+  const { fake, bridge } = setup();
+  fake.respond('tempdir_info', () => ({ path: '/t/Netcatty', fileCount: 2, totalSize: 10, isCustom: false, defaultPath: '/t/Netcatty' }));
+  fake.respond('tempdir_set_custom', (args) => ({ ok: true, path: `${(args as { dir: string }).dir}/Netcatty` }));
+  assert.equal((await bridge.getTempDirInfo!()).fileCount, 2);
+  assert.deepEqual(await bridge.setCustomTempDir!('/data'), { ok: true, path: '/data/Netcatty' });
+  await bridge.resetCustomTempDir!();
+  await bridge.clearTempDir!();
+  assert.ok(['tempdir_reset_custom', 'tempdir_clear'].every((cmd) => fake.invokes.some((entry) => entry.cmd === cmd)));
+});

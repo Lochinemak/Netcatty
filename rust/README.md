@@ -123,7 +123,8 @@ Implemented in Rust:
   regions), title-bar controls, native theme / background colour, language
   and cross-window settings sync
 * Crash log (Rust panics + renderer diagnostics, Electron's JSONL format),
-  clipboard file lists and images
+  clipboard file lists and images, temp directory management (info, clear,
+  custom root), Electron-compatible local vault backups
 * Tauri shell: dialogs, clipboard, opener, event fan-out
 
 Not yet ported (the renderer treats these bridge methods as optional and

@@ -11,7 +11,9 @@ pub fn app_get_version<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> String {
 
 #[tauri::command]
 pub fn app_get_temp_dir_path<R: tauri::Runtime>(state: Ctx<'_, R>) -> String {
-    state.paths.temp_dir().to_string_lossy().into_owned()
+    super::tempdir::current(&state.app)
+        .to_string_lossy()
+        .into_owned()
 }
 
 /// Reveal a path in Finder / Explorer / the file manager.

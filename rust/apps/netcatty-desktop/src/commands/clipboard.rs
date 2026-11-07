@@ -123,7 +123,7 @@ pub async fn clipboard_read_files() -> Vec<ClipboardFile> {
 pub async fn clipboard_read_image<R: tauri::Runtime>(
     state: Ctx<'_, R>,
 ) -> super::CmdResult<Option<ClipboardImage>> {
-    let temp_dir = state.paths.temp_dir();
+    let temp_dir = super::tempdir::current(&state.app);
     Ok(
         tauri::async_runtime::spawn_blocking(move || write_image(&temp_dir))
             .await

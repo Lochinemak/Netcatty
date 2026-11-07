@@ -74,7 +74,7 @@ pub async fn temp_upload_begin<R: tauri::Runtime>(
     transfer_id: String,
     file_name: String,
 ) -> CmdResult<String> {
-    let temp_dir = state.paths.temp_dir();
+    let temp_dir = super::tempdir::current(&state.app);
     tokio::fs::create_dir_all(&temp_dir).await?;
     let path = transfer_temp_file_path(&temp_dir, &transfer_id, &file_name);
     let mut options = tokio::fs::OpenOptions::new();
@@ -101,7 +101,7 @@ pub async fn temp_upload_chunk<R: tauri::Runtime>(
     request: tauri::ipc::Request<'_>,
 ) -> CmdResult<u64> {
     let path = require_header(request.headers(), "path")?;
-    let path = ensure_temp_path(&state.paths.temp_dir(), &path)?;
+    let path = ensure_temp_path(&super::tempdir::current(&state.app), &path)?;
     let body = raw_body(&request)?;
     use tokio::io::AsyncWriteExt;
     let mut file = tokio::fs::OpenOptions::new()
@@ -121,7 +121,7 @@ pub async fn temp_delete_file<R: tauri::Runtime>(
     state: Ctx<'_, R>,
     file_path: String,
 ) -> CmdResult<SuccessResult> {
-    let path = match ensure_temp_path(&state.paths.temp_dir(), &file_path) {
+    let path = match ensure_temp_path(&super::tempdir::current(&state.app), &file_path) {
         Ok(path) => path,
         Err(err) => {
             tracing::warn!(path = %file_path, "{}", err.message);

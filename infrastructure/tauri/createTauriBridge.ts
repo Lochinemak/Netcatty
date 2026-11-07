@@ -1114,6 +1114,18 @@ export function createTauriBridge(options: CreateTauriBridgeOptions = {}): Netca
     onVaultBackupsChanged: (handler) => hub.subscribe<unknown>(TAURI_EVENTS.vaultBackupsChanged, () => handler()),
 
     // -----------------------------------------------------------------------
+    // Temp directory management (info / clear / open / custom root)
+    // -----------------------------------------------------------------------
+    getTempDirInfo: () => invoke<BridgeResult<'getTempDirInfo'>>('tempdir_info'),
+    clearTempDir: () => invoke<BridgeResult<'clearTempDir'>>('tempdir_clear'),
+    openTempDir: () => invoke<BridgeResult<'openTempDir'>>('tempdir_open'),
+    chooseTempDir: dialog?.open
+      ? async () => firstPath(await dialog.open!({ directory: true, multiple: false }))
+      : undefined,
+    setCustomTempDir: (dir) => invoke<BridgeResult<'setCustomTempDir'>>('tempdir_set_custom', { dir }),
+    resetCustomTempDir: () => invoke<BridgeResult<'resetCustomTempDir'>>('tempdir_reset_custom'),
+
+    // -----------------------------------------------------------------------
     // Crash logs / diagnostics (Rust panics and logDiagnostic entries)
     // -----------------------------------------------------------------------
     getCrashLogs: () => invoke<BridgeResult<'getCrashLogs'>>('crash_logs_list'),

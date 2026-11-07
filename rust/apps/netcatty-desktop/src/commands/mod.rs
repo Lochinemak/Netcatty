@@ -20,6 +20,7 @@ pub mod ssh;
 pub mod store;
 pub mod sync;
 pub mod temp;
+pub mod tempdir;
 pub mod window;
 
 use netcatty_core::CoreError;
@@ -98,6 +99,12 @@ pub fn handler<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + 
         clipboard::clipboard_read_files,
         clipboard::clipboard_read_image,
         clipboard::clipboard_has_image,
+        // Temp directory management.
+        tempdir::tempdir_info,
+        tempdir::tempdir_clear,
+        tempdir::tempdir_open,
+        tempdir::tempdir_set_custom,
+        tempdir::tempdir_reset_custom,
         session::session_start_ssh,
         session::session_test_connection,
         session::session_cancel_test_connection,

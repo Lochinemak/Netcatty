@@ -316,6 +316,25 @@ drops events whose `source` is its own window), `netcatty:language-changed`
 (language string), `netcatty:window:fullscreen-changed` (`{ label,
 fullscreen }`, filtered by label).
 
+## Temp directory
+
+`commands/tempdir.rs` (Electron: `tempDirBridge.cjs` without the AI
+tool-output store). The effective temp dir is the custom root when set, else
+`<cache>/netcatty/tmp`; upload staging, clipboard images and
+`app_get_temp_dir_path` all use it. A custom root must be absolute, gets
+`Netcatty` appended, may not traverse symlinks, and must be empty or carry
+`.netcatty-managed-temp`; it persists in `<data>/temp-dir-pref.json`.
+
+| Command | Args | Returns |
+| --- | --- | --- |
+| `tempdir_info` | — | `{ path, fileCount, totalSize, isCustom, defaultPath }` |
+| `tempdir_clear` | — | `{ deletedCount, failedCount, error? }` (marker kept) |
+| `tempdir_open` | — | `{ success }` |
+| `tempdir_set_custom` | `dir` | `{ ok, path? , error? }` |
+| `tempdir_reset_custom` | — | `{ ok, path?, error? }` |
+
+`chooseTempDir` is the dialog plugin's directory picker.
+
 ## Crash logs, diagnostics, clipboard extras
 
 Crash log: `netcatty_store::crashlog` (Electron: `crashLogBridge.cjs`), JSONL
