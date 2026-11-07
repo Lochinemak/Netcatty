@@ -664,3 +664,155 @@ fn remote_desktop_commands() {
     });
     assert!(reusable, "a finished session must free its id");
 }
+
+// ---------------------------------------------------------------------------
+// System manager / server stats / monitor (commands/system.rs, monitor.rs)
+
+#[cfg(unix)]
+#[test]
+fn system_manager_commands_on_a_local_session() {
+    let h = build_app();
+    let started = ok(invoke(
+        &h.webview,
+        "session_start_local",
+        json!({ "payload": { "shell": "/bin/sh", "cols": 80, "rows": 24 } }),
+    ));
+    let id = started["sessionId"].as_str().unwrap().to_string();
+
+    // Local sessions run the probes on this machine.
+    let caps = ok(invoke(
+        &h.webview,
+        "system_probe_capabilities",
+        json!({ "payload": { "sessionId": id } }),
+    ));
+    assert_eq!(caps["success"], true, "{caps}");
+    let expected_os = if cfg!(target_os = "macos") {
+        "darwin"
+    } else {
+        "linux"
+    };
+    assert_eq!(caps["capabilities"]["targetOs"], expected_os);
+
+    let procs = ok(invoke(
+        &h.webview,
+        "system_list_processes",
+        json!({ "payload": { "sessionId": id } }),
+    ));
+    assert_eq!(procs["success"], true, "{procs}");
+    assert!(procs["processes"].as_array().unwrap().len() > 1);
+
+    // A command started from the shell shows up as a PTY child.
+    ok(invoke(
+        &h.webview,
+        "session_write",
+        json!({ "payload": { "sessionId": id, "data": "sleep 30\n" } }),
+    ));
+    let start = Instant::now();
+    let mut children = Value::Null;
+    while start.elapsed() < Duration::from_secs(10) {
+        children = ok(invoke(
+            &h.webview,
+            "pty_child_processes",
+            json!({ "sessionId": id }),
+        ));
+        if children.to_string().contains("sleep 30") {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    assert!(
+        children.to_string().contains("sleep 30"),
+        "children: {children}"
+    );
+    assert_eq!(
+        ok(invoke(
+            &h.webview,
+            "pty_child_processes",
+            json!({ "sessionId": "nope" })
+        )),
+        json!([])
+    );
+
+    // Stats / distro / history need an SSH connection.
+    let stats = ok(invoke(
+        &h.webview,
+        "session_server_stats",
+        json!({ "sessionId": id }),
+    ));
+    assert_eq!(
+        stats,
+        json!({ "success": false, "error": "Session not found or not connected" })
+    );
+    let history = ok(invoke(
+        &h.webview,
+        "session_read_remote_history",
+        json!({ "sessionId": "nope", "limit": 10 }),
+    ));
+    assert_eq!(history["error"], "Session not found");
+
+    // Unknown sessions fail like Electron's execOnSession.
+    let missing = ok(invoke(
+        &h.webview,
+        "system_list_listening_ports",
+        json!({ "payload": { "sessionId": "nope" } }),
+    ));
+    assert_eq!(missing["success"], false);
+    assert_eq!(missing["error"], "Session not found");
+    let no_id = ok(invoke(
+        &h.webview,
+        "system_list_tmux_sessions",
+        json!({ "payload": {} }),
+    ));
+    assert_eq!(no_id["error"], "Missing sessionId");
+
+    ok(invoke(
+        &h.webview,
+        "session_close",
+        json!({ "sessionId": id }),
+    ));
+}
+
+#[test]
+fn monitor_commands_track_panels_per_window() {
+    let h = build_app();
+    let err = invoke(&h.webview, "monitor_update", json!({ "panels": {} }))
+        .expect_err("non-array demand is rejected");
+    assert_eq!(err["code"], "INVALID_ARGUMENT");
+
+    // Hosts without connect options are reported, never dialed.
+    let snap = ok(invoke(
+        &h.webview,
+        "monitor_update",
+        json!({ "panels": [{
+            "id": "p1", "runId": "r1", "interval": 7,
+            "hosts": [{ "id": "a" }, { "id": "b", "status": "login" }]
+        }] }),
+    ));
+    assert_eq!(snap["running"], json!(["p1"]));
+    assert_eq!(snap["count"], 1);
+    assert_eq!(snap["hostCount"], 0);
+    assert_eq!(snap["hosts"]["a"]["status"], "unsupported");
+    assert_eq!(snap["hosts"]["b"]["status"], "login");
+    assert_eq!(snap["historyMode"], "replace");
+    let started_at = snap["startedAt"]["p1"].as_i64().unwrap();
+    assert!(started_at > 0);
+
+    let cursor = json!({ "runtimeId": snap["runtimeId"], "epoch": snap["epoch"], "after": {} });
+    let next = ok(invoke(
+        &h.webview,
+        "monitor_snapshot",
+        json!({ "cursor": cursor }),
+    ));
+    assert_eq!(next["historyMode"], "append");
+    assert_eq!(next["startedAt"]["p1"], started_at);
+
+    ok(invoke(
+        &h.webview,
+        "monitor_retry",
+        json!({ "hostId": "a" }),
+    ));
+    ok(invoke(&h.webview, "monitor_stop_all", json!({})));
+    let after = ok(invoke(&h.webview, "monitor_snapshot", json!({})));
+    assert_eq!(after["running"], json!([]));
+    assert_eq!(after["epoch"], snap["epoch"].as_u64().unwrap() + 1);
+}

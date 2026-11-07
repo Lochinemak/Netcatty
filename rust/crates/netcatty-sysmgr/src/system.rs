@@ -669,10 +669,106 @@ pub async fn setup_osc7_tracking(exec: &dyn SessionExec, payload: &Value) -> Val
     })
 }
 
+// ------------------------------------------------------------ SSH banners
+
+/// `SSH-2.0-` / `SSH-1.99-` stripped from an identification string.
+fn banner_software(banner: &str) -> &str {
+    let t = banner.trim();
+    for prefix in ["SSH-2.0-", "SSH-1.99-", "ssh-2.0-", "ssh-1.99-"] {
+        if let Some(rest) = t.strip_prefix(prefix) {
+            return rest;
+        }
+    }
+    t
+}
+
+/// `domain/singleChannelSshBanner.shared.cjs`: SSH software that allows a
+/// single session channel per connection (an extra exec channel would tear
+/// down the interactive shell).
+pub fn remote_software_requires_single_channel(banner: &str) -> bool {
+    let software = banner.trim();
+    if software.is_empty() {
+        return false;
+    }
+    [
+        "BHostSSH",
+        "TERM-SSHD",
+        "CLOUDBILITY",
+        "CLOUDLINKER",
+        "russh",
+    ]
+    .iter()
+    .any(|token| {
+        Regex::new(&format!(
+            r"(?i)(?:^|[^A-Za-z0-9]){}(?:[^A-Za-z0-9]|$)",
+            regex::escape(token)
+        ))
+        .is_ok_and(|re| re.is_match(software))
+    })
+}
+
+/// `domain/sshServerVendor.mjs` `detectVendorFromSshVersion`: network
+/// device vendor from the SSH banner, `""` when none.
+pub fn detect_vendor_from_ssh_version(banner: &str) -> &'static str {
+    let s = banner_software(banner);
+    if s.is_empty() {
+        return "";
+    }
+    let m = |pattern: &str| Regex::new(pattern).is_ok_and(|re| re.is_match(s));
+    if m(r"(?i)^Cisco[-_]") || m(r"(?i)^CiscoIOS_") || m(r"^CISCO_WLC\b") {
+        return "cisco";
+    }
+    if m(r"^NetScreen\b") {
+        return "juniper";
+    }
+    if s == "-" || m(r"(?i)^HUAWEI[-_]") || m(r"(?i)^VRP-") {
+        return "huawei";
+    }
+    if m(r"(?i)^H3C[-_\s]") || m(r"(?i)^Comware-") || m(r"(?i)^3Com\s*OS") {
+        return "h3c";
+    }
+    if m(r"(?i)^mpSSH_") {
+        return "hpe";
+    }
+    if m(r"^ROSSSH\b") {
+        return "mikrotik";
+    }
+    if m(r"(?i)^FortiSSH_") {
+        return "fortinet";
+    }
+    if m(r"(?i)^PaloAltoNetworks[_-]") {
+        return "paloalto";
+    }
+    if m(r"(?i)^Zyxel\s*SSH") {
+        return "zyxel";
+    }
+    if m(r"(?i)^RGOS_SSH\b") {
+        return "ruijie";
+    }
+    ""
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::exec::FakeExec;
+
+    #[test]
+    fn banner_classification() {
+        assert!(remote_software_requires_single_channel("BHostSSH_7.0"));
+        assert!(remote_software_requires_single_channel(
+            "SSH-2.0-russh_0.40"
+        ));
+        assert!(!remote_software_requires_single_channel("OpenSSH_9.6"));
+        assert!(!remote_software_requires_single_channel("xTERM-SSHDx"));
+        assert_eq!(
+            detect_vendor_from_ssh_version("SSH-2.0-Cisco-1.25"),
+            "cisco"
+        );
+        assert_eq!(detect_vendor_from_ssh_version("SSH-2.0--"), "huawei");
+        assert_eq!(detect_vendor_from_ssh_version("ROSSSH"), "mikrotik");
+        assert_eq!(detect_vendor_from_ssh_version("SSH-2.0-OpenSSH_9.6"), "");
+    }
 
     #[test]
     fn capability_flags_are_line_anchored() {
