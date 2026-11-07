@@ -1,6 +1,6 @@
 //! VNC (RFB) sessions on top of `vnc-rs`.
 
-use crate::net::connect_tcp;
+use crate::net::{connect_tcp, with_handshake_timeout};
 use crate::{make_opaque, ConnectOptions, EventSink, RemoteEvent, RemoteInput};
 use netcatty_core::{CoreError, CoreResult};
 use std::time::{Duration, Instant};
@@ -29,22 +29,25 @@ pub(crate) async fn run(
     let tcp = connect_tcp(&options.host, options.port).await?;
     let password = options.password.clone().unwrap_or_default();
 
-    let client = VncConnector::new(tcp)
-        // Only polled when the server asks for VNC authentication.
-        .set_auth_method(async move { Ok(password) })
-        .add_encoding(VncEncoding::Zrle)
-        .add_encoding(VncEncoding::CopyRect)
-        .add_encoding(VncEncoding::Raw)
-        .add_encoding(VncEncoding::DesktopSizePseudo)
-        .allow_shared(true)
-        .set_pixel_format(PixelFormat::rgba())
-        .build()
-        .map_err(vnc_error)?
-        .try_start()
-        .await
-        .map_err(vnc_error)?
-        .finish()
-        .map_err(vnc_error)?;
+    let handshake = async {
+        VncConnector::new(tcp)
+            // Only polled when the server asks for VNC authentication.
+            .set_auth_method(async move { Ok(password) })
+            .add_encoding(VncEncoding::Zrle)
+            .add_encoding(VncEncoding::CopyRect)
+            .add_encoding(VncEncoding::Raw)
+            .add_encoding(VncEncoding::DesktopSizePseudo)
+            .allow_shared(true)
+            .set_pixel_format(PixelFormat::rgba())
+            .build()
+            .map_err(vnc_error)?
+            .try_start()
+            .await
+            .map_err(vnc_error)?
+            .finish()
+            .map_err(vnc_error)
+    };
+    let client = with_handshake_timeout("VNC", handshake).await?;
 
     let result = pump(&client, inputs, sink).await;
     let _ = client.close().await;

@@ -128,6 +128,12 @@ Implemented in Rust:
     optional domain; keyboard (scancodes, Unicode fallback), mouse and wheel.
     The server certificate is not validated (RDP hosts are normally
     self-signed), matching mstsc's "connect anyway".
+  * A connect attempt is bounded (15 s TCP, 45 s handshake) and every outcome,
+    including a crash of the protocol engine, ends in one `closed` channel
+    message, so a pane never stays on "connecting". The RDP TLS upgrade
+    installs the `aws-lc-rs` rustls provider itself: the application links
+    `reqwest` as well, and rustls panics when feature unification leaves it
+    with two providers and no process-level default.
 * JSON document store, AES-256-GCM credential encryption keyed from the OS
   keychain, vault backups
 * Cloud sync transports (`netcatty-sync`): GitHub Gist device flow, Google
