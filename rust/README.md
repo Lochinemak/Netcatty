@@ -22,6 +22,7 @@ rust/
 │   ├── netcatty-localfs       local file browser operations, tree scans
 │   ├── netcatty-rdesktop      embedded remote desktops: VNC (vnc-rs) and RDP (IronRDP)
 │   ├── netcatty-store         JSON key/value store, OS-keychain credential cipher, vault backups
+│   ├── netcatty-sysmgr        system manager + server stats: remote command builders and parsers (processes, tmux, docker/podman/nerdctl, kubectl, GPUs, ports, systemd, stats)
 │   └── netcatty-sync          cloud sync transports: GitHub, Google Drive, OneDrive, WebDAV, S3, OAuth callback
 └── apps/
     └── netcatty-desktop       Tauri 2 app: commands, session registry, prompt broker, events
@@ -118,6 +119,15 @@ Implemented in Rust:
   Drive and OneDrive (OAuth loopback callback + PKCE), WebDAV (Basic / Digest
   / token) and S3 (SigV4); the sync master password is kept encrypted with
   the credential cipher
+* System manager (`netcatty-sysmgr`): capability probe, processes and
+  signals, tmux (sessions / windows / panes / clients / actions), Docker /
+  Podman / nerdctl containers and images, kubectl contexts / namespaces /
+  pods, NVIDIA / Ascend accelerators, listening ports, systemd services with
+  sudo fallback, OSC 7 setup — on the session's SSH connection, or locally
+  for local terminals
+* Server stats (`getServerStats`, distro probe, remote shell history) and the
+  server monitor panels (`monitor*`), sharing one sampler per connection;
+  child processes of local terminals (busy check on close)
 * Tauri shell: window, dialogs, clipboard, opener, event fan-out
 
 Not yet ported (the renderer treats these bridge methods as optional and
@@ -130,8 +140,7 @@ hides the features when they are absent):
 * Plugin-provided sync providers (they need the plugin runtime)
 * Tray, tray panel, global shortcuts, auto-launch, auto-update, deep links,
   Explorer context menu
-* Session logging, file watch (edit-and-sync), compressed folder upload,
-  system manager (processes/tmux/docker/kubectl), monitor bridge
+* Session logging, file watch (edit-and-sync), compressed folder upload
 * X11 forwarding is requested on the channel but no local X11 proxy is
   started yet
 * Remote desktop gaps: Kerberos-only RDP accounts, RDP clipboard / audio /
@@ -149,8 +158,9 @@ build so both backends can be compared while the port matures.
 managed state and event emission through `tauri::test`'s mock runtime (no
 window): local shell start → write → `netcatty:data` → resize → close →
 exactly one `netcatty:exit`, the store and credential commands, local file
-commands including the raw-body / raw-response binary path, and shell
-discovery. The crate is generic over `tauri::Runtime` for this reason;
+commands including the raw-body / raw-response binary path, shell
+discovery, the system-manager commands on a local session (capabilities,
+processes, PTY child processes) and the monitor panel bookkeeping. The crate is generic over `tauri::Runtime` for this reason;
 commands take `Ctx<'_, R>` (a thin `State<AppState<R>>` extractor).
 
 Note for packaging: `CredentialCipher::load_or_create` runs synchronously in

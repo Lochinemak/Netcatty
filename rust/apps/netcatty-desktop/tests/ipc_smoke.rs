@@ -816,3 +816,159 @@ fn monitor_commands_track_panels_per_window() {
     assert_eq!(after["running"], json!([]));
     assert_eq!(after["epoch"], snap["epoch"].as_u64().unwrap() + 1);
 }
+
+/// Opt-in: the system manager, stats and monitor over a real SSH session.
+/// Skipped unless `NETCATTY_E2E_SSH_HOST` is set (password auth; defaults
+/// match `rust/scripts/e2e-sshd`: `tester` / `testpass`). Install `tmux` on
+/// the target to cover the tmux commands too.
+#[test]
+fn system_manager_over_ssh_e2e() {
+    let Ok(host) = std::env::var("NETCATTY_E2E_SSH_HOST") else {
+        eprintln!("skipped: NETCATTY_E2E_SSH_HOST not set");
+        return;
+    };
+    let port: u16 = std::env::var("NETCATTY_E2E_SSH_PORT")
+        .ok()
+        .and_then(|p| p.parse().ok())
+        .unwrap_or(22);
+    let user = std::env::var("NETCATTY_E2E_SSH_USER").unwrap_or_else(|_| "tester".into());
+    let password = std::env::var("NETCATTY_E2E_SSH_PASSWORD").unwrap_or_else(|_| "testpass".into());
+    let h = build_app();
+    let options = json!({
+        "hostname": host, "port": port, "username": user, "password": password,
+        "verifyHostKeys": false, "keepaliveInterval": 10,
+    });
+    let mut start = options.clone();
+    start["sessionId"] = json!("e2e-sys");
+    ok(invoke(
+        &h.webview,
+        "session_start_ssh",
+        json!({ "payload": start }),
+    ));
+    let sid = json!({ "sessionId": "e2e-sys" });
+    let payload = json!({ "payload": { "sessionId": "e2e-sys" } });
+
+    let stats = ok(invoke(&h.webview, "session_server_stats", sid.clone()));
+    assert_eq!(stats["success"], true, "{stats}");
+    assert!(stats["stats"]["memTotal"].as_i64().unwrap() > 0, "{stats}");
+    assert!(stats["stats"]["cpuCores"].as_i64().unwrap() > 0);
+    assert!(!stats["stats"]["hostname"].as_str().unwrap().is_empty());
+    assert!(stats["stats"]["disks"].as_array().is_some());
+    assert!(stats["stats"]["responseLatencyMs"].is_number(), "{stats}");
+    // keepaliveInterval is set, so the SSH transport ping measures latency.
+    assert!(stats["stats"]["latencyMs"].is_number(), "{stats}");
+    // Past the 4 s terminal cache the CPU delta is available.
+    std::thread::sleep(Duration::from_millis(4300));
+    let stats = ok(invoke(&h.webview, "session_server_stats", sid.clone()));
+    assert!(stats["stats"]["cpu"].is_number(), "{stats}");
+    assert_eq!(stats["stats"]["networkReady"], true);
+
+    let distro = ok(invoke(&h.webview, "session_distro_info", sid.clone()));
+    assert_eq!(distro["success"], true, "{distro}");
+    assert!(
+        distro["stdout"].as_str().unwrap().contains("ID="),
+        "{distro}"
+    );
+
+    let history = ok(invoke(
+        &h.webview,
+        "session_read_remote_history",
+        json!({ "sessionId": "e2e-sys", "limit": 50 }),
+    ));
+    assert_eq!(history["success"], true, "{history}");
+
+    let caps = ok(invoke(
+        &h.webview,
+        "system_probe_capabilities",
+        payload.clone(),
+    ));
+    assert_eq!(caps["capabilities"]["targetOs"], "linux", "{caps}");
+    let procs = ok(invoke(&h.webview, "system_list_processes", payload.clone()));
+    assert!(procs["processes"].to_string().contains("sshd"), "{procs}");
+    let ports = ok(invoke(
+        &h.webview,
+        "system_list_listening_ports",
+        payload.clone(),
+    ));
+    assert_eq!(ports["success"], true, "{ports}");
+    let osc7 = ok(invoke(
+        &h.webview,
+        "system_setup_osc7_tracking",
+        json!({ "payload": { "sessionId": "e2e-sys", "command": "printf ok; exit 3" } }),
+    ));
+    assert_eq!(osc7["code"], 3, "{osc7}");
+    assert_eq!(osc7["stdout"], "ok");
+
+    if caps["capabilities"]["hasTmux"] == true {
+        let created = ok(invoke(
+            &h.webview,
+            "system_create_tmux_session",
+            json!({ "payload": { "sessionId": "e2e-sys", "name": "nc-e2e" } }),
+        ));
+        assert_eq!(created["success"], true, "{created}");
+        let listed = ok(invoke(
+            &h.webview,
+            "system_list_tmux_sessions",
+            payload.clone(),
+        ));
+        assert!(
+            listed["sessions"].to_string().contains("nc-e2e"),
+            "{listed}"
+        );
+        let windows = ok(invoke(
+            &h.webview,
+            "system_list_tmux_windows",
+            json!({ "payload": { "sessionId": "e2e-sys", "sessionName": "nc-e2e" } }),
+        ));
+        assert_eq!(windows["success"], true, "{windows}");
+        let killed = ok(invoke(
+            &h.webview,
+            "system_tmux_action",
+            json!({ "payload": { "sessionId": "e2e-sys", "action": "killSession", "sessionName": "nc-e2e" } }),
+        ));
+        assert_eq!(killed["success"], true, "{killed}");
+    }
+
+    // The monitor reuses the live session transport for the same endpoint.
+    ok(invoke(
+        &h.webview,
+        "monitor_update",
+        json!({ "panels": [{ "id": "p", "runId": "r", "interval": 1,
+                             "hosts": [{ "id": "h", "options": options }] }] }),
+    ));
+    let start = Instant::now();
+    let mut snap = Value::Null;
+    while start.elapsed() < Duration::from_secs(20) {
+        snap = ok(invoke(&h.webview, "monitor_snapshot", json!({})));
+        if snap["hosts"]["h"]["status"] == "live" && snap["hosts"]["h"]["stats"].is_object() {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(200));
+    }
+    assert_eq!(snap["hosts"]["h"]["status"], "live", "{snap}");
+    assert!(!snap["hosts"]["h"]["points"].as_array().unwrap().is_empty());
+    ok(invoke(&h.webview, "monitor_stop_all", json!({})));
+    ok(invoke(&h.webview, "session_close", sid));
+
+    // Without a live session the monitor logs in on its own connection.
+    ok(invoke(
+        &h.webview,
+        "monitor_update",
+        json!({ "panels": [{ "id": "p", "runId": "r2", "interval": 2,
+                             "hosts": [{ "id": "h", "options": options }] }] }),
+    ));
+    let start = Instant::now();
+    while start.elapsed() < Duration::from_secs(20) {
+        snap = ok(invoke(&h.webview, "monitor_snapshot", json!({})));
+        if snap["hosts"]["h"]["status"] == "live" {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(200));
+    }
+    assert_eq!(snap["hosts"]["h"]["status"], "live", "{snap}");
+    assert!(snap["activeSessions"][0]
+        .as_str()
+        .unwrap()
+        .starts_with("monitor-"));
+    ok(invoke(&h.webview, "monitor_stop_all", json!({})));
+}
