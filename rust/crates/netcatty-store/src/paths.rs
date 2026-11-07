@@ -59,6 +59,10 @@ impl AppPaths {
     pub fn backups_dir(&self) -> PathBuf {
         self.data_dir.join("backups")
     }
+    /// `<data>/netcatty/crash-logs` (Electron: `{userData}/crash-logs`).
+    pub fn crash_logs_dir(&self) -> PathBuf {
+        self.data_dir.join("crash-logs")
+    }
     pub fn temp_dir(&self) -> PathBuf {
         self.cache_dir.join("tmp")
     }

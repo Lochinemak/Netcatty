@@ -1099,6 +1099,22 @@ export function createTauriBridge(options: CreateTauriBridgeOptions = {}): Netca
     },
 
     // -----------------------------------------------------------------------
+    // Crash logs / diagnostics (Rust panics and logDiagnostic entries)
+    // -----------------------------------------------------------------------
+    getCrashLogs: () => invoke<BridgeResult<'getCrashLogs'>>('crash_logs_list'),
+    readCrashLog: (fileName) => invoke<BridgeResult<'readCrashLog'>>('crash_logs_read', { fileName }),
+    clearCrashLogs: () => invoke<BridgeResult<'clearCrashLogs'>>('crash_logs_clear'),
+    openCrashLogsDir: () => invoke<BridgeResult<'openCrashLogsDir'>>('crash_logs_open_dir'),
+    logDiagnostic: (payload) => invoke<BridgeResult<'logDiagnostic'>>('app_log_diagnostic', { payload }),
+
+    // -----------------------------------------------------------------------
+    // Clipboard files / images (arboard; text uses the clipboard plugin)
+    // -----------------------------------------------------------------------
+    readClipboardFiles: () => invoke<BridgeResult<'readClipboardFiles'>>('clipboard_read_files'),
+    readClipboardImage: () => invoke<BridgeResult<'readClipboardImage'>>('clipboard_read_image'),
+    hasClipboardImage: () => invoke<boolean>('clipboard_has_image'),
+
+    // -----------------------------------------------------------------------
     // App
     // -----------------------------------------------------------------------
     getAppInfo: async () => ({

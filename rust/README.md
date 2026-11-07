@@ -122,6 +122,8 @@ Implemented in Rust:
   lights on macOS, frameless with the renderer's own buttons elsewhere, drag
   regions), title-bar controls, native theme / background colour, language
   and cross-window settings sync
+* Crash log (Rust panics + renderer diagnostics, Electron's JSONL format),
+  clipboard file lists and images
 * Tauri shell: dialogs, clipboard, opener, event fan-out
 
 Not yet ported (the renderer treats these bridge methods as optional and

@@ -305,6 +305,25 @@ drops events whose `source` is its own window), `netcatty:language-changed`
 (language string), `netcatty:window:fullscreen-changed` (`{ label,
 fullscreen }`, filtered by label).
 
+## Crash logs, diagnostics, clipboard extras
+
+Crash log: `netcatty_store::crashlog` (Electron: `crashLogBridge.cjs`), JSONL
+files `<data>/crash-logs/crash-YYYY-MM-DD.log`, 30-day retention, 16 MB per
+file. Rust panics are recorded by the hook installed in `run()`.
+Clipboard files / images use `arboard` (`commands/clipboard.rs`, Electron:
+`clipboardFiles.cjs`).
+
+| Command | Args | Returns |
+| --- | --- | --- |
+| `crash_logs_list` | — | `[{ fileName, date, size, entryCount }]` newest first |
+| `crash_logs_read` | `fileName` (`crash-YYYY-MM-DD.log` only) | last ≤ 500 entries of the last 256 KB |
+| `crash_logs_clear` | — | `{ deletedCount }` |
+| `crash_logs_open_dir` | — | `{ success }` |
+| `app_log_diagnostic` | `payload: { source?, message?, extra? }` | `{ success: true }` (`terminal-perf` goes to the tracing log only) |
+| `clipboard_read_files` | — | `[{ path, name, isDirectory, size }]` (file list, else `file://` text lines) |
+| `clipboard_read_image` | — | `{ path, name, mediaType: "image/png", size } \| null` (PNG written to the temp dir) |
+| `clipboard_has_image` | — | `bool` |
+
 ## App
 
 | Command | Args | Returns |

@@ -9,6 +9,8 @@
 //!   `ArrayBuffer`; binary requests use `tauri::ipc::Request` raw bodies.
 
 pub mod app;
+pub mod clipboard;
+pub mod diagnostics;
 pub mod forward;
 pub mod localfs;
 pub mod rdesktop;
@@ -86,6 +88,16 @@ pub fn handler<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + 
         window::app_set_background_color,
         window::app_set_language,
         window::app_broadcast_settings_changed,
+        // Crash logs / diagnostics.
+        diagnostics::crash_logs_list,
+        diagnostics::crash_logs_read,
+        diagnostics::crash_logs_clear,
+        diagnostics::crash_logs_open_dir,
+        diagnostics::app_log_diagnostic,
+        // Clipboard files / images.
+        clipboard::clipboard_read_files,
+        clipboard::clipboard_read_image,
+        clipboard::clipboard_has_image,
         session::session_start_ssh,
         session::session_test_connection,
         session::session_cancel_test_connection,

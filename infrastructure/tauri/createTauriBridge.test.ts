@@ -799,3 +799,22 @@ test('language and fullscreen events reach the right listeners', async () => {
   assert.deepEqual(languages, ['ja']);
   assert.deepEqual(fullscreen, [true]);
 });
+
+test('crash logs, diagnostics and clipboard extras map to their commands', async () => {
+  const { fake, bridge } = setup();
+  fake.respond('crash_logs_list', () => [{ fileName: 'crash-2026-01-01.log', date: '2026-01-01', size: 10, entryCount: 1 }]);
+  fake.respond('crash_logs_clear', () => ({ deletedCount: 1 }));
+  fake.respond('app_log_diagnostic', () => ({ success: true }));
+  fake.respond('clipboard_has_image', () => true);
+
+  assert.equal((await bridge.getCrashLogs!())[0].fileName, 'crash-2026-01-01.log');
+  await bridge.readCrashLog!('crash-2026-01-01.log');
+  assert.deepEqual(lastInvoke(fake, 'crash_logs_read').args, { fileName: 'crash-2026-01-01.log' });
+  assert.deepEqual(await bridge.clearCrashLogs!(), { deletedCount: 1 });
+  const diagnostic = { source: 'sftp', message: 'stalled', extra: { id: 1 } };
+  assert.deepEqual(await bridge.logDiagnostic!(diagnostic), { success: true });
+  assert.deepEqual(lastInvoke(fake, 'app_log_diagnostic').args, { payload: diagnostic });
+  assert.equal(await bridge.hasClipboardImage!(), true);
+  await bridge.readClipboardFiles!();
+  assert.ok(fake.invokes.some((entry) => entry.cmd === 'clipboard_read_files'));
+});

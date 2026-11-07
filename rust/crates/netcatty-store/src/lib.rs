@@ -15,6 +15,7 @@
 //! * [`backups`]: vault backup rotation (`vaultBackupBridge.cjs`).
 
 pub mod backups;
+pub mod crashlog;
 pub mod credentials;
 pub mod kv;
 pub mod paths;

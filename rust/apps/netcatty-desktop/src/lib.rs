@@ -60,6 +60,12 @@ pub fn configure_with<R: tauri::Runtime>(
             };
             app.manage(state);
             app.manage(commands::window::WindowState::default());
+            let crash_log = commands::diagnostics::crash_log_for(
+                &netcatty_store::AppPaths::resolve(),
+                &app.package_info().version.to_string(),
+            );
+            crash_log.init();
+            app.manage(crash_log);
             tracing::info!("netcatty-desktop started");
             Ok(())
         })
@@ -71,8 +77,13 @@ pub fn configure_with<R: tauri::Runtime>(
 pub fn run() {
     init_tracing();
 
+    let context = tauri::generate_context!();
+    commands::diagnostics::install_panic_hook(commands::diagnostics::crash_log_for(
+        &netcatty_store::AppPaths::resolve(),
+        &context.package_info().version.to_string(),
+    ));
     configure(tauri::Builder::default())
-        .run(tauri::generate_context!())
+        .run(context)
         .expect("error while running Netcatty");
 }
 

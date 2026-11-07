@@ -3880,9 +3880,11 @@ dependencies = [
 name = "netcatty-desktop"
 version = "0.1.0"
 dependencies = [
+ "arboard",
  "async-trait",
  "base64 0.23.1",
  "bytes",
+ "chrono",
  "dashmap",
  "dirs",
  "encoding_rs",
@@ -3898,6 +3900,7 @@ dependencies = [
  "netcatty-sync",
  "parking_lot 0.13.0",
  "percent-encoding",
+ "png",
  "russh",
  "serde",
  "serde_json",
@@ -3913,6 +3916,7 @@ dependencies = [
  "tokio-util",
  "tracing",
  "tracing-subscriber",
+ "url",
 ]
 
 [[package]]
