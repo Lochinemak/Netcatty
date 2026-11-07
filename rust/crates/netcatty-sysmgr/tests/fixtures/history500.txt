@@ -1,0 +1,8 @@
+exec sh -c 'SH="$(getent passwd "$(id -un)" 2>/dev/null | cut -d: -f7)"; [ -n "$SH" ] || SH="$SHELL"
+FISH="${XDG_DATA_HOME:-$HOME/.local/share}/fish/fish_history"; [ -f "$FISH" ] || FISH="$HOME/.config/fish/fish_history"
+case "$SH" in
+  *zsh) printf '\''%s\n'\'' '\''__NC_SHELL__zsh'\''; printf '\''%s\n'\'' '\''__NC_ZSH__'\''; tail -n 500 "${HISTFILE:-$HOME/.zsh_history}" 2>/dev/null || true ;;
+  *bash) printf '\''%s\n'\'' '\''__NC_SHELL__bash'\''; printf '\''%s\n'\'' '\''__NC_BASH__'\''; tail -n 500 "${HISTFILE:-$HOME/.bash_history}" 2>/dev/null || true ;;
+  *fish) printf '\''%s\n'\'' '\''__NC_SHELL__fish'\''; printf '\''%s\n'\'' '\''__NC_FISH__'\''; tail -n 1500 "$FISH" 2>/dev/null || true ;;
+  *) printf '\''%s\n'\'' '\''__NC_SHELL__unknown'\''; printf '\''%s\n'\'' '\''__NC_BASH__'\''; tail -n 500 "$HOME/.bash_history" 2>/dev/null || true; printf '\''%s\n'\'' '\''__NC_ZSH__'\''; tail -n 500 "$HOME/.zsh_history" 2>/dev/null || true; printf '\''%s\n'\'' '\''__NC_FISH__'\''; tail -n 1500 "$FISH" 2>/dev/null || true ;;
+esac'
