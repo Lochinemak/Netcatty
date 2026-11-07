@@ -7,9 +7,11 @@
 import { installTauriBridge } from './installTauriBridge';
 import { installClipboardPolyfill } from './clipboardPolyfill';
 import { installDragRegions } from './dragRegion';
+import { installExternalLinks } from './externalLinks';
 import { installRendererDiagnostics } from './rendererDiagnostics';
 
 installRendererDiagnostics();
 installClipboardPolyfill();
 installTauriBridge();
 installDragRegions();
+installExternalLinks();
