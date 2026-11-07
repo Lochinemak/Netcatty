@@ -23,6 +23,7 @@ pub mod google;
 pub mod http;
 pub mod oauth;
 pub mod onedrive;
+pub mod proxy;
 pub mod s3;
 pub mod synced_file;
 pub mod webdav;

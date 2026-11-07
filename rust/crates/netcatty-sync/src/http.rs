@@ -2,8 +2,8 @@
 //! provider uses to shape errors the same way the Electron bridges do.
 
 use netcatty_core::{CoreError, CoreResult};
+use parking_lot::RwLock;
 use percent_encoding::{AsciiSet, NON_ALPHANUMERIC};
-use std::sync::OnceLock;
 
 /// Characters `encodeURIComponent` leaves alone; everything else is escaped.
 pub const COMPONENT: &AsciiSet = &NON_ALPHANUMERIC
@@ -23,22 +23,30 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(20);
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(120);
 
 fn builder() -> reqwest::ClientBuilder {
-    reqwest::Client::builder()
-        .user_agent(USER_AGENT)
-        .connect_timeout(CONNECT_TIMEOUT)
-        .timeout(REQUEST_TIMEOUT)
+    crate::proxy::configure(
+        reqwest::Client::builder()
+            .user_agent(USER_AGENT)
+            .connect_timeout(CONNECT_TIMEOUT)
+            .timeout(REQUEST_TIMEOUT),
+    )
 }
 
-/// The shared client (system proxy, platform certificate verification).
+/// Shared client, rebuilt after the app proxy settings change.
+static CLIENT: RwLock<Option<reqwest::Client>> = RwLock::new(None);
+
+pub(crate) fn invalidate_client() {
+    *CLIENT.write() = None;
+}
+
+/// The shared client (app proxy settings, platform certificate verification).
 pub fn client() -> CoreResult<reqwest::Client> {
-    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
-    if let Some(client) = CLIENT.get() {
+    if let Some(client) = CLIENT.read().as_ref() {
         return Ok(client.clone());
     }
     let client = builder()
         .build()
         .map_err(|err| CoreError::internal(format!("HTTP client init failed: {err}")))?;
-    Ok(CLIENT.get_or_init(|| client).clone())
+    Ok(CLIENT.write().get_or_insert(client).clone())
 }
 
 /// Client for a user-configured endpoint. `allow_insecure` skips TLS

@@ -855,3 +855,11 @@ test('temp directory management maps to the tempdir commands', async () => {
   await bridge.clearTempDir!();
   assert.ok(['tempdir_reset_custom', 'tempdir_clear'].every((cmd) => fake.invokes.some((entry) => entry.cmd === cmd)));
 });
+
+test('http network proxy maps to the app proxy commands', async () => {
+  const { fake, bridge } = setup();
+  const settings = { mode: 'custom' as const, url: 'http://proxy:8080', bypass: '<local>' };
+  fake.respond('app_set_http_proxy', () => ({ success: true, settings }));
+  assert.deepEqual(await bridge.setHttpNetworkProxy!(settings), { success: true, settings });
+  assert.deepEqual(lastInvoke(fake, 'app_set_http_proxy').args, { settings });
+});

@@ -124,7 +124,8 @@ Implemented in Rust:
   and cross-window settings sync
 * Crash log (Rust panics + renderer diagnostics, Electron's JSONL format),
   clipboard file lists and images, temp directory management (info, clear,
-  custom root), Electron-compatible local vault backups
+  custom root), Electron-compatible local vault backups, app-level HTTP proxy
+  for cloud sync / OAuth (system / direct / custom)
 * Tauri shell: dialogs, clipboard, opener, event fan-out
 
 Not yet ported (the renderer treats these bridge methods as optional and

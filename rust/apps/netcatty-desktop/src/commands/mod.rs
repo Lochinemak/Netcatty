@@ -72,6 +72,8 @@ pub fn handler<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + 
         app::app_get_temp_dir_path,
         app::app_reveal_in_folder,
         app::system_info,
+        app::app_set_http_proxy,
+        app::app_get_http_proxy,
         // Window management / settings window.
         window::window_open_settings,
         window::window_close_settings,

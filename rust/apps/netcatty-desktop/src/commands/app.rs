@@ -50,3 +50,39 @@ pub fn app_renderer_log(level: String, message: String, source: Option<String>) 
         _ => tracing::info!(target: "renderer", %source, "{message}"),
     }
 }
+
+// ---------------------------------------------------------------------------
+// App-level HTTP proxy (Electron: `httpNetworkProxyBridge.cjs`). Applies to
+// the backend's HTTP calls (cloud sync, OAuth); the renderer re-applies its
+// stored setting at startup, so nothing is persisted here.
+// ---------------------------------------------------------------------------
+
+use netcatty_sync::proxy::{ProxySettings, RawProxySettings};
+
+#[derive(serde::Serialize)]
+pub struct ProxyApplied {
+    success: bool,
+    settings: ProxySettings,
+}
+
+#[derive(serde::Serialize)]
+pub struct ProxyCurrent {
+    settings: ProxySettings,
+}
+
+#[tauri::command]
+pub fn app_set_http_proxy(settings: Option<RawProxySettings>) -> ProxyApplied {
+    let settings = netcatty_sync::proxy::normalize(&settings.unwrap_or_default());
+    netcatty_sync::proxy::set(settings.clone());
+    ProxyApplied {
+        success: true,
+        settings,
+    }
+}
+
+#[tauri::command]
+pub fn app_get_http_proxy() -> ProxyCurrent {
+    ProxyCurrent {
+        settings: netcatty_sync::proxy::current(),
+    }
+}

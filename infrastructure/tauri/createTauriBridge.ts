@@ -1126,6 +1126,12 @@ export function createTauriBridge(options: CreateTauriBridgeOptions = {}): Netca
     resetCustomTempDir: () => invoke<BridgeResult<'resetCustomTempDir'>>('tempdir_reset_custom'),
 
     // -----------------------------------------------------------------------
+    // App-level HTTP proxy for backend HTTP calls (cloud sync, OAuth)
+    // -----------------------------------------------------------------------
+    setHttpNetworkProxy: (settings) => invoke<BridgeResult<'setHttpNetworkProxy'>>('app_set_http_proxy', { settings }),
+    getHttpNetworkProxy: () => invoke<BridgeResult<'getHttpNetworkProxy'>>('app_get_http_proxy'),
+
+    // -----------------------------------------------------------------------
     // Crash logs / diagnostics (Rust panics and logDiagnostic entries)
     // -----------------------------------------------------------------------
     getCrashLogs: () => invoke<BridgeResult<'getCrashLogs'>>('crash_logs_list'),

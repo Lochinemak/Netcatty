@@ -335,6 +335,21 @@ tool-output store). The effective temp dir is the custom root when set, else
 
 `chooseTempDir` is the dialog plugin's directory picker.
 
+## App HTTP proxy
+
+`netcatty_sync::proxy` (Electron: `httpNetworkProxyBridge.cjs`): the proxy
+for the backend's own HTTP calls (cloud sync, OAuth), not SSH proxies.
+`system` uses reqwest's system proxy, `direct` none, `custom` routes through
+`url` except the bypass list (`<local>` = localhost / loopback); userinfo is
+stripped from the URL; an empty custom URL acts like `system`. Not persisted
+(the renderer re-applies its setting at startup); local terminals are not
+affected.
+
+| Command | Args | Returns |
+| --- | --- | --- |
+| `app_set_http_proxy` | `settings: { mode, url, bypass }` | `{ success: true, settings }` (normalized) |
+| `app_get_http_proxy` | — | `{ settings }` |
+
 ## Crash logs, diagnostics, clipboard extras
 
 Crash log: `netcatty_store::crashlog` (Electron: `crashLogBridge.cjs`), JSONL
