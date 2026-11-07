@@ -1166,6 +1166,10 @@ export function createTauriBridge(options: CreateTauriBridgeOptions = {}): Netca
     setHttpNetworkProxy: (settings) => invoke<BridgeResult<'setHttpNetworkProxy'>>('app_set_http_proxy', { settings }),
     getHttpNetworkProxy: () => invoke<BridgeResult<'getHttpNetworkProxy'>>('app_get_http_proxy'),
 
+    // TOTP preview for the host editor (same parser / error codes as
+    // domain/totp.shared.cjs). Screen QR scanning is not ported.
+    previewTotp: (payload) => invoke<BridgeResult<'previewTotp'>>('totp_preview', { payload }),
+
     // -----------------------------------------------------------------------
     // Crash logs / diagnostics (Rust panics and logDiagnostic entries)
     // -----------------------------------------------------------------------

@@ -23,6 +23,7 @@ pub mod store;
 pub mod sync;
 pub mod temp;
 pub mod tempdir;
+pub mod totp;
 pub mod window;
 
 use netcatty_core::CoreError;
@@ -121,6 +122,7 @@ pub fn handler<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + 
         openwith::sftp_download_to_temp,
         openwith::dialog_confirm_close_busy,
         openwith::sftp_same_host_copy_dir,
+        totp::totp_preview,
         session::session_start_ssh,
         session::session_test_connection,
         session::session_cancel_test_connection,

@@ -901,3 +901,10 @@ test('open-with helpers and the busy-close confirmation map to their commands', 
   assert.equal(await bridge.confirmCloseBusy!({ command: 'vim' }), false);
   assert.deepEqual(lastInvoke(fake, 'dialog_confirm_close_busy').args, { payload: { command: 'vim' } });
 });
+
+test('previewTotp maps to totp_preview', async () => {
+  const { fake, bridge } = setup();
+  fake.respond('totp_preview', () => ({ ok: false, error: 'hotp' }));
+  assert.deepEqual(await bridge.previewTotp!({ text: 'otpauth://hotp/x' }), { ok: false, error: 'hotp' });
+  assert.deepEqual(lastInvoke(fake, 'totp_preview').args, { payload: { text: 'otpauth://hotp/x' } });
+});

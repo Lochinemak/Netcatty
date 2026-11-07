@@ -47,6 +47,9 @@ encoding_rs = "0.8"
 percent-encoding = "2.3"
 arboard = "3.7"
 png = "0.18"
+hmac = { workspace = true }
+sha1 = "0.11"
+sha2 = { workspace = true }
 url = { workspace = true }
 chrono = { workspace = true }
 
