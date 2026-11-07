@@ -69,6 +69,7 @@ pub fn configure_with<R: tauri::Runtime>(
             crash_log.init();
             app.manage(crash_log);
             app.manage(commands::filewatch::FileWatchState::default());
+            app.manage(commands::sessionlog::SessionLogState::default());
             app.manage(commands::tempdir::TempDirState::load(
                 &netcatty_store::AppPaths::resolve(),
             ));

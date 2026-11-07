@@ -112,6 +112,9 @@ pub struct ExternalSessionOptions {
     pub env: Option<HashMap<String, String>>,
     #[serde(default)]
     pub boot_epoch: Option<u64>,
+    /// Automatic session log (`sessionLog` of the start options).
+    #[serde(default)]
+    pub session_log: Option<netcatty_core::ipc::SessionLogConfig>,
 }
 
 fn auth_method_str(method: Option<HostAuthMethod>) -> Option<String> {
@@ -575,6 +578,22 @@ pub async fn mosh_start<R: Runtime>(
     };
     tauri::async_runtime::spawn(driver.run(ssh_pty, ssh_events));
 
+    // Session-log hook (automatic log of this session).
+    {
+        let host = payload.hostname.trim();
+        let label = payload
+            .label
+            .as_deref()
+            .map(str::trim)
+            .filter(|l| !l.is_empty());
+        super::sessionlog::session_starting(
+            &state.app,
+            &session_id,
+            payload.session_log.as_ref(),
+            label.unwrap_or(host),
+            host,
+        );
+    }
     state.sessions.insert(SessionEntry {
         session_id: session_id.clone(),
         host_id: payload.host_id.clone(),
@@ -974,6 +993,22 @@ pub async fn et_start<R: Runtime>(
         forward.run_cleanup();
     });
 
+    // Session-log hook (automatic log of this session).
+    {
+        let host = payload.hostname.trim();
+        let label = payload
+            .label
+            .as_deref()
+            .map(str::trim)
+            .filter(|l| !l.is_empty());
+        super::sessionlog::session_starting(
+            &state.app,
+            &session_id,
+            payload.session_log.as_ref(),
+            label.unwrap_or(host),
+            host,
+        );
+    }
     state.sessions.insert(SessionEntry {
         session_id: session_id.clone(),
         host_id: payload.host_id.clone(),

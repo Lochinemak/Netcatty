@@ -3982,6 +3982,7 @@ dependencies = [
  "netcatty-pty",
  "netcatty-rdesktop",
  "netcatty-serial",
+ "netcatty-sessionlog",
  "netcatty-sftp",
  "netcatty-ssh",
  "netcatty-store",
@@ -4120,6 +4121,17 @@ dependencies = [
  "serialport",
  "thiserror 2.0.21",
  "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "netcatty-sessionlog"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "parking_lot 0.13.0",
+ "regex",
+ "tempfile",
  "tracing",
 ]
 

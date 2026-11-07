@@ -21,6 +21,7 @@ rust/
 │   ├── netcatty-pty           local shells (portable-pty) + shell discovery
 │   ├── netcatty-localfs       local file browser operations, tree scans
 │   ├── netcatty-rdesktop      embedded remote desktops: VNC (vnc-rs) and RDP (IronRDP)
+│   ├── netcatty-sessionlog    session logs: terminal replay to txt / html, live log streams
 │   ├── netcatty-store         JSON key/value store, OS-keychain credential cipher, vault backups
 │   ├── netcatty-sync          cloud sync transports: GitHub, Google Drive, OneDrive, WebDAV, S3, OAuth callback
 │   ├── netcatty-sysmgr        system manager + server stats: remote command builders and parsers (processes, tmux, docker/podman/nerdctl, kubectl, GPUs, ports, systemd, stats)
@@ -155,6 +156,10 @@ Implemented in Rust:
 * Server stats (`getServerStats`, distro probe, remote shell history) and the
   server monitor panels (`monitor*`), sharing one sampler per connection;
   child processes of local terminals (busy check on close)
+* Session logs: export (txt / raw / html), auto-save, logs directory open /
+  clear, manual "record session log" and automatic per-session logs streamed
+  live from the session pump, with Electron's file naming and a byte-for-byte
+  port of its terminal-to-text / HTML sanitizer (`netcatty-sessionlog`)
 * Tauri shell: dialogs, clipboard, opener, event fan-out
 
 Not yet ported (the renderer treats these bridge methods as optional and
@@ -168,7 +173,7 @@ hides the features when they are absent):
 * Plugin-provided sync providers (they need the plugin runtime)
 * Auto-update, deep links, Explorer context menu, the macOS Dock menu
   (saved hosts), per-variant tray icons (`appIconManager`)
-* Session logging, compressed folder upload
+* Compressed folder upload
 * X11 forwarding is requested on the channel but no local X11 proxy is
   started yet
 * Remote desktop gaps: Kerberos-only RDP accounts, RDP clipboard / audio /

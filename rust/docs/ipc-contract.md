@@ -589,6 +589,51 @@ servers (by banner) are `unsupported`. Terminal stats and the monitor share
 one sampler per connection (baselines, 30-minute / 1800-point history and
 the monitor's separate, cached `nvidia-smi` probe).
 
+## Session logs
+
+`commands/sessionlog.rs` + the `netcatty-sessionlog` crate (Electron:
+`sessionLogsBridge.cjs`, `sessionLogStreamManager.cjs`,
+`terminalLogSanitizer.cjs`, `programmaticCommandLog.cjs`). Formats: `raw`
+(`.log`, output as received), `txt` (terminal replay: cursor moves, erases,
+`\r` overwrites, cleared screens kept as history, alternate-screen paint
+omitted) and `html` (the same replay with SGR styles, wrapped in Electron's
+light / dark page). The sanitizer is a byte-for-byte port, checked against
+the JavaScript one with randomized differential runs.
+
+File names: automatic logs and auto-save write
+`<directory>/<safe host label>/<YYYY-MM-DDTHH-MM-SS>.<ext>` (local time);
+export and manual logs default to `<safe label>_<YYYY-MM-DDTHH-MM-SS>.<ext>`.
+"Safe" replaces `<>:"/\|?*` and control characters with `_`, trims, turns
+trailing dots into `_` and suffixes Windows device names.
+
+Streams: every decoded chunk passes `sessions.rs` `deliver` →
+`sessionlog::tap_output` (before flow-control buffering), is buffered and
+written by a per-stream flush thread every 500 ms (immediately at 64 KiB).
+`raw` appends; `txt` / `html` rewrite the rendered file. Two managers mirror
+Electron's main / worker split: **automatic** logs (`sessionLog: { enabled,
+directory, format, timestampsEnabled }` on `session_start_ssh` /
+`session_start_local`; label `hostLabel || hostname`, local `Local`) end with
+the session; **manual** recordings (token-guarded) survive reconnects and end
+only on `session_log_manual_stop`. `session_write` registers sudo-autofill
+markers and `logRewrite: { sentCommand, displayCommand }` so injected
+commands do not appear in logs. A new session kind needs the three hooks:
+`session_starting` before inserting into the registry, output through
+`deliver`, and `remove_and_release` (calls `session_ended`).
+
+| Command | Args | Returns |
+| --- | --- | --- |
+| `session_log_export` | `payload: { terminalData, hostLabel, hostname, startTime, format, plainText? }` | `{ success: true, filePath }` \| `{ success: false, canceled: true }`; rejects `INVALID_ARGUMENT` "No terminal data to export". Save dialog (txt / log / html / all filters); the chosen extension picks the format. |
+| `session_log_select_dir` | — | `{ success: true, directory }` \| `{ success: false, canceled: true }` |
+| `session_log_auto_save` | `payload: { terminalData, hostLabel, hostname, hostId, startTime, format, directory }` | `{ success, filePath?, error? }` ("Missing terminal data or directory") |
+| `session_log_open_dir` | `directory` | `{ success, error? }` ("No directory specified", `ENOENT: …` when missing) |
+| `session_log_clear_dir` | `directory` | `{ success, deletedCount, failedCount, error? }` — only session-log artifacts; live stream files / host folders and symlinks are kept; a missing directory is success |
+| `session_log_manual_choose_path` | `payload: { sessionId, sessionName?, preferredDirectory?, format? }` | `{ success, canceled, selectionToken?, filePath?, format?, error? }` — save dialog (default `~`, format default `raw`); `.ext` appended when missing, then an overwrite confirmation if that file exists |
+| `session_log_manual_start` | `payload: { sessionId, sessionName?, preferredDirectory?, selectionToken?, format?, timestampsEnabled?, initialLine?, alternateScreenActive? }` | `{ success, started, canceled?, filePath?, error? }` — redeems the token (single use, same session and window); `filePath` in the payload is refused; no token → dialog first |
+| `session_log_manual_stop` | `payload: { sessionId }` | `{ success, stopped, filePath?, error? }` |
+| `session_log_manual_status` | `payload: { sessionId }` | `{ success, isLogging, hasSessionLog, error? }` — `isLogging` = manual recording; `hasSessionLog` = a manual or automatic log exists |
+| `session_log_prepare` | `payload: { sessionId }` | `{ success, filePath?, error? }` — flushes the live log (or returns the finalized one; manual before automatic) |
+| `session_log_reveal` | `payload: { sessionId }` | as prepare, then reveals the file (opener plugin) |
+
 ## App
 
 | Command | Args | Returns |
@@ -607,7 +652,7 @@ adapter (`window.__TAURI__.dialog`, `.clipboardManager`, `.opener`).
 | `startSSHSession(o)` | `session_start_ssh` → `.sessionId` |
 | `testConnection(o)` / `cancelTestConnection(id)` | `session_test_connection` / `session_cancel_test_connection` |
 | `startLocalSession(o)` | `session_start_local` → `.sessionId` |
-| `writeToSession(id, data, opts)` | `session_write` (fire-and-forget) |
+| `writeToSession(id, data, opts)` | `session_write` (fire-and-forget; `opts.logRewrite` forwarded) |
 | `resizeSession`, `interruptSession`, `setSessionFlowPaused`, `ackSessionFlow`, `closeSession` | `session_resize`, `session_interrupt`, `session_set_flow_paused`, `session_ack_flow`, `session_close` |
 | `onSessionData(id, cb)` / `onSessionExit(id, cb)` | listen `netcatty:data` / `netcatty:exit`, filter by `sessionId`; return unlisten |
 | `startRemoteDesktopSession(o, onEvent)` | `rdesktop_connect` with a `Channel`; binary messages are decoded into `frame` / `copyRect` events |
@@ -655,9 +700,13 @@ adapter (`window.__TAURI__.dialog`, `.clipboardManager`, `.opener`).
 | `probeSystemCapabilities` … `systemServiceAction` (system manager) | `system_*` (`payload` = the Electron IPC payload) |
 | `monitorUpdate`, `monitorSnapshot`, `monitorStopAll`, `monitorRetry` | `monitor_update`, `monitor_snapshot`, `monitor_stop_all`, `monitor_retry` |
 | `ptyGetChildProcesses` | `pty_child_processes` |
+| `exportSessionLog`, `selectSessionLogsDir`, `autoSaveSessionLog` | `session_log_export`, `session_log_select_dir`, `session_log_auto_save` (`payload`) |
+| `openSessionLogsDir(dir)`, `clearSessionLogsDir(dir)` | `session_log_open_dir`, `session_log_clear_dir` (`directory`) |
+| `chooseManualSessionLogPath`, `startManualSessionLog`, `stopManualSessionLog`, `getManualSessionLogStatus` | `session_log_manual_choose_path`, `session_log_manual_start`, `session_log_manual_stop`, `session_log_manual_status` (`payload`) |
+| `prepareSessionLog`, `revealSessionLog` | `session_log_prepare`, `session_log_reveal` (`payload: { sessionId }` only) |
 
 Bridge methods that have no Rust counterpart in this version (AI, plugins,
-MCP, ZMODEM/YMODEM, FIDO, plugin sync providers, auto-update, session logs)
-are left `undefined` on the adapter; the renderer already treats them as
-optional. `onTrayPanelCloseRequest` stays undefined too: the Electron main
-process never sends that event.
+MCP, ZMODEM/YMODEM, FIDO, plugin sync providers, auto-update) are left
+`undefined` on the adapter; the renderer already treats them as optional.
+`onTrayPanelCloseRequest` stays undefined too: the Electron main process
+never sends that event.

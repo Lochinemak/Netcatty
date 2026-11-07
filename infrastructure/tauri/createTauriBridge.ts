@@ -602,6 +602,16 @@ export function createTauriBridge(options: CreateTauriBridgeOptions = {}): Netca
           // Serial Backspace expansion; only sent when set.
           ...(typeof writeOptions?.serialEraseChar === 'string' ? { serialEraseChar: writeOptions.serialEraseChar } : {}),
           lineDelayMs: Number.isFinite(lineDelayMs) && lineDelayMs > 0 ? lineDelayMs : undefined,
+          // Session logs show `displayCommand` instead of this command's echo;
+          // only sent when set.
+          ...(typeof writeOptions?.logRewrite?.sentCommand === 'string' && writeOptions.logRewrite.sentCommand
+            ? {
+              logRewrite: {
+                sentCommand: writeOptions.logRewrite.sentCommand,
+                displayCommand: String(writeOptions.logRewrite.displayCommand ?? ''),
+              },
+            }
+            : {}),
         },
       }));
     },
@@ -1403,6 +1413,32 @@ export function createTauriBridge(options: CreateTauriBridgeOptions = {}): Netca
     // Local terminals only: direct children of the shell (busy check on close).
     ptyGetChildProcesses: (sessionId) =>
       invoke<BridgeResult<'ptyGetChildProcesses'>>('pty_child_processes', { sessionId }),
+
+    // -----------------------------------------------------------------------
+    // Session logs: export / auto-save / logs directory, manual recording and
+    // automatic per-session logs. Save / folder dialogs run in Rust; a manual
+    // log path never leaves Rust (the renderer only holds a selectionToken).
+    // -----------------------------------------------------------------------
+    exportSessionLog: (payload) => invoke<BridgeResult<'exportSessionLog'>>('session_log_export', { payload }),
+    selectSessionLogsDir: () => invoke<BridgeResult<'selectSessionLogsDir'>>('session_log_select_dir'),
+    autoSaveSessionLog: (payload) =>
+      invoke<BridgeResult<'autoSaveSessionLog'>>('session_log_auto_save', { payload }),
+    openSessionLogsDir: (directory) =>
+      invoke<BridgeResult<'openSessionLogsDir'>>('session_log_open_dir', { directory }),
+    clearSessionLogsDir: (directory) =>
+      invoke<BridgeResult<'clearSessionLogsDir'>>('session_log_clear_dir', { directory }),
+    chooseManualSessionLogPath: (payload) =>
+      invoke<BridgeResult<'chooseManualSessionLogPath'>>('session_log_manual_choose_path', { payload }),
+    startManualSessionLog: (payload) =>
+      invoke<BridgeResult<'startManualSessionLog'>>('session_log_manual_start', { payload }),
+    stopManualSessionLog: (payload) =>
+      invoke<BridgeResult<'stopManualSessionLog'>>('session_log_manual_stop', { payload }),
+    getManualSessionLogStatus: (payload) =>
+      invoke<BridgeResult<'getManualSessionLogStatus'>>('session_log_manual_status', { payload }),
+    prepareSessionLog: (payload) =>
+      invoke<BridgeResult<'prepareSessionLog'>>('session_log_prepare', { payload: { sessionId: payload.sessionId } }),
+    revealSessionLog: (payload) =>
+      invoke<BridgeResult<'revealSessionLog'>>('session_log_reveal', { payload: { sessionId: payload.sessionId } }),
 
     // -----------------------------------------------------------------------
     // App

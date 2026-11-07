@@ -149,6 +149,16 @@ pub async fn session_start_ssh<R: tauri::Runtime>(
 
     // System manager: sudo password / single-channel flag of this session.
     state.system.remember_session(&session_id, &payload);
+    // Session-log hook (before the output pump starts).
+    let hostname = payload.hostname.trim();
+    let log_label = payload.host_label.as_deref().filter(|l| !l.is_empty());
+    super::sessionlog::session_starting(
+        &state.app,
+        &session_id,
+        payload.session_log.as_ref(),
+        log_label.unwrap_or(hostname),
+        hostname,
+    );
     state.sessions.insert(SessionEntry {
         session_id: session_id.clone(),
         host_id: payload.host_id.clone(),
@@ -276,6 +286,14 @@ pub async fn session_start_local<R: tauri::Runtime>(
     };
     let pty = PtySession::spawn(options).await?;
     let label = pty.shell.clone();
+    // Session-log hook (before the output pump starts).
+    super::sessionlog::session_starting(
+        &state.app,
+        &session_id,
+        payload.session_log.as_ref(),
+        "Local",
+        "localhost",
+    );
     state.sessions.insert(SessionEntry {
         session_id: session_id.clone(),
         host_id: None,
@@ -304,6 +322,15 @@ pub async fn session_write<R: tauri::Runtime>(
         automated: payload.automated,
         serial_erase_char: payload.serial_erase_char.clone(),
     };
+    if !payload.binary {
+        // Session-log hook: sudo-autofill markers and `logRewrite` echoes.
+        super::sessionlog::session_input(
+            &state.app,
+            &payload.session_id,
+            &payload.data,
+            payload.log_rewrite.as_ref(),
+        );
+    }
     match plan_write(&payload)? {
         WritePlan::Binary(bytes) => {
             state

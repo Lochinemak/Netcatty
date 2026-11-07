@@ -1243,3 +1243,60 @@ test('monitor methods forward panels, cursor and host ids', async () => {
   await bridge.monitorStopAll!();
   assert.ok(fake.invokes.some((entry) => entry.cmd === 'monitor_stop_all'));
 });
+
+test('writeToSession forwards logRewrite so session logs hide injected commands', async () => {
+  const { fake, bridge } = setup();
+  bridge.writeToSession('s1', 'setup\r', { automated: true, logRewrite: { sentCommand: 'setup', displayCommand: '' } });
+  bridge.writeToSession('s1', 'x', { logRewrite: { sentCommand: '', displayCommand: 'ignored' } });
+  await flush();
+  const writes = fake.invokes.filter((entry) => entry.cmd === 'session_write');
+  const payloads = writes.map((entry) => (entry.args as { payload: { logRewrite?: unknown } }).payload.logRewrite);
+  assert.deepEqual(payloads, [{ sentCommand: 'setup', displayCommand: '' }, undefined]);
+});
+
+test('session logs map to the session_log commands with Electron payloads', async () => {
+  const { fake, bridge } = setup();
+  fake.respond('session_log_export', () => ({ success: true, filePath: '/logs/h.txt' }));
+  fake.respond('session_log_select_dir', () => ({ success: false, canceled: true }));
+  fake.respond('session_log_clear_dir', () => ({ success: true, deletedCount: 2, failedCount: 0 }));
+  fake.respond('session_log_manual_choose_path', () => ({
+    success: true, canceled: false, selectionToken: 'tok', filePath: '/logs/m.log', format: 'raw',
+  }));
+  fake.respond('session_log_manual_start', () => ({ success: true, started: true, filePath: '/logs/m.log' }));
+  fake.respond('session_log_manual_stop', () => ({ success: true, stopped: true, filePath: '/logs/m.log' }));
+  fake.respond('session_log_manual_status', () => ({ success: true, isLogging: true, hasSessionLog: true }));
+  fake.respond('session_log_prepare', () => ({ success: true, filePath: '/logs/m.log' }));
+  fake.respond('session_log_reveal', () => ({ success: false, error: 'No saved log is available for this session' }));
+
+  const exportPayload = { terminalData: 'x', hostLabel: 'h', hostname: 'h', startTime: 1, format: 'txt' as const };
+  assert.deepEqual(await bridge.exportSessionLog!(exportPayload), { success: true, filePath: '/logs/h.txt' });
+  assert.deepEqual(lastInvoke(fake, 'session_log_export').args, { payload: exportPayload });
+  assert.deepEqual(await bridge.selectSessionLogsDir!(), { success: false, canceled: true });
+
+  const autoSave = { terminalData: 'x', hostLabel: 'h', hostname: 'h', hostId: 'id', startTime: 1, format: 'raw' as const, directory: '/logs' };
+  await bridge.autoSaveSessionLog!(autoSave);
+  assert.deepEqual(lastInvoke(fake, 'session_log_auto_save').args, { payload: autoSave });
+  await bridge.openSessionLogsDir!('/logs');
+  assert.deepEqual(lastInvoke(fake, 'session_log_open_dir').args, { directory: '/logs' });
+  assert.equal((await bridge.clearSessionLogsDir!('/logs')).deletedCount, 2);
+  assert.deepEqual(lastInvoke(fake, 'session_log_clear_dir').args, { directory: '/logs' });
+
+  const chosen = await bridge.chooseManualSessionLogPath!({ sessionId: 's1', sessionName: 'web', format: 'raw' });
+  assert.equal(chosen.selectionToken, 'tok');
+  const start = { sessionId: 's1', selectionToken: 'tok', initialLine: '$ ', alternateScreenActive: false };
+  assert.equal((await bridge.startManualSessionLog!(start)).started, true);
+  assert.deepEqual(lastInvoke(fake, 'session_log_manual_start').args, { payload: start });
+  assert.equal((await bridge.getManualSessionLogStatus!({ sessionId: 's1' })).isLogging, true);
+  assert.deepEqual(lastInvoke(fake, 'session_log_manual_status').args, { payload: { sessionId: 's1' } });
+  assert.equal((await bridge.stopManualSessionLog!({ sessionId: 's1' })).stopped, true);
+
+  // prepare / reveal forward only the session id, like the Electron preload.
+  const prepare = bridge.prepareSessionLog as (payload: unknown) => Promise<unknown>;
+  assert.deepEqual(await prepare({ sessionId: 's1', filePath: '/etc/passwd' }), { success: true, filePath: '/logs/m.log' });
+  assert.deepEqual(lastInvoke(fake, 'session_log_prepare').args, { payload: { sessionId: 's1' } });
+  const reveal = bridge.revealSessionLog as (payload: unknown) => Promise<unknown>;
+  assert.deepEqual(await reveal({ sessionId: 's2', directory: '/x' }), {
+    success: false, error: 'No saved log is available for this session',
+  });
+  assert.deepEqual(lastInvoke(fake, 'session_log_reveal').args, { payload: { sessionId: 's2' } });
+});

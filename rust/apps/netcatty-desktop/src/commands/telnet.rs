@@ -63,6 +63,9 @@ pub struct TelnetSessionOptions {
     pub host_id: Option<String>,
     #[serde(default)]
     pub boot_epoch: Option<u64>,
+    /// Automatic session log (`sessionLog` of the start options).
+    #[serde(default)]
+    pub session_log: Option<netcatty_core::ipc::SessionLogConfig>,
 }
 
 /// `netcatty:telnet:echo-mode` payload and `getTelnetEchoMode` success shape.
@@ -414,6 +417,22 @@ pub async fn telnet_start<R: Runtime>(
     spawn_writer(writer, wire_rx, cancel.clone());
     spawn_reader(reader, transport.clone(), wire_tx, events_tx, cancel);
 
+    // Session-log hook (automatic log of this session).
+    {
+        let host = payload.hostname.trim();
+        let label = payload
+            .label
+            .as_deref()
+            .map(str::trim)
+            .filter(|l| !l.is_empty());
+        super::sessionlog::session_starting(
+            &state.app,
+            &session_id,
+            payload.session_log.as_ref(),
+            label.unwrap_or(host),
+            host,
+        );
+    }
     state.sessions.insert(SessionEntry {
         session_id: session_id.clone(),
         host_id: payload.host_id.clone(),

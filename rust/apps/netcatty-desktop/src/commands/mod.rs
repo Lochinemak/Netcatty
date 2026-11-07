@@ -23,6 +23,7 @@ pub mod openwith;
 pub mod rdesktop;
 pub mod serial;
 pub mod session;
+pub mod sessionlog;
 pub mod sftp;
 pub mod ssh;
 pub mod store;
@@ -150,6 +151,18 @@ pub fn handler<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + 
         autostart::autostart_get,
         autostart::autostart_set,
         notification::notification_show,
+        // Session logs (export, auto-save, manual / automatic recording).
+        sessionlog::session_log_export,
+        sessionlog::session_log_select_dir,
+        sessionlog::session_log_auto_save,
+        sessionlog::session_log_open_dir,
+        sessionlog::session_log_clear_dir,
+        sessionlog::session_log_manual_choose_path,
+        sessionlog::session_log_manual_start,
+        sessionlog::session_log_manual_stop,
+        sessionlog::session_log_manual_status,
+        sessionlog::session_log_prepare,
+        sessionlog::session_log_reveal,
         session::session_start_ssh,
         session::session_test_connection,
         session::session_cancel_test_connection,

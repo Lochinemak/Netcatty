@@ -410,6 +410,20 @@ pub struct WriteToSessionPayload {
     /// byte-oriented device (one Backspace per encoded byte).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub serial_erase_char: Option<String>,
+    /// Session logs show `displayCommand` instead of the echo of
+    /// `sentCommand` (commands Netcatty types on the user's behalf).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub log_rewrite: Option<LogRewrite>,
+}
+
+/// `writeToSession` `logRewrite` option.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LogRewrite {
+    #[serde(default)]
+    pub sent_command: String,
+    #[serde(default)]
+    pub display_command: String,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
