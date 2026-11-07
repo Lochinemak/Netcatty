@@ -1045,6 +1045,70 @@ export function createTauriBridge(options: CreateTauriBridgeOptions = {}): Netca
       : undefined,
 
     // -----------------------------------------------------------------------
+    // System manager, server stats, monitor and PTY children
+    // (rust/apps/netcatty-desktop/src/commands/system.rs + monitor.rs, logic in
+    // the netcatty-sysmgr crate). Inputs travel as the Electron IPC payload and
+    // the replies are the Electron bridge objects verbatim, so no mapping here.
+    // -----------------------------------------------------------------------
+    getServerStats: (sessionId) =>
+      invoke<BridgeResult<'getServerStats'>>('session_server_stats', { sessionId }),
+    getSessionDistroInfo: (sessionId) =>
+      invoke<BridgeResult<'getSessionDistroInfo'>>('session_distro_info', { sessionId }),
+    readRemoteHistory: (sessionId, limit) =>
+      invoke<BridgeResult<'readRemoteHistory'>>('session_read_remote_history', { sessionId, limit }),
+    probeSystemCapabilities: (sessionId) =>
+      invoke<BridgeResult<'probeSystemCapabilities'>>('system_probe_capabilities', { payload: { sessionId } }),
+    listSystemProcesses: (sessionId) =>
+      invoke<BridgeResult<'listSystemProcesses'>>('system_list_processes', { payload: { sessionId } }),
+    signalSystemProcess: (options) =>
+      invoke<BridgeResult<'signalSystemProcess'>>('system_signal_process', { payload: { ...options } }),
+    setupOsc7Tracking: (sessionId, command) =>
+      invoke<BridgeResult<'setupOsc7Tracking'>>('system_setup_osc7_tracking', { payload: { sessionId, command } }),
+    listTmuxSessions: (sessionId) =>
+      invoke<BridgeResult<'listTmuxSessions'>>('system_list_tmux_sessions', { payload: { sessionId } }),
+    createTmuxSession: (options) =>
+      invoke<BridgeResult<'createTmuxSession'>>('system_create_tmux_session', { payload: { ...options } }),
+    listTmuxWindows: (options) =>
+      invoke<BridgeResult<'listTmuxWindows'>>('system_list_tmux_windows', { payload: { ...options } }),
+    listTmuxPanes: (options) =>
+      invoke<BridgeResult<'listTmuxPanes'>>('system_list_tmux_panes', { payload: { ...options } }),
+    listTmuxClients: (options) =>
+      invoke<BridgeResult<'listTmuxClients'>>('system_list_tmux_clients', { payload: { ...options } }),
+    tmuxAction: (options) =>
+      invoke<BridgeResult<'tmuxAction'>>('system_tmux_action', { payload: { ...options } }),
+    listDockerContainers: (sessionId, runtime) =>
+      invoke<BridgeResult<'listDockerContainers'>>('system_list_docker_containers', { payload: { sessionId, runtime } }),
+    listDockerImages: (sessionId, runtime) =>
+      invoke<BridgeResult<'listDockerImages'>>('system_list_docker_images', { payload: { sessionId, runtime } }),
+    getDockerStats: (options) =>
+      invoke<BridgeResult<'getDockerStats'>>('system_docker_stats', { payload: { ...options } }),
+    dockerInspect: (options) =>
+      invoke<BridgeResult<'dockerInspect'>>('system_docker_inspect', { payload: { ...options } }),
+    dockerImageInspect: (options) =>
+      invoke<BridgeResult<'dockerImageInspect'>>('system_docker_image_inspect', { payload: { ...options } }),
+    dockerAction: (options) =>
+      invoke<BridgeResult<'dockerAction'>>('system_docker_action', { payload: { ...options } }),
+    dockerImageAction: (options) =>
+      invoke<BridgeResult<'dockerImageAction'>>('system_docker_image_action', { payload: { ...options } }),
+    kubectl: (options) => invoke<BridgeResult<'kubectl'>>('system_kubectl', { payload: { ...options } }),
+    listAccelerators: (sessionId) =>
+      invoke<BridgeResult<'listAccelerators'>>('system_list_accelerators', { payload: { sessionId } }),
+    listListeningPorts: (sessionId) =>
+      invoke<BridgeResult<'listListeningPorts'>>('system_list_listening_ports', { payload: { sessionId } }),
+    listSystemServices: (sessionId) =>
+      invoke<BridgeResult<'listSystemServices'>>('system_list_services', { payload: { sessionId } }),
+    systemServiceAction: (options) =>
+      invoke<BridgeResult<'systemServiceAction'>>('system_service_action', { payload: { ...options } }),
+    // Monitor panels are owned by the calling window (Electron: webContents).
+    monitorUpdate: (panels) => invoke<BridgeResult<'monitorUpdate'>>('monitor_update', { panels }),
+    monitorSnapshot: (cursor) => invoke<BridgeResult<'monitorSnapshot'>>('monitor_snapshot', { cursor }),
+    monitorStopAll: () => invoke<void>('monitor_stop_all'),
+    monitorRetry: (hostId) => invoke<void>('monitor_retry', { hostId }),
+    // Local terminals only: direct children of the shell (busy check on close).
+    ptyGetChildProcesses: (sessionId) =>
+      invoke<BridgeResult<'ptyGetChildProcesses'>>('pty_child_processes', { sessionId }),
+
+    // -----------------------------------------------------------------------
     // App
     // -----------------------------------------------------------------------
     getAppInfo: async () => ({
