@@ -23,7 +23,7 @@ use crate::prompt_patterns::shell_prompt_patterns;
 use parking_lot::Mutex;
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use tokio::sync::watch;
 
 pub const DEFAULT_BUFFER_SIZE: usize = 1024 * 1024;
@@ -752,155 +752,182 @@ impl OutputBuffer {
         self.inner.state.lock().waiter_count()
     }
 
-    /// Generic wait loop: `check` runs under the lock with the waiter's
-    /// current fresh boundary and consumes a match when it finds one.
-    async fn wait_with<T>(
+    /// Generic wait: the immediate check and the waiter registration run
+    /// synchronously (like the JavaScript promise executor), the returned
+    /// future re-checks whenever the buffer changes. `check` runs under the
+    /// lock with the waiter's current fresh boundary and consumes a match
+    /// when it finds one.
+    fn wait_with<T, C>(
         &self,
-        label: &str,
+        label: &'static str,
         timeout_ms: u64,
         should_abort: Option<AbortCheck>,
         fresh_boundary: Option<usize>,
-        mut check: impl FnMut(&mut BufferState, Option<usize>) -> Result<Option<T>, PatternError>,
-    ) -> Result<T, WaitError> {
-        let mut rx = self.inner.changed.subscribe();
-        let waiter = self.inner.state.lock().register_waiter(fresh_boundary);
-        let deadline = Instant::now() + Duration::from_millis(timeout_ms);
-        let result = loop {
-            {
-                let mut state = self.inner.state.lock();
-                if let Some(reason) = state.waiter_aborted(waiter) {
-                    break Err(WaitError::Aborted(reason));
-                }
-                let boundary = state.waiter_boundary(waiter);
-                match check(&mut state, boundary) {
-                    Ok(Some(value)) => break Ok(value),
-                    Ok(None) => {}
-                    Err(err) => break Err(WaitError::Pattern(err)),
-                }
+        mut check: C,
+    ) -> WaitFuture<T>
+    where
+        T: Send + 'static,
+        C: FnMut(&mut BufferState, Option<usize>) -> Result<Option<T>, PatternError>
+            + Send
+            + 'static,
+    {
+        let inner = self.inner.clone();
+        let mut rx = inner.changed.subscribe();
+        // Immediate match (`const immediate = ...`).
+        {
+            let mut state = inner.state.lock();
+            match check(&mut state, fresh_boundary) {
+                Ok(Some(value)) => return Box::pin(async move { Ok(value) }),
+                Ok(None) => {}
+                Err(err) => return Box::pin(async move { Err(WaitError::Pattern(err)) }),
             }
-            if should_abort.as_ref().is_some_and(|f| f()) {
-                break Err(WaitError::Aborted("Script stopped".into()));
-            }
-            tokio::select! {
-                _ = rx.changed() => {}
-                _ = tokio::time::sleep(ABORT_POLL_INTERVAL) => {}
-                _ = tokio::time::sleep_until(tokio::time::Instant::from_std(deadline)) => {
-                    break Err(WaitError::Timeout(format!("{label} timed out after {timeout_ms}ms")));
+        }
+        let waiter = inner.state.lock().register_waiter(fresh_boundary);
+        let deadline = tokio::time::Instant::now() + Duration::from_millis(timeout_ms);
+        Box::pin(async move {
+            let result = loop {
+                {
+                    let mut state = inner.state.lock();
+                    if let Some(reason) = state.waiter_aborted(waiter) {
+                        break Err(WaitError::Aborted(reason));
+                    }
+                    let boundary = state.waiter_boundary(waiter);
+                    match check(&mut state, boundary) {
+                        Ok(Some(value)) => break Ok(value),
+                        Ok(None) => {}
+                        Err(err) => break Err(WaitError::Pattern(err)),
+                    }
                 }
-            }
-        };
-        self.inner.state.lock().waiters.remove(&waiter);
-        result
+                if should_abort.as_ref().is_some_and(|f| f()) {
+                    break Err(WaitError::Aborted("Script stopped".into()));
+                }
+                tokio::select! {
+                    _ = rx.changed() => {}
+                    _ = tokio::time::sleep(ABORT_POLL_INTERVAL) => {}
+                    _ = tokio::time::sleep_until(deadline) => {
+                        break Err(WaitError::Timeout(format!("{label} timed out after {timeout_ms}ms")));
+                    }
+                }
+            };
+            inner.state.lock().waiters.remove(&waiter);
+            result
+        })
     }
 
     /// `waitFor`: string → literal (or `/body/flags` regex); RegExp → regex
     /// with stale-core protection.
-    pub async fn wait_for(
+    pub fn wait_for(
         &self,
         pattern: &WaitPattern,
         timeout_ms: u64,
         should_abort: Option<AbortCheck>,
-    ) -> Result<String, WaitError> {
+    ) -> WaitFuture<String> {
         let fresh_boundary = self.inner.state.lock().current_fresh_boundary();
+        let pattern = pattern.clone();
         if pattern.is_regex() {
-            return self
-                .wait_with("waitFor", timeout_ms, should_abort, Some(fresh_boundary), |state, boundary| {
-                    let matched = state.consume_fresh_pending_regex(pattern, boundary)?;
-                    Ok(matched.map(|m| {
-                        state.advance_scan_offset(m.end_offset);
-                        m.value
-                    }))
-                })
-                .await;
+            return self.wait_with("waitFor", timeout_ms, should_abort, Some(fresh_boundary), move |state, boundary| {
+                let matched = state.consume_fresh_pending_regex(&pattern, boundary)?;
+                Ok(matched.map(|m| {
+                    state.advance_scan_offset(m.end_offset);
+                    m.value
+                }))
+            });
         }
-        self.wait_with("waitFor", timeout_ms, should_abort, Some(fresh_boundary), |state, boundary| {
+        self.wait_with("waitFor", timeout_ms, should_abort, Some(fresh_boundary), move |state, boundary| {
             let boundary = boundary.unwrap_or_else(|| state.current_fresh_boundary());
-            let matched = state.consume_fresh_pending_match(pattern, boundary)?;
+            let matched = state.consume_fresh_pending_match(&pattern, boundary)?;
             Ok(matched.map(|m| {
                 state.advance_scan_offset(m.end_offset);
                 m.value
             }))
         })
-        .await
     }
 
-    pub async fn wait_for_text(
+    pub fn wait_for_text(
         &self,
         pattern: &WaitPattern,
         timeout_ms: u64,
         should_abort: Option<AbortCheck>,
-    ) -> Result<String, WaitError> {
+    ) -> WaitFuture<String> {
         let fresh_boundary = self.inner.state.lock().current_fresh_boundary();
-        self.wait_with("waitForText", timeout_ms, should_abort, Some(fresh_boundary), |state, boundary| {
+        let pattern = pattern.clone();
+        self.wait_with("waitForText", timeout_ms, should_abort, Some(fresh_boundary), move |state, boundary| {
             let boundary = boundary.unwrap_or_else(|| state.current_fresh_boundary());
-            let matched = state.consume_fresh_pending_text(pattern, boundary)?;
+            let matched = state.consume_fresh_pending_text(&pattern, boundary)?;
             Ok(matched.map(|m| {
                 state.advance_scan_offset(m.end_offset);
                 m.value
             }))
         })
-        .await
     }
 
-    pub async fn wait_for_regex(
+    pub fn wait_for_regex(
         &self,
         pattern: &WaitPattern,
         timeout_ms: u64,
         should_abort: Option<AbortCheck>,
-    ) -> Result<String, WaitError> {
+    ) -> WaitFuture<String> {
         let fresh_boundary = self.inner.state.lock().current_fresh_boundary();
-        self.wait_with("waitForRegex", timeout_ms, should_abort, Some(fresh_boundary), |state, boundary| {
-            let matched = state.consume_fresh_pending_regex(pattern, boundary)?;
+        let pattern = pattern.clone();
+        self.wait_with("waitForRegex", timeout_ms, should_abort, Some(fresh_boundary), move |state, boundary| {
+            let matched = state.consume_fresh_pending_regex(&pattern, boundary)?;
             Ok(matched.map(|m| {
                 state.advance_scan_offset(m.end_offset);
                 m.value
             }))
         })
-        .await
     }
 
     /// `waitForAny`: index of the first pattern that matches fresh output.
     /// `allow_preserved_tail_match` (waitForPrompt) also accepts the startup
     /// prompt preserved by the seeded viewport, once.
-    pub async fn wait_for_any(
+    pub fn wait_for_any(
         &self,
         patterns: &[WaitPattern],
         timeout_ms: u64,
         should_abort: Option<AbortCheck>,
         allow_preserved_tail_match: bool,
-    ) -> Result<usize, WaitError> {
+    ) -> WaitFuture<usize> {
         if patterns.is_empty() {
-            return Err(WaitError::Pattern(PatternError::Type(
-                "waitForAny requires a non-empty patterns array".into(),
-            )));
+            return Box::pin(async {
+                Err(WaitError::Pattern(PatternError::Type(
+                    "waitForAny requires a non-empty patterns array".into(),
+                )))
+            });
         }
         let fresh_boundary = {
             let mut state = self.inner.state.lock();
             if allow_preserved_tail_match {
-                if let Some(preserved) = state.consume_preserved_tail_match_any(patterns)? {
-                    return Ok(preserved.index);
+                match state.consume_preserved_tail_match_any(patterns) {
+                    Ok(Some(preserved)) => return Box::pin(async move { Ok(preserved.index) }),
+                    Ok(None) => {}
+                    Err(err) => return Box::pin(async move { Err(WaitError::Pattern(err)) }),
                 }
                 state.current_tail_fresh_boundary()
             } else {
                 state.current_fresh_boundary()
             }
         };
-        self.wait_with("waitForAny", timeout_ms, should_abort, Some(fresh_boundary), |state, boundary| {
+        let patterns = patterns.to_vec();
+        self.wait_with("waitForAny", timeout_ms, should_abort, Some(fresh_boundary), move |state, boundary| {
             if allow_preserved_tail_match {
-                if let Some(preserved) = state.consume_preserved_tail_match_any(patterns)? {
+                if let Some(preserved) = state.consume_preserved_tail_match_any(&patterns)? {
                     return Ok(Some(preserved.index));
                 }
             }
             let boundary = boundary.unwrap_or_else(|| state.current_fresh_boundary());
-            let fresh = state.consume_fresh_pending_match_any(patterns, boundary)?;
+            let fresh = state.consume_fresh_pending_match_any(&patterns, boundary)?;
             Ok(fresh.map(|f| {
                 state.advance_scan_offset(f.matched.end_offset);
                 f.index
             }))
         })
-        .await
     }
 }
+
+/// A pending wait (resolves with the match, or rejects with [`WaitError`]).
+pub type WaitFuture<T> =
+    std::pin::Pin<Box<dyn std::future::Future<Output = Result<T, WaitError>> + Send + 'static>>;
 
 /// Registry of per-session buffers (`getOrCreateBuffer` / `removeSessionBuffer`).
 #[derive(Default)]
