@@ -384,7 +384,8 @@ test('plugin-backed methods go through invoke("plugin:…") when no plugin globa
   assert.deepEqual(lastInvoke(fake, 'plugin:opener|open_url').args, { url: 'https://example.com', with: undefined });
   // No Rust counterpart: stays undefined rather than faking success.
   assert.equal(bridge.cancelZmodem, undefined);
-  assert.equal(bridge.checkForUpdate, undefined);
+  // Auto-update is ported (bridge/update.ts).
+  assert.equal(typeof bridge.checkForUpdate, 'function');
 });
 
 test('dialog, clipboard and opener plugins are wired through the global API', async () => {
