@@ -474,6 +474,15 @@ pub struct PluginLogger {
 }
 
 impl PluginLogger {
+    /// Host audit of one capability call (never params or results).
+    pub fn audit_call(&self, operation: &str, authorization: &str, ok: bool, error_code: Option<i64>, resources: &[String], duration_ms: u64) {
+        self.service.audit(&self.identity, operation, authorization, ok, error_code, resources, Some(duration_ms));
+    }
+
+    pub fn identity(&self) -> &LogIdentity {
+        &self.identity
+    }
+
     pub fn write(&self, level: &str, message: &str, fields: Option<&Value>) {
         if !self.service.sink.lock().enabled || !self.service.verbose() {
             return;

@@ -582,10 +582,9 @@ impl PackageStore {
         }
         let key = version_key(&plugin_id, &version);
         if !refresh {
-            if let Some(cached) = self.verified.lock().get(&key) {
-                if cached.archive_sha256 == record.archive_sha256 {
-                    return Ok(cached.clone());
-                }
+            let cached = self.verified.lock().get(&key).cloned();
+            if let Some(cached) = cached.filter(|c| c.archive_sha256 == record.archive_sha256) {
+                return Ok(cached);
             }
         }
         let version_dir = installed_version_dir(&self.paths, &plugin_id, &version)?;

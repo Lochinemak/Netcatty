@@ -11,15 +11,27 @@
 //! * [`secrets`] — OS-encrypted plugin secrets.
 //! * [`logs`] — opt-in local audit / diagnostic logs.
 
+pub mod browser;
+pub mod capabilities;
 pub mod constants;
+pub mod context_keys;
 pub mod contract;
+pub mod contributions;
 pub mod database;
 pub mod error;
+pub mod host;
+pub mod interactions;
 pub mod logs;
+pub mod manager;
 pub mod package;
+pub mod permissions;
 pub mod quota;
+pub mod registry;
+pub mod rpc;
+pub mod runtime;
 pub mod secrets;
 pub mod source;
 pub mod store;
+pub mod supervisor;
 
 pub use error::{codes, PluginError, PluginResult};
