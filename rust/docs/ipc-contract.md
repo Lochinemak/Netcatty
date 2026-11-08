@@ -645,6 +645,8 @@ commands do not appear in logs. A new session kind needs the three hooks:
 Dialogs, clipboard and opening URLs use the Tauri plugins directly from the
 adapter (`window.__TAURI__.dialog`, `.clipboardManager`, `.opener`).
 
+Managed SDK agents, agent discovery and Codex login: see [ipc-agents.md](ipc-agents.md).
+
 ## Mapping `NetcattyBridge` → commands (adapter cheat-sheet)
 
 | Bridge method | Command / plugin |
