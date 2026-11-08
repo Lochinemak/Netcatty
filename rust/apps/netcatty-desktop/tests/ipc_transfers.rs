@@ -589,6 +589,86 @@ fn e2e_cwd_probe_and_compressed_upload() {
         "the internal archive transfer stays silent"
     );
     drop(seen);
+
+    // Pause / resume while compressing (SIGSTOP) and while uploading
+    // (restart from the checkpoint) still produces an intact folder.
+    let big = work_path.join("local").join("big");
+    std::fs::create_dir_all(&big).unwrap();
+    let mut blob = vec![0u8; 48 * 1024 * 1024];
+    let mut x: u64 = 0x9e37_79b9_7f4a_7c15;
+    for b in blob.iter_mut() {
+        x ^= x << 13;
+        x ^= x >> 7;
+        x ^= x << 17;
+        *b = x as u8;
+    }
+    std::fs::write(big.join("blob.bin"), &blob).unwrap();
+    let webview = h.webview.clone();
+    let start_payload = json!({ "payload": {
+        "compressionId": "e2e-c2",
+        "folderPath": big.to_string_lossy(),
+        "targetPath": remote.to_string_lossy(),
+        "sftpId": sftp_id,
+        "folderName": "big",
+        "totalBytes": blob.len()
+    }});
+    let runner = std::thread::spawn(move || invoke(&webview, "compress_start", start_payload));
+    let phase_seen = |phase: &str| {
+        let phase = phase.to_string();
+        move |events: &[Value]| {
+            events.iter().any(|e| {
+                e["transferId"] == "e2e-c2" && e["type"] == "progress" && e["phase"] == phase
+            })
+        }
+    };
+    assert!(wait_for(
+        &transfers,
+        Duration::from_secs(10),
+        phase_seen("compressing")
+    ));
+    let paused = ok(
+        &h.webview,
+        "compress_pause",
+        json!({ "compressionId": "e2e-c2" }),
+    );
+    assert_eq!(paused["success"], true, "{paused}");
+    std::thread::sleep(Duration::from_millis(300));
+    ok(
+        &h.webview,
+        "compress_resume",
+        json!({ "compressionId": "e2e-c2" }),
+    );
+    if wait_for(&transfers, Duration::from_secs(60), phase_seen("uploading")) {
+        let paused = ok(
+            &h.webview,
+            "compress_pause",
+            json!({ "compressionId": "e2e-c2" }),
+        );
+        assert_eq!(paused["success"], true);
+        std::thread::sleep(Duration::from_millis(300));
+        ok(
+            &h.webview,
+            "compress_resume",
+            json!({ "compressionId": "e2e-c2" }),
+        );
+    }
+    let result = runner.join().unwrap().unwrap();
+    assert_eq!(result["success"], true, "{result}");
+    assert_eq!(std::fs::read(remote.join("big/blob.bin")).unwrap(), blob);
+    {
+        let seen = transfers.lock().unwrap();
+        let kinds: Vec<&str> = seen
+            .iter()
+            .filter(|e| e["transferId"] == "e2e-c2")
+            .filter_map(|e| e["type"].as_str())
+            .collect();
+        assert!(
+            kinds.contains(&"paused") && kinds.contains(&"resumed"),
+            "{kinds:?}"
+        );
+        assert_eq!(kinds.last(), Some(&"completed"));
+    }
+
     ok(&h.webview, "sftp_close", json!({ "sftpId": sftp_id }));
     ok(
         &h.webview,
