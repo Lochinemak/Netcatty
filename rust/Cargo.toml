@@ -23,6 +23,7 @@ members = [
   "crates/netcatty-ptyexec",
   "crates/netcatty-capabilities",
   "crates/netcatty-mcp",
+  "crates/netcatty-transfers",
   "apps/netcatty-desktop",
 ]
 
@@ -56,6 +57,7 @@ netcatty-hostbrowser = { path = "crates/netcatty-hostbrowser" }
 netcatty-ptyexec = { path = "crates/netcatty-ptyexec" }
 netcatty-capabilities = { path = "crates/netcatty-capabilities" }
 netcatty-mcp = { path = "crates/netcatty-mcp" }
+netcatty-transfers = { path = "crates/netcatty-transfers" }
 
 # async runtime
 tokio = { version = "1.54", features = ["full"] }

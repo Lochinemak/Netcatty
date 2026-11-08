@@ -4467,6 +4467,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "netcatty-transfers"
+version = "0.1.0"
+dependencies = [
+ "hex",
+ "parking_lot 0.13.0",
+ "sha2 0.11.1",
+ "tokio",
+]
+
+[[package]]
 name = "new_debug_unreachable"
 version = "1.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
