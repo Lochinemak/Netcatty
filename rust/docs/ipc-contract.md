@@ -645,6 +645,8 @@ commands do not appear in logs. A new session kind needs the three hooks:
 Dialogs, clipboard and opening URLs use the Tauri plugins directly from the
 adapter (`window.__TAURI__.dialog`, `.clipboardManager`, `.opener`).
 
+Host browser (in-app browser panel / window, `hostbrowser_*` commands): see [ipc-hostbrowser.md](ipc-hostbrowser.md).
+
 ## Mapping `NetcattyBridge` → commands (adapter cheat-sheet)
 
 | Bridge method | Command / plugin |
