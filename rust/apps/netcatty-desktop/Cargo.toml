@@ -49,6 +49,7 @@ netcatty-fido = { workspace = true }
 rqrr = "0.11"
 regex = { workspace = true }
 netcatty-zmodem = { workspace = true }
+netcatty-plugins = { workspace = true }
 tauri = { version = "2.12", features = ["tray-icon", "image-png"] }
 tauri-plugin-shell = "2.6"
 tauri-plugin-dialog = "2.8"

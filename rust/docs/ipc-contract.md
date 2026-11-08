@@ -724,3 +724,4 @@ MCP, FIDO, plugin sync providers) are left
 never sends that event.
 
 OS shell integration (deep links, PuTTY / SecureCRT launches, single instance, open terminal at path, Explorer verbs, portable data, app icon variants, Dock menu): see [ipc-integration.md](ipc-integration.md).
+Plugin host runtime (package store, permissions, browser / Node runtimes, contributions, Providers, sync sidecars): see [`ipc-plugins.md`](ipc-plugins.md).

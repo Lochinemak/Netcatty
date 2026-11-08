@@ -47,7 +47,8 @@ const isTauriEnv = Boolean(process.env.TAURI_ENV_PLATFORM);
 
 // Tauri's IPC and asset protocols (custom schemes on macOS/Linux, http://*.localhost on Windows).
 const tauriCspAdditions: Record<string, string[]> = {
-  'default-src': ['tauri:', 'asset:', 'http://asset.localhost'],
+  // netcatty-plugin: sandboxed plugin runtime iframes (frame-src falls back to default-src).
+  'default-src': ['tauri:', 'asset:', 'http://asset.localhost', 'netcatty-plugin:', 'http://netcatty-plugin.localhost'],
   'connect-src': ['ipc:', 'http://ipc.localhost', 'tauri:', 'asset:', 'http://asset.localhost'],
   'img-src': ['asset:', 'http://asset.localhost'],
   'font-src': ['asset:', 'http://asset.localhost'],

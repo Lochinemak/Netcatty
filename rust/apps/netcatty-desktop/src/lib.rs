@@ -95,6 +95,7 @@ pub fn configure_with<R: tauri::Runtime>(
             commands::security::setup(app);
             // Deep links, launch intents, Explorer verbs, Dock menu.
             commands::integration::setup(app);
+            commands::plugins::setup(app);
             tracing::info!("netcatty-desktop started");
             Ok(())
         })
@@ -102,6 +103,7 @@ pub fn configure_with<R: tauri::Runtime>(
             commands::hostbrowser::ASSET_SCHEME,
             commands::hostbrowser::asset_protocol,
         )
+        .register_uri_scheme_protocol(commands::plugins::SCHEME, commands::plugins::protocol)
         .on_window_event(commands::window::on_window_event)
         .invoke_handler(commands::handler())
 }

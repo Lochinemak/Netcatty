@@ -37,6 +37,7 @@ import { createIntegrationBridge } from './bridge/integration';
 import { createSecurityBridge } from './bridge/security';
 import { createZmodemBridge } from './bridge/zmodem';
 import { createTerminalBridge } from './bridge/terminal';
+import { createPluginsBridge } from './bridge/plugins';
 import { McpMarkerFilter } from './bridge/mcpMarkerFilter';
 import { SessionOutputRoutes, createWindowsBridge, listenToCurrentWindow } from './bridge/windows';
 
@@ -1472,6 +1473,7 @@ export function createTauriBridge(options: CreateTauriBridgeOptions = {}): Netca
     // ZMODEM / YMODEM and terminal plumbing + autocomplete (`bridge/zmodem.ts`, `bridge/terminal.ts`).
     ...createZmodemBridge({ hub }),
     ...createTerminalBridge({ hub }),
+    ...createPluginsBridge({ hub }),
   };
 
   return bridge as NetcattyBridge;

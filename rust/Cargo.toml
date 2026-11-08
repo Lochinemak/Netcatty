@@ -28,6 +28,7 @@ members = [
   "crates/netcatty-applock",
   "crates/netcatty-fido",
   "crates/netcatty-zmodem",
+  "crates/netcatty-plugins",
   "apps/netcatty-desktop",
 ]
 
@@ -66,6 +67,7 @@ netcatty-integration = { path = "crates/netcatty-integration" }
 netcatty-applock = { path = "crates/netcatty-applock" }
 netcatty-fido = { path = "crates/netcatty-fido" }
 netcatty-zmodem = { path = "crates/netcatty-zmodem" }
+netcatty-plugins = { path = "crates/netcatty-plugins" }
 
 # async runtime
 tokio = { version = "1.54", features = ["full"] }
