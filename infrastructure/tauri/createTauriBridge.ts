@@ -32,6 +32,7 @@ import { createScriptsBridge } from './bridge/scripts';
 import { createHostBrowserBridge } from './bridge/hostBrowser';
 import { createAgentsBridge } from './bridge/agents';
 import { createMcpBridge } from './bridge/mcp';
+import { createTransfersBridge } from './bridge/transfers';
 import { McpMarkerFilter } from './bridge/mcpMarkerFilter';
 
 // ---------------------------------------------------------------------------
@@ -1455,6 +1456,8 @@ export function createTauriBridge(options: CreateTauriBridgeOptions = {}): Netca
     ...createHostBrowserBridge({ hub }),
     ...createAgentsBridge({ hub }),
     ...createMcpBridge({ hub }),
+    // Transfer queue, compressed upload, native drag, SSH cwd (rust/docs/ipc-transfers.md).
+    ...createTransfersBridge({ hub }),
   };
 
   return bridge as NetcattyBridge;
