@@ -344,6 +344,10 @@ pub fn main_window_shown<R: Runtime>(app: &AppHandle<R>) {
 /// App run-loop events (wired in `lib.rs::run`): clicking the Dock icon
 /// re-shows a main window hidden to the tray (Electron `activate`).
 pub fn on_run_event<R: Runtime>(app: &AppHandle<R>, event: RunEvent) {
+    // Stop the Netcatty-owned FIDO ssh-agent with the app.
+    if matches!(event, RunEvent::Exit) {
+        super::security::shutdown(app);
+    }
     #[cfg(target_os = "macos")]
     if let RunEvent::Reopen {
         has_visible_windows: false,
@@ -363,6 +367,8 @@ pub fn on_run_event<R: Runtime>(app: &AppHandle<R>, event: RunEvent) {
 /// Unminimize, show and focus the main window; cancels a pending hide.
 pub(crate) fn bring_main_to_foreground<R: Runtime>(app: &AppHandle<R>) -> bool {
     main_window_shown(app);
+    // App lock: a background lock can auto-prompt Touch ID / Windows Hello.
+    super::security::notify_reopen(app);
     let Some(main) = app.get_webview_window(MAIN_LABEL) else {
         return false;
     };
@@ -373,6 +379,8 @@ pub(crate) fn bring_main_to_foreground<R: Runtime>(app: &AppHandle<R>) -> bool {
 
 /// Hide the main window to the tray, leaving macOS native fullscreen first.
 pub(crate) fn hide_main_window<R: Runtime>(app: &AppHandle<R>, main: &WebviewWindow<R>) {
+    // App lock: hide-to-tray / hotkey hide locks with reason `background`.
+    super::security::lock_for_background(app);
     let generation = with_prefs(app, |p| {
         p.hide_generation += 1;
         p.hide_generation

@@ -275,9 +275,12 @@ pub fn window_focus<R: Runtime>(window: WebviewWindow<R>) -> bool {
 pub fn window_set_title<R: Runtime>(window: WebviewWindow<R>, title: Option<String>) -> bool {
     let title = title.unwrap_or_default();
     let title = title.trim();
-    window
-        .set_title(if title.is_empty() { "Netcatty" } else { title })
-        .is_ok()
+    let title = if title.is_empty() { "Netcatty" } else { title };
+    // While the app is locked the title is remembered, not shown.
+    if super::security::defer_window_title(window.app_handle(), window.label(), title) {
+        return false;
+    }
+    window.set_title(title).is_ok()
 }
 
 /// Show and focus the main window (tray / secondary windows).

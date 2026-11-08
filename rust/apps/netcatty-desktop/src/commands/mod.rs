@@ -27,6 +27,7 @@ pub mod notification;
 pub mod openwith;
 pub mod rdesktop;
 pub mod scripts;
+pub mod security;
 pub mod serial;
 pub mod session;
 pub mod sessionlog;
@@ -439,6 +440,26 @@ pub fn handler<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + 
         agents::codex_app_server_status,
         agents::codex_app_server_respond,
         agents::codex_app_server_cancel_timeout,
+        // Security: app lock, FIDO2 prompts / sk keygen, TOTP QR screen scan,
+        // SSH debug log (commands/security/, rust/docs/ipc-security.md).
+        security::applock::app_lock_get_runtime_state,
+        security::applock::app_lock_get_settings,
+        security::applock::app_lock_set_timeout_minutes,
+        security::applock::app_lock_request_enable,
+        security::applock::app_lock_request_disable,
+        security::applock::app_lock_request_reset,
+        security::applock::app_lock_request_password_change,
+        security::applock::app_lock_set_locked,
+        security::applock::app_lock_request_unlock,
+        security::applock::app_lock_get_system_unlock_status,
+        security::applock::app_lock_set_system_unlock_enabled,
+        security::applock::app_lock_request_system_unlock,
+        security::applock::app_lock_report_activity,
+        security::fido::fido_prompt_respond,
+        security::fido::fido_generate_key_pair,
+        security::totp_scan::totp_scan_screen,
+        security::ssh_debug::ssh_debug_log_info,
+        security::ssh_debug::ssh_debug_log_open_dir,
     ]
 }
 

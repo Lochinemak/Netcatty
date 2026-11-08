@@ -4,7 +4,8 @@
 //! `invalid-uri`, `hotp`, `unsupported-type`, `missing-secret`,
 //! `invalid-secret`, `invalid-algorithm`, `invalid-digits`, `invalid-period`.
 //!
-//! Screen QR scanning (`scanTotpQrFromScreen`) is not ported.
+//! Screen QR scanning (`scanTotpQrFromScreen`) lives in
+//! `commands/security/totp_scan.rs`.
 
 use hmac::{Hmac, KeyInit, Mac};
 use percent_encoding::{utf8_percent_encode, AsciiSet, NON_ALPHANUMERIC};

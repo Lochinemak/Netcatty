@@ -491,7 +491,9 @@ pub async fn mosh_start<R: Runtime>(
         .ok_or_else(|| CoreError::not_found(MOSH_CLIENT_NOT_FOUND))?;
     let ssh = binaries::resolve_ssh(path_for_lookup.as_deref())
         .ok_or_else(|| CoreError::not_found(SSH_NOT_FOUND))?;
-    let auth = external_auth(&payload)?;
+    let mut auth = external_auth(&payload)?;
+    // FIDO2 sk-* keys sign through the Netcatty-owned agent (security/fido.rs).
+    super::security::fido::prepare_external(&state.app, &mut auth, &session_id).await?;
     let cols = payload.cols.filter(|c| *c > 0).unwrap_or(80);
     let rows = payload.rows.filter(|r| *r > 0).unwrap_or(24);
     let lang = options_env
@@ -838,7 +840,9 @@ pub async fn et_start<R: Runtime>(
         effective_path(&options_env).as_deref(),
     )
     .ok_or_else(|| CoreError::not_found(ET_CLIENT_NOT_FOUND))?;
-    let auth = external_auth(&payload)?;
+    let mut auth = external_auth(&payload)?;
+    // FIDO2 sk-* keys sign through the Netcatty-owned agent (security/fido.rs).
+    super::security::fido::prepare_external(&state.app, &mut auth, &session_id).await?;
     let jumps: Vec<ExternalSshAuth> = payload
         .jump_hosts
         .as_ref()
