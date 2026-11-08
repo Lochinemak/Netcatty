@@ -60,7 +60,7 @@ pub fn normalize_scope_id(scope: &str, scope_id: Option<&str>) -> PluginResult<S
         _ => "",
     };
     let len = value.encode_utf16().count();
-    if len < 1 || len > 256 || value.contains('\0') {
+    if !(1..=256).contains(&len) || value.contains('\0') {
         return Err(invalid(format!("Plugin {scope} setting requires a valid scope ID")));
     }
     Ok(value.to_string())

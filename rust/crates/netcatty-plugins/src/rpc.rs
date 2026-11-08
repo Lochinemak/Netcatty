@@ -962,6 +962,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[allow(clippy::field_reassign_with_default)]
     async fn incoming_stream_credit_and_ordering() {
         let received = Arc::new(Mutex::new(Vec::<Vec<u8>>::new()));
         let sink = received.clone();

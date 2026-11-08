@@ -409,7 +409,7 @@ impl RuntimeSupervisor {
         let transport = match launched {
             Ok(t) => t,
             Err(err) => {
-                self.record_failure(&identity, &err.message().to_string());
+                self.record_failure(&identity, err.message());
                 return Err(err);
             }
         };
@@ -747,7 +747,7 @@ impl RuntimeSupervisor {
 
     pub async fn shutdown(&self) {
         *self.shutting_down.lock() = true;
-        for (_, (_, cancel)) in self.starting.lock().iter() {
+        for (_, cancel) in self.starting.lock().values() {
             cancel.cancel();
         }
         let ids: Vec<String> = self.runtimes.lock().keys().cloned().collect();

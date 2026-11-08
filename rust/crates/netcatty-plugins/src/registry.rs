@@ -381,7 +381,7 @@ pub fn assert_storage_params(params: &Value, require_value: bool) -> PluginResul
     let object = params.as_object().ok_or_else(|| PluginError::invalid("Plugin storage parameters must be an object"))?;
     let key = object.get("key").and_then(Value::as_str).unwrap_or("");
     let len = key.encode_utf16().count();
-    if len < 1 || len > 256 || key.contains('\0') {
+    if !(1..=256).contains(&len) || key.contains('\0') {
         return Err(PluginError::invalid("Plugin storage key is invalid"));
     }
     if require_value && !object.contains_key("value") {

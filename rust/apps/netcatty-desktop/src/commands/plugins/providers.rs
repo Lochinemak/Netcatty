@@ -7,6 +7,8 @@
 //! Provider, so `netcatty:data` / `netcatty:exit`, session logs and the
 //! output taps work unchanged.
 
+#![allow(clippy::type_complexity)]
+
 use super::PluginsState;
 use crate::sessions::{SessionBackend, SessionEntry};
 use crate::state::AppState;

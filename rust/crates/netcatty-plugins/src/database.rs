@@ -1265,7 +1265,7 @@ impl PluginDatabase {
     }
 
     pub fn get_host_theme_selection(&self) -> PluginResult<Value> {
-        self.with(|c| theme_selection(c))
+        self.with(theme_selection)
     }
 
     pub fn commit_host_theme_selection(&self, expected_revision: i64, selection: &Value, plugin_id: Option<&str>) -> PluginResult<()> {

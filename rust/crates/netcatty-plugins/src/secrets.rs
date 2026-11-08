@@ -61,7 +61,7 @@ fn data_loss() -> PluginError {
 
 pub fn assert_secret_key(key: &str) -> PluginResult<()> {
     let n = key.encode_utf16().count();
-    if n < 1 || n > 256 || key.contains('\0') {
+    if !(1..=256).contains(&n) || key.contains('\0') {
         return Err(PluginError::invalid("Plugin secret key is invalid"));
     }
     Ok(())

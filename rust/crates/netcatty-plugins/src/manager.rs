@@ -67,9 +67,7 @@ impl PluginManager {
                     .await
                     .map_err(|e| e.to_string())
                     .and_then(|r| r.map_err(|e| e.message().to_string()));
-                if let Err(err) = recovered {
-                    return Err(err);
-                }
+                recovered?;
                 self.contributions.initialize().await;
                 Ok(())
             })

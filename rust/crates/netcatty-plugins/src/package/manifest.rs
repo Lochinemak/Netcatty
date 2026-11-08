@@ -28,7 +28,7 @@ fn s<'a>(value: &'a Value, key: &str) -> Option<&'a str> {
     value.get(key).and_then(Value::as_str)
 }
 
-fn arr<'a>(value: Option<&'a Value>) -> &'a [Value] {
+fn arr(value: Option<&Value>) -> &[Value] {
     value.and_then(Value::as_array).map(Vec::as_slice).unwrap_or(&[])
 }
 
@@ -196,7 +196,7 @@ pub fn setting_pattern_error(source: &str) -> Option<&'static str> {
         bytes.windows(2).any(|w| w[0] == b'\\' && (matches!(w[1], b'1'..=b'9')))
             || source.contains("\\k<")
     };
-    if len < 1 || len > MAX_SETTING_PATTERN_LENGTH || source.contains("(?") || backref || quantified_group {
+    if !(1..=MAX_SETTING_PATTERN_LENGTH).contains(&len) || source.contains("(?") || backref || quantified_group {
         return Some("pattern uses an unsafe regular-expression feature");
     }
     if regress::Regex::with_flags(source, "u").is_err() {
@@ -262,7 +262,7 @@ pub fn restricted_setting_schema_errors(root: &Value, root_type: Option<&str>) -
                 Some(properties) => {
                     for (name, child) in properties {
                         let n = name.encode_utf16().count();
-                        if n < 1 || n > 128 || name.contains('\0') || forbidden.contains(&name.as_str()) {
+                        if !(1..=128).contains(&n) || name.contains('\0') || forbidden.contains(&name.as_str()) {
                             errors.push(format!("valueSchema property name is invalid: {name}"));
                         }
                         stack.push((child, depth + 1));
@@ -287,7 +287,7 @@ pub fn restricted_setting_schema_errors(root: &Value, root_type: Option<&str>) -
         }
         for name in ["minItems", "maxItems", "minLength", "maxLength"] {
             if let Some(v) = schema.get(name) {
-                if !v.as_u64().is_some_and(|n| n <= (1u64 << 53) - 1) {
+                if !v.as_u64().is_some_and(|n| n < (1u64 << 53)) {
                     errors.push(format!("valueSchema {name} must be a non-negative safe integer"));
                 }
             }

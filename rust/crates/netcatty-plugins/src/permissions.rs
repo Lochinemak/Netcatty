@@ -86,17 +86,17 @@ pub fn canonicalize_stream_endpoint(value: &str) -> PluginResult<(String, String
         return Err(invalid("Byte stream port is invalid"));
     }
     let mut host = host_raw.to_ascii_lowercase();
-    let endpoint_host;
-    if host.starts_with('[') {
+    
+    let endpoint_host = if host.starts_with('[') {
         if !host.ends_with(']') {
             return Err(invalid("Byte streams require an exact TCP or TLS host and port"));
         }
         let inner = &host[1..host.len() - 1];
         let ip: std::net::Ipv6Addr = inner.parse().map_err(|_| invalid("Byte stream IPv6 address is invalid"))?;
         host = ip.to_string();
-        endpoint_host = format!("[{host}]");
+        format!("[{host}]")
     } else if host.parse::<std::net::Ipv4Addr>().is_ok() {
-        endpoint_host = host.clone();
+        host.clone()
     } else {
         let label_ok = |l: &str| {
             !l.is_empty()
@@ -112,8 +112,8 @@ pub fn canonicalize_stream_endpoint(value: &str) -> PluginResult<(String, String
         {
             return Err(invalid("Byte stream hostname is invalid"));
         }
-        endpoint_host = host.clone();
-    }
+        host.clone()
+    };
     Ok((format!("{transport}://{endpoint_host}:{port}"), transport.into(), host, port as u16))
 }
 
@@ -620,6 +620,7 @@ impl PermissionEngine {
         Ok((declaration, hash, principal))
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn memory_grant_covers(&self, grant: &MemoryGrant, context: &AuthContext, permission: &str, hash: &str, resource: &str, kind: &str, session: Option<&str>) -> bool {
         grant.plugin_id == context.plugin_id
             && grant.source_owner == self.owner(&context.plugin_id)

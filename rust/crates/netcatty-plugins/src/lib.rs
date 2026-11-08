@@ -11,6 +11,8 @@
 //! * [`secrets`] — OS-encrypted plugin secrets.
 //! * [`logs`] — opt-in local audit / diagnostic logs.
 
+#![allow(clippy::type_complexity)]
+
 pub mod browser;
 pub mod capabilities;
 pub mod constants;

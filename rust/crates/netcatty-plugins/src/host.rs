@@ -93,6 +93,9 @@ pub struct PluginHost {
 }
 
 /// Features this host implements (advertised in `plugin.initialize`).
+/// Not offered (capabilities not ported): `network.byte-streams`,
+/// `ai.model-invocation`, `context.selected-read`, `ai.agent-sessions`,
+/// `vault.host-actions`, `filesystem.directory-enumeration`.
 pub fn supported_features() -> Vec<String> {
     [
         "appearance.theme-packs",
@@ -104,12 +107,7 @@ pub fn supported_features() -> Vec<String> {
         "host.interactions",
         "terminal.input-drafts",
         "terminal.selection-sharing",
-        "network.byte-streams",
         "network.credential-lease",
-        "ai.model-invocation",
-        "context.selected-read",
-        "ai.agent-sessions",
-        "vault.host-actions",
     ]
     .iter()
     .map(|s| s.to_string())

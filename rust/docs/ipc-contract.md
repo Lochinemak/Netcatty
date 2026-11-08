@@ -718,3 +718,5 @@ MCP, ZMODEM/YMODEM, FIDO, plugin sync providers) are left
 `undefined` on the adapter; the renderer already treats them as optional.
 `onTrayPanelCloseRequest` stays undefined too: the Electron main process
 never sends that event.
+
+Plugin host runtime (package store, permissions, browser / Node runtimes, contributions, Providers, sync sidecars): see [`ipc-plugins.md`](ipc-plugins.md).
