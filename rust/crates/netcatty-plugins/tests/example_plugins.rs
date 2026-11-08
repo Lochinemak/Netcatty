@@ -131,6 +131,26 @@ async fn hello_and_starter_examples_run_against_the_rust_host() {
     assert_eq!(entry["settings"][0]["value"], json!("Hi from Rust"));
     assert_eq!(entry["menus"][0]["visible"], json!(true));
 
+    // Terminal providers over the contract (completion + theme).
+    let session = json!({ "sessionId": "s1", "protocol": "ssh", "status": "connected" });
+    let completions = host
+        .terminal_providers
+        .provide(
+            &json!({ "kind": "terminal.completion", "operation": "provideCompletions", "session": session,
+                "payload": { "input": "netc", "cursor": 4, "hostOs": "linux", "maximum": 10 } }),
+            tokio_util::sync::CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(completions[0]["status"], json!("ok"), "{completions}");
+    assert_eq!(completions[0]["result"]["items"][0]["text"], json!("netcatty-hello"));
+    let deliveries = host
+        .terminal_providers
+        .publish_session_event(&json!({ "type": "titleChanged", "session": session }))
+        .await
+        .unwrap();
+    assert_eq!(deliveries[0]["delivered"], json!(true));
+
     // Restart keeps it working; disable stops it.
     host.manager.restart("com.netcatty.hello").await.unwrap();
     assert_eq!(host.database.get_active_plugin("com.netcatty.hello").unwrap().unwrap().runtime.status, "running");

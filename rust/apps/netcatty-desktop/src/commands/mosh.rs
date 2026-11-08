@@ -634,6 +634,7 @@ fn handshake_meta(requires_user_input: bool) -> Option<SessionDataMeta> {
     Some(SessionDataMeta {
         mosh_handshake: Some(true),
         mosh_handshake_requires_user_input: requires_user_input.then_some(true),
+        ..Default::default()
     })
 }
 

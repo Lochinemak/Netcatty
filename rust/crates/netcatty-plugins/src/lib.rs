@@ -25,6 +25,7 @@ pub mod logs;
 pub mod manager;
 pub mod package;
 pub mod permissions;
+pub mod providers;
 pub mod quota;
 pub mod registry;
 pub mod rpc;
@@ -33,5 +34,6 @@ pub mod secrets;
 pub mod source;
 pub mod store;
 pub mod supervisor;
+pub mod ui;
 
 pub use error::{codes, PluginError, PluginResult};

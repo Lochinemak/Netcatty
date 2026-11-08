@@ -48,6 +48,8 @@ pub const MAX_SECRET_LEASES_PER_RUNTIME: usize = 128;
 pub enum LeaseCredential {
     Secret(Value),
     Vault(String),
+    /// Host-held plaintext (authentication challenge answers).
+    Inline(String),
 }
 
 struct LeaseRecord {
@@ -112,7 +114,12 @@ impl SecretLeaseStore {
         match record.credential {
             LeaseCredential::Secret(reference) => self.secrets.resolve(&record.plugin_id, &reference),
             LeaseCredential::Vault(credential_id) => self.catalog.resolve(&credential_id),
+            LeaseCredential::Inline(secret) => Ok(secret),
         }
+    }
+
+    pub fn revoke_operation(&self, plugin_id: &str, operation_id: &str) {
+        self.leases.lock().retain(|_, l| !(l.plugin_id == plugin_id && l.operation_id == operation_id));
     }
 
     pub fn revoke_runtime(&self, runtime_id: &str) {
@@ -805,6 +812,7 @@ pub fn register(registry: &HostRpcRegistry, services: &SecureCapabilities) -> Pl
                     LeaseCredential::Secret(reference) => {
                         secrets.get_record_by_reference(ctx.plugin_id(), reference)?;
                     }
+                    LeaseCredential::Inline(_) => return Err(invalid("Credential reference is invalid")),
                 }
                 ctx.assert_active()?;
                 leases.issue(ctx.plugin_id(), &ctx.identity.runtime_id, p.credential, &p.operation_id, p.ttl_ms)

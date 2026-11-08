@@ -81,6 +81,11 @@ pub struct PluginHost {
     pub manager: Arc<PluginManager>,
     pub capabilities: SecureCapabilities,
     pub interactions: Arc<InteractionService>,
+    pub themes: Arc<crate::ui::ThemeService>,
+    pub icons: Arc<crate::ui::IconService>,
+    pub views: Arc<crate::ui::ViewHost>,
+    pub terminal_providers: Arc<crate::providers::TerminalProviderService>,
+    pub extensions: Arc<crate::providers::ExtensionProviderService>,
     pub events: Arc<dyn HostEvents>,
     pub supported_features: Vec<String>,
     pub allow_advanced_plugins: bool,
@@ -173,6 +178,11 @@ impl PluginHost {
             permissions.clone(),
             secrets.clone(),
         );
+        let themes = crate::ui::ThemeService::new(database.clone(), store.clone(), &contributions, config.events.clone());
+        let icons = Arc::new(crate::ui::IconService::new(database.clone(), store.clone()));
+        let views = crate::ui::ViewHost::new(contributions.clone(), icons.clone(), config.events.clone());
+        let terminal_providers = Arc::new(crate::providers::TerminalProviderService::new(contributions.clone(), supervisor.clone(), permissions.clone()));
+        let extensions = crate::providers::ExtensionProviderService::new(contributions.clone(), supervisor.clone(), permissions.clone(), capabilities.leases.clone(), &registry);
         // Wiring.
         let quota_for_cleanup = quota.clone();
         let leases = capabilities.leases.clone();
@@ -225,6 +235,11 @@ impl PluginHost {
             manager,
             capabilities,
             interactions,
+            themes,
+            icons,
+            views,
+            terminal_providers,
+            extensions,
             events: config.events,
             supported_features: features,
             allow_advanced_plugins: config.allow_advanced_plugins,
@@ -241,6 +256,8 @@ impl PluginHost {
     }
 
     pub async fn shutdown(&self) {
+        self.views.shutdown().await;
+        self.extensions.shutdown();
         self.manager.shutdown().await;
         self.interactions.shutdown();
         self.permissions.shutdown();
