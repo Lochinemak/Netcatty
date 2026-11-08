@@ -26,7 +26,9 @@ pub use icons::{
 };
 pub use pdf::pdf_download_headers;
 pub use theme::{valid_theme_tokens, THEME_TOKEN_NAMES};
-pub use url::{icon_origin, is_allowed_page_url, normalize_browser_url, ALLOWED_PAGE_SCHEMES};
+pub use url::{
+    icon_origin, is_allowed_page_url, is_loopback_url, normalize_browser_url, ALLOWED_PAGE_SCHEMES,
+};
 
 /// Maximum number of tabs per browser (Electron `MAX_TABS`).
 pub const MAX_TABS: usize = 32;

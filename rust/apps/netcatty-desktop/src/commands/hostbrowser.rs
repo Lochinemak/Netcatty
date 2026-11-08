@@ -43,7 +43,7 @@ use super::CmdResult;
 use crate::state::{AppState, Ctx};
 use netcatty_core::CoreError;
 use netcatty_hostbrowser::{
-    icon_origin, image_mime, is_allowed_page_url, normalize_browser_url, reserve_download_file,
+    icon_origin, image_mime, is_allowed_page_url, is_loopback_url, normalize_browser_url, reserve_download_file,
     valid_image_data_url, valid_theme_tokens, BookmarkStore, Download, DownloadStatus,
     DownloadStore, IconMode, SiteIconInput, SiteIconStore, CHROME_HEIGHT, DOWNLOAD_PANEL_WIDTH,
     MAX_TABS,
@@ -170,6 +170,25 @@ fn macos_major_version() -> Option<u32> {
             .parse()
             .ok()
     })
+}
+
+/// WebKit (macOS) never applies its proxy configuration to loopback
+/// destinations (verified against an SSH container: `localhost`,
+/// `127.0.0.0/8`, `::1` and `*.localhost` connect to the local machine).
+/// Electron proxied them (`<-loopback>`); here SSH-routed browsers refuse
+/// them rather than silently showing the local machine's services.
+const LOOPBACK_BYPASSES_PROXY: bool = cfg!(target_os = "macos");
+const LOOPBACK_REFUSED: &str = "Pages on the host's own loopback address (localhost) cannot be opened through SSH on macOS. Use the host's network address, or forward the port and open it in a local browser.";
+
+fn loopback_refused(local: bool, url: &str) -> bool {
+    LOOPBACK_BYPASSES_PROXY && !local && is_loopback_url(url)
+}
+
+fn check_route_url(record: &Record, url: &str) -> CmdResult<()> {
+    if loopback_refused(record.local, url) {
+        return Err(invalid(LOOPBACK_REFUSED));
+    }
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -719,6 +738,10 @@ fn create_page<R: Runtime>(
         .get_webview_window(&record.owner_label)
         .ok_or("Browser window is unavailable")?;
     let parsed: url::Url = url.parse().map_err(|_| "Enter a valid web address")?;
+    if loopback_refused(record.local, url) {
+        return Err(LOOPBACK_REFUSED.into());
+    }
+    let local = record.local;
     let label = record.tabs[index].label.clone();
     let connected = record.connected.clone();
     let browser_id = record.id.clone();
@@ -757,7 +780,9 @@ fn create_page<R: Runtime>(
                 }
                 return false;
             }
-            nav_connected.load(Ordering::SeqCst) && is_allowed_page_url(url.as_str())
+            nav_connected.load(Ordering::SeqCst)
+                && is_allowed_page_url(url.as_str())
+                && !loopback_refused(local, url.as_str())
         })
         .on_new_window(move |url, _features| {
             if let Ok(url) = normalize_browser_url(url.as_str()) {
@@ -823,7 +848,8 @@ fn create_page<R: Runtime>(
         // this browser's environment gets these switches).
         .additional_browser_args(
             "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection \
-             --force-webrtc-ip-handling-policy=disable_non_proxied_udp --ignore-certificate-errors",
+             --force-webrtc-ip-handling-policy=disable_non_proxied_udp --ignore-certificate-errors \
+             --proxy-bypass-list=<-loopback>",
         );
     builder.build().map_err(|e| e.to_string())?;
     let tab = &mut record.tabs[index];
@@ -1451,6 +1477,10 @@ fn flush_panel_urls<R: Runtime>(app: &AppHandle<R>, inner: &mut Inner, browser_i
     for url in urls {
         let active = record.tab(None);
         match active {
+            _ if loopback_refused(record.local, &url) => {
+                record.error = Some(LOOPBACK_REFUSED.into());
+                send(app, record);
+            }
             Some(index) if record.tabs[index].url.is_empty() => {
                 record.tabs[index].url = url;
                 display(app, record);
@@ -1466,6 +1496,9 @@ fn flush_panel_urls<R: Runtime>(app: &AppHandle<R>, inner: &mut Inner, browser_i
 fn add_tab<R: Runtime>(app: &AppHandle<R>, record: &mut Record, url: Option<String>) -> CmdResult<()> {
     if record.tabs.len() >= MAX_TABS {
         return Err(invalid("Too many open tabs"));
+    }
+    if let Some(url) = &url {
+        check_route_url(record, url)?;
     }
     let tab = Tab::new(url);
     record.active_tab_id = Some(tab.id.clone());
@@ -2229,6 +2262,7 @@ pub async fn hostbrowser_command<R: Runtime>(
                 return Err(invalid("Reconnect to the host before opening a page"));
             }
             let url = normalize_browser_url(&str_field("url").unwrap_or_default()).map_err(|e| invalid(&e))?;
+            check_route_url(record, &url)?;
             if let Some(index) = tab_index {
                 record.tabs[index].url = url.clone();
                 let page = record.tabs[index]

@@ -61,6 +61,29 @@ pub fn normalize_browser_url(input: &str) -> Result<String, String> {
     Ok(url.to_string())
 }
 
+/// Does `url` point at a loopback destination (`localhost`, `*.localhost`,
+/// `127.0.0.0/8`, `::1`, `0.0.0.0`)? WebKit's proxy configuration (macOS)
+/// never applies to these, so an SSH-routed browser must refuse them instead
+/// of silently opening the local machine's services.
+pub fn is_loopback_url(url: &str) -> bool {
+    let Ok(parsed) = Url::parse(url) else {
+        return false;
+    };
+    match parsed.host() {
+        Some(url::Host::Domain(domain)) => {
+            let domain = domain.trim_end_matches('.').to_ascii_lowercase();
+            domain == "localhost" || domain.ends_with(".localhost")
+        }
+        Some(url::Host::Ipv4(ip)) => ip.is_loopback() || ip.is_unspecified(),
+        Some(url::Host::Ipv6(ip)) => {
+            ip.is_loopback()
+                || ip.is_unspecified()
+                || ip.to_ipv4_mapped().is_some_and(|v4| v4.is_loopback())
+        }
+        None => false,
+    }
+}
+
 /// `scheme://host[:port]` of an `http(s)` URL (the key website icons are
 /// stored under); `None` for anything else.
 pub fn icon_origin(url: &str) -> Option<String> {
@@ -128,6 +151,32 @@ mod tests {
         assert!(!is_allowed_page_url("javascript:alert(1)"));
         assert!(!is_allowed_page_url("netcatty-hb://shortcut/new-tab"));
         assert!(!is_allowed_page_url("not a url"));
+    }
+
+    #[test]
+    fn loopback_destinations_are_recognised() {
+        for url in [
+            "http://localhost:3000/",
+            "http://LOCALHOST./",
+            "http://app.localhost/",
+            "http://127.0.0.1:8080/",
+            "http://127.1.2.3/",
+            "http://0.0.0.0:8000/",
+            "http://[::1]:5000/",
+            "http://[::ffff:127.0.0.1]/",
+        ] {
+            assert!(is_loopback_url(url), "{url}");
+        }
+        for url in [
+            "http://10.0.0.1/",
+            "https://example.com/",
+            "http://localhost.example.com/",
+            "http://[2001:db8::1]/",
+            "data:text/plain,x",
+            "garbage",
+        ] {
+            assert!(!is_loopback_url(url), "{url}");
+        }
     }
 
     #[test]
