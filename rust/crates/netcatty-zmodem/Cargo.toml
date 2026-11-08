@@ -1,0 +1,11 @@
+[package]
+name = "netcatty-zmodem"
+description = "ZMODEM (rz/sz) and YMODEM file transfer: sans-IO protocol state machines and the terminal-output sentry"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+tokio = { workspace = true }
+thiserror = { workspace = true }

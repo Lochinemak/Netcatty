@@ -4467,6 +4467,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "netcatty-zmodem"
+version = "0.1.0"
+dependencies = [
+ "thiserror 2.0.21",
+ "tokio",
+]
+
+[[package]]
 name = "new_debug_unreachable"
 version = "1.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
