@@ -737,11 +737,12 @@ pub fn integration_set_explorer_context_menu_enabled<R: Runtime>(
     app: AppHandle<R>,
     enabled: Option<bool>,
 ) -> ExplorerResult {
-    let Some(state) = state(&app) else {
+    let Some(state) = state(&app).filter(|_| cfg!(windows)) else {
+        // Windows only: elsewhere nothing is applied or saved.
         return ExplorerResult {
             enabled: false,
-            success: false,
-            supported: cfg!(windows),
+            success: !cfg!(windows),
+            supported: false,
         };
     };
     let spec = explorer_launch_spec();
@@ -755,14 +756,7 @@ pub fn integration_set_explorer_context_menu_enabled<R: Runtime>(
         )
     });
     state.inner.lock().explorer_enabled = result.enabled;
-    if cfg!(windows) {
-        result
-    } else {
-        ExplorerResult {
-            supported: false,
-            ..result
-        }
-    }
+    result
 }
 
 /// Electron `netcatty:setAppIconVariant`: `true` when the variant artwork

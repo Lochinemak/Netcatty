@@ -718,3 +718,5 @@ MCP, ZMODEM/YMODEM, FIDO, plugin sync providers) are left
 `undefined` on the adapter; the renderer already treats them as optional.
 `onTrayPanelCloseRequest` stays undefined too: the Electron main process
 never sends that event.
+
+OS shell integration (deep links, PuTTY / SecureCRT launches, single instance, open terminal at path, Explorer verbs, portable data, app icon variants, Dock menu): see [ipc-integration.md](ipc-integration.md).
