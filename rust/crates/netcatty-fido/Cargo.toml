@@ -1,0 +1,24 @@
+[package]
+name = "netcatty-fido"
+description = "FIDO2 OpenSSH security keys (sk-*) for Netcatty: key detection, owned ssh-agent + SSH_ASKPASS bridge for PIN / touch prompts, prompt broker, sk key generation"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+base64 = { workspace = true }
+dirs = { workspace = true }
+hostname = { workspace = true }
+parking_lot = { workspace = true }
+regex = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha1 = "0.11"
+ssh-key = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+uuid = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"
