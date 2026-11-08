@@ -86,6 +86,7 @@ pub struct PluginHost {
     pub views: Arc<crate::ui::ViewHost>,
     pub terminal_providers: Arc<crate::providers::TerminalProviderService>,
     pub extensions: Arc<crate::providers::ExtensionProviderService>,
+    pub sidecars: Arc<crate::sidecars::SidecarService>,
     pub events: Arc<dyn HostEvents>,
     pub supported_features: Vec<String>,
     pub allow_advanced_plugins: bool,
@@ -183,6 +184,7 @@ impl PluginHost {
         let views = crate::ui::ViewHost::new(contributions.clone(), icons.clone(), config.events.clone());
         let terminal_providers = Arc::new(crate::providers::TerminalProviderService::new(contributions.clone(), supervisor.clone(), permissions.clone()));
         let extensions = crate::providers::ExtensionProviderService::new(contributions.clone(), supervisor.clone(), permissions.clone(), capabilities.leases.clone(), &registry);
+        let sidecars = Arc::new(crate::sidecars::SidecarService::new(database.clone(), contributions.clone()));
         // Wiring.
         let quota_for_cleanup = quota.clone();
         let leases = capabilities.leases.clone();
@@ -240,6 +242,7 @@ impl PluginHost {
             views,
             terminal_providers,
             extensions,
+            sidecars,
             events: config.events,
             supported_features: features,
             allow_advanced_plugins: config.allow_advanced_plugins,

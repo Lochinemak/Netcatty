@@ -31,6 +31,7 @@ pub mod registry;
 pub mod rpc;
 pub mod runtime;
 pub mod secrets;
+pub mod sidecars;
 pub mod source;
 pub mod store;
 pub mod supervisor;
