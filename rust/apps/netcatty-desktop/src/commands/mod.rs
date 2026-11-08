@@ -22,6 +22,7 @@ pub mod mosh;
 pub mod notification;
 pub mod openwith;
 pub mod rdesktop;
+pub mod scripts;
 pub mod serial;
 pub mod session;
 pub mod sessionlog;
@@ -349,6 +350,17 @@ pub fn handler<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + 
         ai::ai_sessions_backup_read_latest,
         ai::ai_sessions_backup_export,
         ai::ai_sessions_backup_import,
+        // Script automation (commands/scripts.rs, rust/docs/ipc-scripts.md).
+        scripts::script_run,
+        scripts::script_stop,
+        scripts::script_pause,
+        scripts::script_resume,
+        scripts::script_get_runs,
+        scripts::script_dialog_response,
+        scripts::script_screen_snapshot_response,
+        scripts::script_recording_start,
+        scripts::script_recording_stop,
+        scripts::script_recording_append_step,
     ]
 }
 

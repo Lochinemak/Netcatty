@@ -62,6 +62,7 @@ pub fn configure_with<R: tauri::Runtime>(
                 None => state::AppState::new(handle),
             };
             app.manage(state);
+            commands::scripts::setup(app);
             app.manage(commands::window::WindowState::default());
             let crash_log = commands::diagnostics::crash_log_for(
                 &netcatty_store::AppPaths::resolve(),

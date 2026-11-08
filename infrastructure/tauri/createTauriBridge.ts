@@ -28,6 +28,7 @@ import { createUpdateBridge } from './bridge/update';
 import { pluginClipboard, pluginDialog, pluginOpener } from './plugins';
 import { cancelStagedUpload, stageUploadFile } from './uploadStaging';
 import { createAiBridge } from './bridge/ai';
+import { createScriptsBridge } from './bridge/scripts';
 
 // ---------------------------------------------------------------------------
 // Contract constants (see `netcatty_core::ipc::events`)
@@ -104,28 +105,7 @@ type SessionDataCallback = BridgeArgs<'onSessionData'>[1];
 type SessionExitCallback = BridgeArgs<'onSessionExit'>[1];
 type SessionExitPayload = Parameters<SessionExitCallback>[0];
 
-/**
- * The scripting bridge (`netcatty-bridge-script.d.ts`) declares its members as
- * required although every renderer call site guards them with `?.` — there is
- * no Rust counterpart yet, so the adapter omits them and widens once at the end.
- */
-type ScriptBridgeKeys =
-  | 'scriptRun'
-  | 'scriptStop'
-  | 'scriptPause'
-  | 'scriptResume'
-  | 'scriptGetRuns'
-  | 'scriptDialogResponse'
-  | 'scriptScreenSnapshotResponse'
-  | 'scriptRecordingStart'
-  | 'scriptRecordingStop'
-  | 'scriptRecordingAppendStep'
-  | 'onScriptRunsUpdated'
-  | 'onScriptDialogRequest'
-  | 'onScriptScreenSnapshotRequest'
-  | 'onScriptSessionInput';
-
-type TauriBridgeShape = Omit<NetcattyBridge, ScriptBridgeKeys>;
+type TauriBridgeShape = NetcattyBridge;
 
 // ---------------------------------------------------------------------------
 // Wire shapes (what Rust emits / returns; camelCase, see `ipc.rs`)
@@ -581,6 +561,8 @@ export function createTauriBridge(options: CreateTauriBridgeOptions = {}): Netca
     invoke<void>('session_set_flow_paused', { sessionId, paused }));
 
   const bridge: TauriBridgeShape = {
+    // Script automation (`bridge/scripts.ts`, `rust/docs/ipc-scripts.md`).
+    ...createScriptsBridge({ hub }),
     // -----------------------------------------------------------------------
     // Sessions and terminal
     // -----------------------------------------------------------------------

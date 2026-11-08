@@ -97,6 +97,73 @@ pub(crate) struct Shared<R: Runtime> {
     pub connections: dashmap::DashMap<String, Arc<SshConnection>>,
     /// SFTP clients (owned by `AppState`) — consulted before disconnecting.
     pub sftp: SftpMap,
+    /// Generic output subscribers ([`SessionRegistry::subscribe_output`]).
+    pub taps: OutputTaps,
+}
+
+/// One event of [`SessionRegistry::subscribe_all_output`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum OutputTapEvent {
+    /// Decoded output of a session (every chunk, also while paused).
+    Data { session_id: String, text: String },
+    /// The session ended; no more data follows for it.
+    Closed { session_id: String },
+}
+
+/// Generic taps on decoded session output, fed from the same place as the
+/// session-log tap. Subscribers get unbounded channels; dropped receivers
+/// are pruned on the next publish.
+#[derive(Default)]
+pub struct OutputTaps {
+    per_session:
+        parking_lot::Mutex<std::collections::HashMap<String, Vec<mpsc::UnboundedSender<String>>>>,
+    all: parking_lot::Mutex<Vec<mpsc::UnboundedSender<OutputTapEvent>>>,
+}
+
+impl OutputTaps {
+    fn publish(&self, session_id: &str, text: &str) {
+        {
+            let mut all = self.all.lock();
+            if !all.is_empty() {
+                all.retain(|tx| {
+                    tx.send(OutputTapEvent::Data {
+                        session_id: session_id.to_string(),
+                        text: text.to_string(),
+                    })
+                    .is_ok()
+                });
+            }
+        }
+        let mut per_session = self.per_session.lock();
+        if let Some(subscribers) = per_session.get_mut(session_id) {
+            subscribers.retain(|tx| tx.send(text.to_string()).is_ok());
+            if subscribers.is_empty() {
+                per_session.remove(session_id);
+            }
+        }
+    }
+
+    fn session_closed(&self, session_id: &str) {
+        // Dropping the senders ends the per-session receivers.
+        self.per_session.lock().remove(session_id);
+        self.all.lock().retain(|tx| {
+            tx.send(OutputTapEvent::Closed {
+                session_id: session_id.to_string(),
+            })
+            .is_ok()
+        });
+    }
+}
+
+/// Feed decoded output to the generic taps of the app's session registry.
+fn publish_output<R: Runtime>(app: &AppHandle<R>, session_id: &str, text: &str) {
+    use tauri::Manager;
+    if text.is_empty() {
+        return;
+    }
+    if let Some(state) = app.try_state::<crate::state::AppState<R>>() {
+        state.sessions.shared.taps.publish(session_id, text);
+    }
 }
 
 pub struct SessionRegistry<R: Runtime> {
@@ -210,6 +277,7 @@ impl<R: Runtime> SessionRegistry<R> {
                 flags: dashmap::DashMap::new(),
                 connections: dashmap::DashMap::new(),
                 sftp,
+                taps: OutputTaps::default(),
             }),
         }
     }
@@ -252,6 +320,27 @@ impl<R: Runtime> SessionRegistry<R> {
             .insert(session_id.clone(), Arc::new(Mutex::new(entry)));
         let shared = self.shared.clone();
         tauri::async_runtime::spawn(pump(shared, session_id, source, decoder, charset, flags));
+    }
+
+    /// Decoded output of one session from now on; the receiver ends when
+    /// the session does.
+    pub fn subscribe_output(&self, session_id: &str) -> mpsc::UnboundedReceiver<String> {
+        let (tx, rx) = mpsc::unbounded_channel();
+        self.shared
+            .taps
+            .per_session
+            .lock()
+            .entry(session_id.to_string())
+            .or_default()
+            .push(tx);
+        rx
+    }
+
+    /// Decoded output and end of every session.
+    pub fn subscribe_all_output(&self) -> mpsc::UnboundedReceiver<OutputTapEvent> {
+        let (tx, rx) = mpsc::unbounded_channel();
+        self.shared.taps.all.lock().push(tx);
+        rx
     }
 
     pub fn get(&self, session_id: &str) -> Option<Arc<Mutex<SessionEntry>>> {
@@ -488,6 +577,7 @@ impl<R: Runtime> Shared<R> {
         // Session-log hook: finalize the session's automatic log (idempotent;
         // runs before the entry is removed).
         crate::commands::sessionlog::session_ended(&self.app, session_id);
+        self.taps.session_closed(session_id);
         self.flags.remove(session_id);
         self.connections.remove(session_id);
         let Some((_, entry)) = self.sessions.remove(session_id) else {
@@ -534,6 +624,8 @@ fn deliver_with_meta<R: Runtime>(
     // here exactly once, before flow-control buffering (paused output is
     // logged too). Only buffers; never blocks on I/O.
     crate::commands::sessionlog::tap_output(app, session_id, text);
+    // Generic output taps (script automation, ...): same point, same rules.
+    publish_output(app, session_id, text);
     if !force && flags.paused.load(Ordering::SeqCst) {
         if pending.len() + text.len() > PAUSE_BUFFER_LIMIT {
             if !flags.dropped_output.swap(true, Ordering::SeqCst) {
