@@ -4257,6 +4257,7 @@ dependencies = [
  "netcatty-localfs",
  "netcatty-mcp",
  "netcatty-mosh",
+ "netcatty-plugins",
  "netcatty-pty",
  "netcatty-ptyexec",
  "netcatty-rdesktop",

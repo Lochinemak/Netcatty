@@ -25,6 +25,7 @@ pub mod monitor;
 pub mod mosh;
 pub mod notification;
 pub mod openwith;
+pub mod plugins;
 pub mod rdesktop;
 pub mod scripts;
 pub mod serial;
@@ -358,6 +359,12 @@ pub fn handler<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + 
         monitor::monitor_stop_all,
         monitor::monitor_retry,
         // Auto-update (commands/update.rs).
+        // Plugin host runtime (commands/plugins.rs, logic in netcatty-plugins).
+        plugins::plugin_call,
+        plugins::plugin_runtime_attach,
+        plugins::plugin_runtime_messages,
+        plugins::plugin_runtime_exited,
+        plugins::plugin_runtime_reset,
         update::update_check,
         update::update_download,
         update::update_install,
