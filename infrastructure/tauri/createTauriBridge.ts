@@ -26,6 +26,7 @@ import {
 } from '../../domain/remoteDesktop';
 import { pluginClipboard, pluginDialog, pluginOpener } from './plugins';
 import { cancelStagedUpload, stageUploadFile } from './uploadStaging';
+import { createAiBridge } from './bridge/ai';
 
 // ---------------------------------------------------------------------------
 // Contract constants (see `netcatty_core::ipc::events`)
@@ -1449,6 +1450,9 @@ export function createTauriBridge(options: CreateTauriBridgeOptions = {}): Netca
       platform: detectPlatform(),
     }),
     getTempDirPath: () => invoke<string>('app_get_temp_dir_path'),
+
+    // AI core (provider proxy, chat streaming, privacy, skills, sessions backup).
+    ...createAiBridge({ hub }),
   };
 
   return bridge as NetcattyBridge;

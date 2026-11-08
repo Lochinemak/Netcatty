@@ -7,8 +7,10 @@
 //!   argument and answers with the Electron result object (`{ ok, … }`), so
 //!   the renderer adapter is a straight mapping. Failures are reported in
 //!   that object, never as rejected invokes, as in Electron.
-//! * Streaming chat events (`netcatty:ai:stream:data|end|error`) go to the
-//!   window that started the request only (Electron: `event.sender`).
+//! * Streaming chat events (`netcatty:ai:stream:data|end|error`) are emitted
+//!   with `emit_to(<calling window label>)` (Electron: `event.sender`). JS
+//!   listeners registered for any target still receive them, so the adapter
+//!   filters by `requestId`, as the Electron preload does.
 //! * Sender checks: Electron accepts the main window (`validateSender`) or
 //!   the main + settings windows (`validateSenderOrSettings`); the same
 //!   window labels are enforced here.
