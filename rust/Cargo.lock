@@ -3974,6 +3974,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "fancy-regex",
+ "parking_lot 0.13.0",
  "regex",
  "serde",
  "serde_json",
