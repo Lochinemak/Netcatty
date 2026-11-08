@@ -1332,25 +1332,37 @@ pub fn on_language_changed<R: Runtime>(app: &AppHandle<R>, language: &str) {
 mod native {
     use tauri::{Runtime, WebviewWindow};
 
+    /// Send `f` the NSWindow of `window` on the main thread. Headless
+    /// runtimes (tests) run tasks inline on another thread and have no real
+    /// NSWindow: nothing is sent there.
+    #[cfg(target_os = "macos")]
+    fn with_ns_window<R: Runtime>(
+        window: &WebviewWindow<R>,
+        f: impl FnOnce(*mut objc2::runtime::AnyObject) + Send + 'static,
+    ) {
+        let target = window.clone();
+        let _ = window.run_on_main_thread(move || {
+            if objc2::MainThreadMarker::new().is_none() {
+                return;
+            }
+            let Ok(ptr) = target.ns_window() else {
+                return;
+            };
+            let ns_window = ptr as *mut objc2::runtime::AnyObject;
+            if !ns_window.is_null() {
+                f(ns_window);
+            }
+        });
+    }
+
     /// Native window alpha. macOS: `NSWindow.alphaValue` (Electron
     /// `setOpacity`). Linux: no-op, like Electron. Windows: not applied —
     /// WebView2 content is not composited into `WS_EX_LAYERED` windows.
     #[cfg(target_os = "macos")]
     pub fn set_alpha<R: Runtime>(window: &WebviewWindow<R>, alpha: f64) {
-        let Ok(ptr) = window.ns_window() else {
-            return;
-        };
-        let addr = ptr as usize;
-        let _ = window.run_on_main_thread(move || {
-            let ns_window = addr as *mut objc2::runtime::AnyObject;
-            if ns_window.is_null() {
-                return;
-            }
-            // SAFETY: `ns_window` is the live NSWindow of this Tauri window,
-            // messaged on the main thread.
-            unsafe {
-                let _: () = objc2::msg_send![ns_window, setAlphaValue: alpha];
-            }
+        // SAFETY: the live NSWindow of this Tauri window, on the main thread.
+        with_ns_window(window, move |ns_window| unsafe {
+            let _: () = objc2::msg_send![ns_window, setAlphaValue: alpha];
         });
     }
 
@@ -1363,20 +1375,11 @@ mod native {
         use tauri::utils::config::WindowEffectsConfig;
         use tauri::window::{Effect, EffectState};
         if enabled {
-            if let Ok(ptr) = window.ns_window() {
-                let addr = ptr as usize;
-                let _ = window.run_on_main_thread(move || {
-                    let ns_window = addr as *mut objc2::runtime::AnyObject;
-                    if ns_window.is_null() {
-                        return;
-                    }
-                    // SAFETY: as in `set_alpha`; a non-opaque window lets the
-                    // material show through the transparent backing.
-                    unsafe {
-                        let _: () = objc2::msg_send![ns_window, setOpaque: false];
-                    }
-                });
-            }
+            // SAFETY: as in `set_alpha`; a non-opaque window lets the
+            // material show through the transparent backing.
+            with_ns_window(window, |ns_window| unsafe {
+                let _: () = objc2::msg_send![ns_window, setOpaque: false];
+            });
             let _ = window.set_effects(WindowEffectsConfig {
                 effects: vec![Effect::HudWindow],
                 state: Some(EffectState::Active),
@@ -1466,14 +1469,27 @@ mod menu {
         }
     }
 
+    /// Build and install on the main thread (AppKit menu items can only be
+    /// created there; commands may run elsewhere).
     pub fn install<R: Runtime>(app: &AppHandle<R>, language: &str) {
-        match build(app, language) {
-            Ok(menu) => {
-                if let Err(err) = app.set_menu(menu) {
-                    tracing::warn!(%err, "could not install the application menu");
-                }
+        let handle = app.clone();
+        let language = language.to_owned();
+        let scheduled = app.run_on_main_thread(move || {
+            // A headless runtime (tests) runs tasks inline on its own thread.
+            if objc2::MainThreadMarker::new().is_none() {
+                return;
             }
-            Err(err) => tracing::warn!(%err, "could not build the application menu"),
+            match build(&handle, &language) {
+                Ok(menu) => {
+                    if let Err(err) = handle.set_menu(menu) {
+                        tracing::warn!(%err, "could not install the application menu");
+                    }
+                }
+                Err(err) => tracing::warn!(%err, "could not build the application menu"),
+            }
+        });
+        if let Err(err) = scheduled {
+            tracing::warn!(%err, "could not schedule the application menu");
         }
     }
 
