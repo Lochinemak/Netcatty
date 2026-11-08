@@ -325,6 +325,8 @@ pub fn event_session_id(event: &Value) -> Option<String> {
 #[derive(Default)]
 pub struct OpenCodeState {
     pub reasoning_open: bool,
+    /// Product name in generated status / error text (`OpenCode` or `MiMo Code`).
+    pub brand: &'static str,
     part_types: HashMap<String, String>,
     message_roles: HashMap<String, String>,
     part_offsets: HashMap<String, usize>,
@@ -348,6 +350,14 @@ fn part_id(part: &Value) -> Option<String> {
 }
 
 impl OpenCodeState {
+    pub fn branded(brand: &'static str) -> Self {
+        Self { brand, ..Default::default() }
+    }
+
+    fn brand(&self) -> &'static str {
+        if self.brand.is_empty() { "OpenCode" } else { self.brand }
+    }
+
     fn assistant(&self, source: &Value) -> bool {
         match message_id(source).and_then(|m| self.message_roles.get(m)) {
             Some(role) => role == "assistant",
@@ -440,8 +450,8 @@ pub fn translate_event(event: &Value, emitter: &Emitter, st: &mut OpenCodeState)
                         let raw = if state["error"].as_str().map(|s| !s.is_empty()).unwrap_or(!state["error"].is_null()) { &state["error"] } else { &state["output"] };
                         let text = match raw {
                             Value::String(s) if !s.is_empty() => s.clone(),
-                            Value::Null | Value::String(_) => "OpenCode tool failed".to_string(),
-                            other => Some(error_message(other)).filter(|s| !s.is_empty()).unwrap_or_else(|| "OpenCode tool failed".into()),
+                            Value::Null | Value::String(_) => format!("{} tool failed", st.brand()),
+                            other => Some(error_message(other)).filter(|s| !s.is_empty()).unwrap_or_else(|| format!("{} tool failed", st.brand())),
                         };
                         emitter.tool_result(&call_id, &text, Some(&name));
                     }
@@ -472,17 +482,17 @@ pub fn translate_event(event: &Value, emitter: &Emitter, st: &mut OpenCodeState)
         }
         "session.error" => {
             let msg = error_message(&props["error"]);
-            emitter.emit_error(if msg.is_empty() { "OpenCode session failed".into() } else { msg });
+            emitter.emit_error(if msg.is_empty() { format!("{} session failed", st.brand()) } else { msg });
             EventOutcome { error: true, ..none }
         }
         "session.idle" => {
             st.close_reasoning(emitter);
-            emitter.status("OpenCode session idle");
+            emitter.status(&format!("{} session idle", st.brand()));
             EventOutcome { idle: true, ..none }
         }
         "session.status" => {
             if let Some(t) = props.pointer("/status/type").and_then(|v| v.as_str()) {
-                emitter.status(&format!("OpenCode session {t}"));
+                emitter.status(&format!("{} session {t}", st.brand()));
             }
             none
         }
@@ -780,7 +790,7 @@ async fn run_v1_turn(ctx: &TurnContext, bin: &str) -> TurnResult {
         }
     };
     let client = HttpClient::new(&serve.url, None);
-    let result = drive_v1_session(ctx, &client, &mut session_id, "Netcatty OpenCode", None).await;
+    let result = drive_v1_session(ctx, &client, &mut session_id, "Netcatty OpenCode", None, "OpenCode").await;
     if ctx.aborted() {
         if let Some(id) = &session_id {
             let dir = ctx.cwd.to_string_lossy().into_owned();
@@ -813,16 +823,16 @@ pub trait PermissionHook: Send + Sync {
 
 /// v1 session protocol shared by OpenCode and MiMo: subscribe to
 /// `/global/event`, create the session, `prompt_async`, translate until idle.
-pub async fn drive_v1_session(ctx: &TurnContext, client: &HttpClient, session_id: &mut Option<String>, title: &str, permissions: Option<&dyn PermissionHook>) -> Result<SessionOutcome, String> {
+pub async fn drive_v1_session(ctx: &TurnContext, client: &HttpClient, session_id: &mut Option<String>, title: &str, permissions: Option<&dyn PermissionHook>, brand: &'static str) -> Result<SessionOutcome, String> {
     let emitter = &ctx.emitter;
     let dir = ctx.cwd.to_string_lossy().into_owned();
     let query = [("directory", dir.as_str())];
-    let mut events = client.sse("/global/event").await.map_err(|(_, e)| if e.is_empty() { "OpenCode event stream unavailable".to_string() } else { e })?;
+    let mut events = client.sse("/global/event").await.map_err(|(_, e)| if e.is_empty() { format!("{brand} did not provide an event stream") } else { e })?;
     if session_id.is_none() {
         let created = client.json(reqwest::Method::POST, "/session", &query, Some(&json!({ "title": title }))).await.map_err(|(_, e)| e)?;
         *session_id = created["id"].as_str().or(created.pointer("/data/id").and_then(|v| v.as_str())).map(str::to_string);
     }
-    let sid = session_id.clone().ok_or("OpenCode did not create a session")?;
+    let sid = session_id.clone().ok_or(format!("{brand} did not create a session"))?;
     emitter.session_id(&sid);
     let mut body = json!({ "parts": build_prompt_parts(&ctx.prompt, &ctx.attachments) });
     if let Some(sys) = ctx.system_prompt.as_deref().filter(|s| !s.is_empty()) {
@@ -832,7 +842,7 @@ pub async fn drive_v1_session(ctx: &TurnContext, client: &HttpClient, session_id
         body["model"] = m;
     }
     let mut outcome = SessionOutcome::default();
-    let mut st = OpenCodeState::default();
+    let mut st = OpenCodeState::branded(brand);
     let mut turn_started = permissions.is_none();
     let mut warnings = 0;
     let prompt_path = format!("/session/{sid}/prompt_async");
@@ -859,7 +869,8 @@ pub async fn drive_v1_session(ctx: &TurnContext, client: &HttpClient, session_id
                 if esid.is_none() && kind == "session.error" {
                     warnings += 1;
                     let msg = error_message(&payload["properties"]["error"]);
-                    emitter.warning(&format!("opencode-background-error:{warnings}"), if msg.is_empty() { "OpenCode reported a background error" } else { &msg });
+                    let fallback = format!("{brand} reported a background error");
+                    emitter.warning(&format!("opencode-background-error:{warnings}"), if msg.is_empty() { &fallback } else { &msg });
                     continue;
                 }
                 if let Some(hook) = permissions {
