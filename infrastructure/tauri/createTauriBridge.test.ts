@@ -1301,3 +1301,20 @@ test('session logs map to the session_log commands with Electron payloads', asyn
   });
   assert.deepEqual(lastInvoke(fake, 'session_log_reveal').args, { payload: { sessionId: 's2' } });
 });
+
+test('session output routed to another window is dropped and started sessions are tracked', async () => {
+  const { fake, bridge } = setup();
+  fake.respond('session_start_local', () => ({ sessionId: 'local-1' }));
+  assert.equal(await bridge.startLocalSession({}), 'local-1');
+  await flush();
+  assert.deepEqual(lastInvoke(fake, 'windows_track_session').args, { sessionId: 'local-1' });
+
+  const seen: string[] = [];
+  bridge.onSessionData('moved', (data) => seen.push(data), { replayBacklog: true });
+  fake.emit('netcatty:data', { sessionId: 'moved', data: 'a' });
+  fake.emit('netcatty:window:session-output-route', { sessionId: 'moved', label: 'terminal-popup-1', revision: 1 });
+  fake.emit('netcatty:data', { sessionId: 'moved', data: 'b' });
+  fake.emit('netcatty:window:session-output-route', { sessionId: 'moved', label: 'main', revision: 2 });
+  fake.emit('netcatty:data', { sessionId: 'moved', data: 'c' });
+  assert.deepEqual(seen, ['a', 'c']);
+});

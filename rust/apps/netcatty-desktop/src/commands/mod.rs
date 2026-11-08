@@ -44,6 +44,7 @@ pub mod transfers2;
 pub mod tray;
 pub mod update;
 pub mod window;
+pub mod windows;
 
 use netcatty_core::CoreError;
 
@@ -145,6 +146,32 @@ pub fn handler<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + 
         window::app_set_background_color,
         window::app_set_language,
         window::app_broadcast_settings_changed,
+        // Editor / terminal popup / session windows, attach hand-over,
+        // opacity / blur (commands/windows, rust/docs/ipc-windows.md).
+        windows::windows_open_editor,
+        windows::windows_editor_ready,
+        windows::windows_focus_editor,
+        windows::windows_close_editor_tabs,
+        windows::windows_save_editor_tab,
+        windows::windows_dock_editor_tab,
+        windows::windows_report_editor_dirty,
+        windows::windows_report_editor_tabs_closed,
+        windows::windows_remap_editor_session,
+        windows::windows_report,
+        windows::windows_open_terminal_popup,
+        windows::windows_terminal_popup_config,
+        windows::windows_mark_attach_close_prepared,
+        windows::windows_open_session,
+        windows::windows_take_open_session,
+        windows::windows_track_session,
+        windows::windows_output_routes,
+        windows::windows_rebind_output,
+        windows::windows_restore_output,
+        windows::windows_request_snapshot,
+        windows::windows_apply_snapshot,
+        windows::windows_set_opacity,
+        windows::windows_set_background_blur,
+        windows::windows_set_terminal_keyboard_focus,
         // Crash logs / diagnostics.
         diagnostics::crash_logs_list,
         diagnostics::crash_logs_read,

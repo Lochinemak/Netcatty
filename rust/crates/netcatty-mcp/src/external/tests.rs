@@ -159,7 +159,17 @@ async fn http_endpoint_auth_host_check_and_sessions() {
     // Disabling stops the listener.
     c.set_enabled(false).await;
     assert_eq!(c.status()["http"]["listening"], false);
-    assert!(tokio::net::TcpStream::connect(("127.0.0.1", port)).await.is_err());
+    // The port may be re-bound at once by a parallel test, so only check
+    // that our endpoint no longer answers an authenticated request.
+    if let Ok(mut stream) = tokio::net::TcpStream::connect(("127.0.0.1", port)).await {
+        let req = format!(
+            "POST /mcp HTTP/1.1\r\nHost: {host}\r\nAuthorization: Bearer {token}\r\nMcp-Session-Id: {sid}\r\nContent-Type: application/json\r\nContent-Length: 40\r\nConnection: close\r\n\r\n{{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"ping\"}}"
+        );
+        let _ = stream.write_all(req.as_bytes()).await;
+        let mut out = String::new();
+        let _ = tokio::time::timeout(std::time::Duration::from_secs(2), stream.read_to_string(&mut out)).await;
+        assert!(!out.starts_with("HTTP/1.1 200"), "disabled endpoint still answered: {out}");
+    }
     c.cleanup().await;
 }
 

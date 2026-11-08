@@ -370,11 +370,15 @@ pub(crate) fn bring_main_to_foreground<R: Runtime>(app: &AppHandle<R>) -> bool {
     };
     let _ = main.unminimize();
     let _ = main.show();
-    main.set_focus().is_ok()
+    let focused = main.set_focus().is_ok();
+    super::windows::notify_window_shown(app, MAIN_LABEL);
+    super::windows::notify_window_focus_requested(app, MAIN_LABEL);
+    focused
 }
 
 /// Hide the main window to the tray, leaving macOS native fullscreen first.
 pub(crate) fn hide_main_window<R: Runtime>(app: &AppHandle<R>, main: &WebviewWindow<R>) {
+    super::windows::notify_window_will_hide(app, MAIN_LABEL);
     let generation = with_prefs(app, |p| {
         p.hide_generation += 1;
         p.hide_generation
