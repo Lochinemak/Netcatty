@@ -114,8 +114,28 @@ pub async fn session_start_ssh<R: tauri::Runtime>(
         )));
     }
 
-    let acquired = connect::acquire(&state, &payload, &session_id, false).await?;
+    // X11 is negotiated per connection with a fresh fake cookie, so an X11
+    // shell never reuses another session's transport (Electron does the same).
+    let x11 = payload.x11_forwarding == Some(true);
+    let acquired = if x11 {
+        let mut fresh = payload.clone();
+        fresh.reuse_transport = Some(false);
+        connect::acquire(&state, &fresh, &session_id, false).await?
+    } else {
+        connect::acquire(&state, &payload, &session_id, false).await?
+    };
     let connection = acquired.connection;
+    let x11_cookie = x11.then(netcatty_ssh::shell::random_x11_cookie);
+    if let Some(cookie) = &x11_cookie {
+        super::transfers2::start_x11_forwarding(
+            &state.app,
+            &session_id,
+            &connection,
+            payload.x11_display.clone(),
+            cookie.clone(),
+        )
+        .await;
+    }
 
     let shell_options = ShellOptions {
         cols: payload.cols(),
@@ -125,6 +145,7 @@ pub async fn session_start_ssh<R: tauri::Runtime>(
         agent_forwarding: payload.agent_forwarding.unwrap_or(false),
         x11_forwarding: payload.x11_forwarding.unwrap_or(false),
         x11_display: payload.x11_display.clone(),
+        x11_cookie,
     };
     let shell = match connection.open_shell(shell_options).await {
         Ok(shell) => shell,
@@ -490,6 +511,9 @@ pub async fn session_exec<R: tauri::Runtime>(
 pub async fn session_pwd<R: tauri::Runtime>(
     state: Ctx<'_, R>,
     session_id: String,
+    allow_home_fallback: Option<bool>,
+    allow_login_shell_fallback: Option<bool>,
+    timeout_ms: Option<f64>,
 ) -> CmdResult<PwdResult> {
     let Some(entry) = state.sessions.get(&session_id) else {
         return Ok(PwdResult::fail("Session not found or not connected"));
@@ -514,24 +538,19 @@ pub async fn session_pwd<R: tauri::Runtime>(
             }
         }
     };
-    Ok(remote_home_dir(&connection).await)
-}
-
-async fn remote_home_dir(connection: &netcatty_ssh::SshConnection) -> PwdResult {
-    match connection
-        .exec("sh -c 'printf %s \"$HOME\"'", Some(Duration::from_secs(5)))
-        .await
-    {
-        Ok(output) => {
-            let home = output.stdout_lossy().trim().to_string();
-            if home.is_empty() || matches!(output.exit_code, Some(code) if code != 0) {
-                PwdResult::fail("Current directory could not be determined")
-            } else {
-                PwdResult::ok(home)
-            }
-        }
-        Err(err) => PwdResult::fail(err.to_string()),
-    }
+    // Real interactive-shell cwd (commands/transfers2.rs), home fallback
+    // unless the caller disables it.
+    let options = netcatty_sysmgr::cwd::CwdProbeOptions::from_request(
+        allow_home_fallback,
+        allow_login_shell_fallback,
+        timeout_ms,
+    );
+    Ok(
+        match super::transfers2::ssh_session_cwd(&state, &session_id, &connection, options).await {
+            Ok(cwd) => PwdResult::ok(cwd),
+            Err(error) => PwdResult::fail(error),
+        },
+    )
 }
 
 #[tauri::command]

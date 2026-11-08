@@ -482,6 +482,8 @@ pub async fn mosh_start<R: Runtime>(
 ) -> CmdResult<StartSessionResult> {
     let session_id = session_id_or_new(payload.session_id.as_ref());
     ensure_free(&state, &session_id)?;
+    // Stats companion credentials (connects only after `netcatty:mosh:ready`).
+    super::transfers2::remember_companion(&state.app, &session_id, &payload, "mosh");
     if payload.hostname.trim().is_empty() {
         return Err(CoreError::invalid("hostname is required"));
     }
@@ -778,6 +780,8 @@ impl<R: Runtime> MoshDriver<R> {
         {
             return;
         }
+        // The handshake vetted the host: the stats companion may connect.
+        super::transfers2::companion_ready(&self.app, &self.session_id);
         crate::events::emit(
             &self.app,
             ev::MOSH_READY,
@@ -1009,6 +1013,8 @@ pub async fn et_start<R: Runtime>(
             host,
         );
     }
+    // Stats companion credentials for host info (commands/transfers2.rs).
+    super::transfers2::remember_companion(&state.app, &session_id, &payload, "et");
     state.sessions.insert(SessionEntry {
         session_id: session_id.clone(),
         host_id: payload.host_id.clone(),

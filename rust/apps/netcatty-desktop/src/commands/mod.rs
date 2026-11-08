@@ -39,6 +39,7 @@ pub mod telnet;
 pub mod temp;
 pub mod tempdir;
 pub mod totp;
+pub mod transfers2;
 pub mod tray;
 pub mod update;
 pub mod window;
@@ -248,6 +249,18 @@ pub fn handler<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + 
         sftp::transfer_start,
         sftp::transfer_cancel,
         sftp::transfer_pause,
+        // Transfer queue controls, compressed folder upload, native file drag
+        // (commands/transfers2.rs, rust/docs/ipc-transfers.md).
+        transfers2::transfer_prioritize,
+        transfers2::transfer_set_concurrency,
+        transfers2::transfer_cleanup,
+        transfers2::compress_check_support,
+        transfers2::compress_start,
+        transfers2::compress_cancel,
+        transfers2::compress_pause,
+        transfers2::compress_resume,
+        transfers2::local_drag_start,
+        transfers2::local_drag_cancel,
         forward::portforward_start,
         forward::portforward_stop,
         forward::portforward_stop_by_rule,

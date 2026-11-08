@@ -29,7 +29,7 @@ use std::time::Duration;
 use tauri::Runtime;
 
 /// Electron's single-channel bastion error.
-const SINGLE_CHANNEL_ERROR: &str = "Remote SSH server does not support extra exec channels";
+pub(crate) const SINGLE_CHANNEL_ERROR: &str = "Remote SSH server does not support extra exec channels";
 
 /// State behind the system-manager, stats and monitor commands.
 #[derive(Default)]
@@ -304,13 +304,22 @@ async fn session_kind<R: Runtime>(state: &AppState<R>, session_id: &str) -> Sess
         state.system.forget_session(session_id);
         return SessionKind::Missing;
     };
-    let local = entry.lock().await.protocol == "local";
+    let protocol = entry.lock().await.protocol;
+    let local = protocol == "local";
     if state.system.single_channel.contains(session_id) {
         return SessionKind::SingleChannel;
     }
     match state.sessions.connection_of(session_id) {
         Some(conn) if single_channel_banner(&conn) => SessionKind::SingleChannel,
         Some(conn) => SessionKind::Ssh(conn),
+        // Mosh / ET: the stats companion SSH connection (commands/transfers2.rs).
+        None if matches!(protocol, "mosh" | "et") => {
+            match super::transfers2::companion_connection(state, session_id).await {
+                Some(conn) if single_channel_banner(&conn) => SessionKind::SingleChannel,
+                Some(conn) => SessionKind::Ssh(conn),
+                None => SessionKind::NoConnection { local },
+            }
+        }
         None => SessionKind::NoConnection { local },
     }
 }

@@ -33,6 +33,7 @@ pub mod options;
 pub mod prompting;
 pub mod proxy;
 pub mod shell;
+pub mod x11;
 
 pub use auth::{totp_code, totp_code_at, AuthOutcome, KeySourceKind};
 pub use connection::{build_client_config, connect, SshConnection};

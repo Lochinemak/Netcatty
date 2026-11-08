@@ -41,6 +41,7 @@ netcatty-agents = { workspace = true }
 netcatty-ptyexec = { workspace = true }
 netcatty-capabilities = { workspace = true }
 netcatty-mcp = { workspace = true }
+netcatty-transfers = { workspace = true }
 tauri = { version = "2.12", features = ["tray-icon", "image-png"] }
 tauri-plugin-shell = "2.6"
 tauri-plugin-dialog = "2.8"
@@ -80,6 +81,14 @@ chrono = { workspace = true }
 uuid = { workspace = true }
 # Host browser favicon fetches through the SOCKS route.
 reqwest = { workspace = true, features = ["socks"] }
+
+# Native drag of local files out of the app (commands/transfers2.rs).
+[target.'cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))'.dependencies]
+drag = "2.1"
+
+# Pause / resume of the local tar of compressed uploads (SIGSTOP / SIGCONT).
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
 
 [dev-dependencies]
 tauri = { version = "2.12", features = ["test", "tray-icon", "image-png"] }

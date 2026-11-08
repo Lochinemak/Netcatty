@@ -23,6 +23,9 @@ pub struct ShellOptions {
     pub agent_forwarding: bool,
     pub x11_forwarding: bool,
     pub x11_display: Option<String>,
+    /// Fake MIT-MAGIC-COOKIE-1 (hex) for the `x11-req`; the local proxy
+    /// ([`crate::x11`]) swaps it for the real one. Random when `None`.
+    pub x11_cookie: Option<String>,
 }
 
 impl Default for ShellOptions {
@@ -35,6 +38,7 @@ impl Default for ShellOptions {
             agent_forwarding: false,
             x11_forwarding: false,
             x11_display: None,
+            x11_cookie: None,
         }
     }
 }
@@ -165,7 +169,7 @@ impl SshConnection {
                     false,
                     false,
                     "MIT-MAGIC-COOKIE-1",
-                    random_x11_cookie(),
+                    options.x11_cookie.clone().unwrap_or_else(random_x11_cookie),
                     screen,
                 )
                 .await
