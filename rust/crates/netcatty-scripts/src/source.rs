@@ -160,18 +160,21 @@ mod tests {
 
     #[test]
     fn resolve_startup_seed_text_prefers_buffer_when_viewport_paint_lags_bastion_menu() {
-        let buffer = "Welcome\n1) host-a\n2) host-b\nSelect: ";
-        let viewport = "Welcome\n1) host-a\n";
-        assert_eq!(resolve_startup_seed_text(viewport, buffer), buffer);
+        let buffer = "Welcome to SSHD\n\nuser login success\n\nSSH资源(5) :\n  [1] host\n";
+        let lagging_viewport = "Welcome to SSHD\n\nuser login success\n";
+        let seed = resolve_startup_seed_text(lagging_viewport, buffer);
+        assert!(seed.contains("SSH资源(5)"));
+        assert_eq!(resolve_startup_seed_text("", buffer), buffer);
     }
 
     #[test]
     fn resolve_startup_seed_text_prefers_viewport_when_buffer_only_adds_scrolled_off_prefix() {
-        let buffer = "old scrollback\nline 1\nline 2\nprompt$ ";
-        let viewport = "line 1\nline 2\nprompt$ \n\n";
-        assert_eq!(resolve_startup_seed_text(viewport, buffer), viewport);
-        assert_eq!(resolve_startup_seed_text("", buffer), buffer);
+        let viewport = "SSH资源(5) :\n  [1] host\n";
+        let buffer = format!("old deployment READY marker\nuser@host:~$ \n{viewport}");
+        let seed = resolve_startup_seed_text(viewport, &buffer);
+        assert_eq!(seed, viewport);
+        assert!(!seed.contains("READY marker"));
         assert_eq!(resolve_startup_seed_text(viewport, ""), viewport);
-        assert_eq!(resolve_startup_seed_text("unrelated", buffer), "unrelated");
+        assert_eq!(resolve_startup_seed_text("unrelated", &buffer), "unrelated");
     }
 }

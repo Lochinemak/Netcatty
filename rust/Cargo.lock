@@ -4127,6 +4127,7 @@ name = "netcatty-scripts"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "chrono",
  "netcatty-core",
  "parking_lot 0.13.0",
  "regress",

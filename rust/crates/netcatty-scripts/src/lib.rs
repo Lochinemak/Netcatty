@@ -16,6 +16,7 @@ pub mod buffer;
 pub mod codegen;
 pub mod dialog;
 pub mod engine;
+pub mod manager;
 pub mod pattern;
 pub mod prompt_patterns;
 pub mod retention;
@@ -24,6 +25,7 @@ pub mod runtime;
 pub mod source;
 
 pub use buffer::{BufferRegistry, OutputBuffer, WaitError};
+pub use manager::{ManagerHost, ScriptManager};
 pub use engine::{RuntimeSnapshot, ScriptError, SessionSnapshot};
 pub use pattern::WaitPattern;
 pub use run::{RunStatus, ScriptRun, SerializedRun};

@@ -1282,7 +1282,6 @@ impl ScriptRuntime {
                     }
                     Some(EngineEvent::Completed) => {
                         if let Some((m, a)) = pending_progress.take() {
-                            progress_flush_at = None;
                             if let Err(err) = self.handle_notification(&m, &a) {
                                 break Err(err);
                             }

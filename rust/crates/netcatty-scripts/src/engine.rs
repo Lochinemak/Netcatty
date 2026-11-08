@@ -760,7 +760,7 @@ mod tests {
                     handle.send(EngineInbound::RpcResult {
                         request_id,
                         result,
-                        snapshot: RuntimeSnapshot::default(),
+                        snapshot: config(source, timeout_ms).snapshot,
                     });
                 }
                 Some(EngineEvent::Notify { method, args }) => notifications.push((method, args)),
@@ -852,7 +852,9 @@ mod tests {
             |_, _| Ok(None),
         )
         .await;
-        assert!(result.unwrap_err().message.to_lowercase().contains("sharedarraybuffer"));
+        // V8 says "SharedArrayBuffer is not a constructor"; QuickJS omits the
+        // name. Either way the blocking primitive is unavailable.
+        assert_eq!(result.unwrap_err().name, "TypeError");
         let started = Instant::now();
         let (result, _) = run_script(
             "await nct.sleep(1); /^(a+)+$/.test('a'.repeat(28) + '!');",
@@ -903,16 +905,25 @@ mod tests {
     #[tokio::test]
     async fn fan_out_stops_at_the_pending_limit() {
         let started = Instant::now();
-        let (result, _) = run_script(
-            "for (let i = 0; i < 20000; i += 1) void nct.sleep(60000);",
-            5_000,
-            |_, _| unreachable!("the engine must not answer during the fan-out"),
-        )
-        .await;
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let handle = spawn_engine(
+            config("for (let i = 0; i < 20000; i += 1) void nct.sleep(60000);", 5_000),
+            tx,
+        );
+        let mut rpcs = 0;
+        let error = loop {
+            match rx.recv().await {
+                Some(EngineEvent::Rpc { .. }) => rpcs += 1,
+                Some(EngineEvent::Failed(error)) => break error,
+                other => panic!("unexpected {other:?}"),
+            }
+        };
+        assert_eq!(rpcs, SCRIPT_WORKER_MAX_PENDING_HOST_REQUESTS);
         assert_eq!(
-            result.unwrap_err().message,
+            error.message,
             format!("Script exceeded the {SCRIPT_WORKER_MAX_PENDING_HOST_REQUESTS} pending host request limit")
         );
+        tokio::task::spawn_blocking(move || handle.join()).await.unwrap();
         assert!(started.elapsed() < Duration::from_secs(1));
     }
 

@@ -16,6 +16,7 @@ async-trait = { workspace = true }
 parking_lot = { workspace = true }
 tracing = { workspace = true }
 thiserror = { workspace = true }
+chrono = { workspace = true }
 regress = "0.12"
 rquickjs = { version = "0.14", features = ["std"] }
 

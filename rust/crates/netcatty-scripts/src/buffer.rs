@@ -16,7 +16,7 @@
 //! slot so trimming / re-seeding can adjust its fresh boundary.
 
 use crate::pattern::{
-    compile_pattern, compile_text_pattern, next_char_boundary, prev_char_boundary,
+    advance_offset, compile_pattern, compile_text_pattern, next_char_boundary, prev_char_boundary,
     try_match_with_end, try_regex_match_with_end, MatchEnd, PatternError, RegexMatch, WaitPattern,
 };
 use crate::prompt_patterns::shell_prompt_patterns;
@@ -168,7 +168,7 @@ fn find_fresh_tail_match_any(
                     },
                 }));
             }
-            offset = next_char_boundary(text, absolute_end.max(offset + 1));
+            offset = advance_offset(text, absolute_end.max(offset + 1));
         }
     }
     Ok(None)
@@ -196,7 +196,7 @@ fn find_matching_preserved_tail_match(
                     },
                 }));
             }
-            offset = next_char_boundary(text, absolute_end.max(offset + 1));
+            offset = advance_offset(text, absolute_end.max(offset + 1));
         }
     }
     Ok(None)
@@ -481,7 +481,7 @@ impl BufferState {
                     ..matched
                 }));
             }
-            relative_offset = next_char_boundary(
+            relative_offset = advance_offset(
                 &self.text[base_offset..],
                 relative_offset + stale_regex_advance_end_offset(&matched),
             );

@@ -141,10 +141,21 @@ impl JsRegex {
             pos = if m.end() > m.start() {
                 m.end()
             } else {
-                next_char_boundary(text, m.end() + 1)
+                advance_offset(text, m.end() + 1)
             };
         }
         out
+    }
+}
+
+/// Advance a scan offset to `raw` like JavaScript does: past the end of
+/// `text` stays past the end (so `while offset <= len` loops exit), inside
+/// it the offset moves to the next char boundary.
+pub fn advance_offset(text: &str, raw: usize) -> usize {
+    if raw > text.len() {
+        raw
+    } else {
+        next_char_boundary(text, raw)
     }
 }
 
