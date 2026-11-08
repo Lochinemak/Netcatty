@@ -1,0 +1,24 @@
+[package]
+name = "netcatty-ptyexec"
+description = "AI command execution inside live terminal sessions: marker-wrapped PTY jobs with prompt detection, live shell probing, command safety blocklist, raw (network device) execution"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+netcatty-sessionlog = { workspace = true }
+async-trait = { workspace = true }
+bytes = { workspace = true }
+fancy-regex = "0.14"
+hex = { workspace = true }
+parking_lot = { workspace = true }
+rand = { workspace = true }
+regex = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }

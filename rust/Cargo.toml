@@ -16,6 +16,9 @@ members = [
   "crates/netcatty-telnet",
   "crates/netcatty-serial",
   "crates/netcatty-mosh",
+  "crates/netcatty-ptyexec",
+  "crates/netcatty-capabilities",
+  "crates/netcatty-mcp",
   "apps/netcatty-desktop",
 ]
 
@@ -42,6 +45,9 @@ netcatty-serial = { path = "crates/netcatty-serial" }
 netcatty-mosh = { path = "crates/netcatty-mosh" }
 netcatty-sysmgr = { path = "crates/netcatty-sysmgr" }
 netcatty-sessionlog = { path = "crates/netcatty-sessionlog" }
+netcatty-ptyexec = { path = "crates/netcatty-ptyexec" }
+netcatty-capabilities = { path = "crates/netcatty-capabilities" }
+netcatty-mcp = { path = "crates/netcatty-mcp" }
 
 # async runtime
 tokio = { version = "1.54", features = ["full"] }

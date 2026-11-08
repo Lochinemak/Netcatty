@@ -1,0 +1,33 @@
+[package]
+name = "netcatty-mcp"
+description = "AI control plane: per-chat MCP TCP host (approvals, scopes, background jobs, SFTP), stdio MCP server + tool CLI helper modes, External MCP (streamable HTTP) controller and client setup"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+netcatty-capabilities = { workspace = true }
+netcatty-ptyexec = { workspace = true }
+async-trait = { workspace = true }
+base64 = { workspace = true }
+bytes = { workspace = true }
+dirs = { workspace = true }
+hex = { workspace = true }
+http-body-util = "0.1"
+hyper = { version = "1", features = ["http1", "server"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+ipnet = "2"
+parking_lot = { workspace = true }
+rand = { workspace = true }
+regex = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+tokio = { workspace = true }
+tokio-util = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"
+tokio = { workspace = true, features = ["test-util"] }
