@@ -645,6 +645,8 @@ commands do not appear in logs. A new session kind needs the three hooks:
 Dialogs, clipboard and opening URLs use the Tauri plugins directly from the
 adapter (`window.__TAURI__.dialog`, `.clipboardManager`, `.opener`).
 
+Auto-update (`update_*`, `app_report_dirty_editors`, `netcatty:update:*` and `app:query-dirty-editors`): see [ipc-update.md](./ipc-update.md).
+
 ## Mapping `NetcattyBridge` → commands (adapter cheat-sheet)
 
 | Bridge method | Command / plugin |
@@ -706,7 +708,7 @@ adapter (`window.__TAURI__.dialog`, `.clipboardManager`, `.opener`).
 | `prepareSessionLog`, `revealSessionLog` | `session_log_prepare`, `session_log_reveal` (`payload: { sessionId }` only) |
 
 Bridge methods that have no Rust counterpart in this version (AI, plugins,
-MCP, ZMODEM/YMODEM, FIDO, plugin sync providers, auto-update) are left
+MCP, ZMODEM/YMODEM, FIDO, plugin sync providers) are left
 `undefined` on the adapter; the renderer already treats them as optional.
 `onTrayPanelCloseRequest` stays undefined too: the Electron main process
 never sends that event.

@@ -153,6 +153,11 @@ Implemented in Rust:
 * Tray icon (native menu on Linux), tray panel window, close-to-tray,
   global "Quake mode" hotkey, launch at login hidden to the tray
   (`--hidden`), native notifications with click-to-focus
+* Auto-update (`tauri-plugin-updater`, `docs/ipc-update.md`): signed bundles
+  from GitHub Releases with Electron's prompt flow (check → download with
+  progress → install on request), persisted auto-download preference,
+  startup check, dirty-editor guard before install, and a "download
+  manually" fallback for unsigned / dev builds and unknown Linux packages
 * System manager (`netcatty-sysmgr`): capability probe, processes and
   signals, tmux (sessions / windows / panes / clients / actions), Docker /
   Podman / nerdctl containers and images, kubectl contexts / namespaces /
@@ -177,8 +182,9 @@ hides the features when they are absent):
   host-stats companion SSH connection
 * FIDO2 security keys and Windows Hello / app lock
 * Plugin-provided sync providers (they need the plugin runtime)
-* Auto-update, deep links, Explorer context menu, the macOS Dock menu
-  (saved hosts), per-variant tray icons (`appIconManager`)
+* Deep links, Explorer context menu, the macOS Dock menu (saved hosts),
+  per-variant tray icons (`appIconManager`), the before-quit dirty-editor
+  guard (the install-time one is ported)
 * Compressed folder upload
 * X11 forwarding is requested on the channel but no local X11 proxy is
   started yet
@@ -190,6 +196,41 @@ hides the features when they are absent):
 
 The `electron/` directory is untouched; `npm run dev` still runs the Electron
 build so both backends can be compared while the port matures.
+
+## Auto-update signing
+
+Release bundles are signed with a minisign key pair so the in-app updater
+(`tauri-plugin-updater`, see `docs/ipc-update.md`) can verify what it
+downloads. Generate the pair once, on a machine you trust:
+
+```bash
+cd rust/apps/netcatty-desktop
+npx --yes @tauri-apps/cli@^2 signer generate -w ~/.tauri/netcatty.key
+# or, with the Rust CLI installed: cargo tauri signer generate -w ~/.tauri/netcatty.key
+```
+
+* `~/.tauri/netcatty.key` is the **private key**. Never commit it. Store its
+  contents in the `TAURI_SIGNING_PRIVATE_KEY` repository secret and the
+  password you chose in `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`;
+  `.github/workflows/build-tauri.yml` exports both to the bundler. Keep a
+  backup: a lost key means existing installs can never verify a new release.
+* `~/.tauri/netcatty.key.pub` is the **public key**. Paste its contents into
+  `plugins.updater.pubkey` in `rust/apps/netcatty-desktop/tauri.conf.json`
+  (replacing `REPLACE_WITH_TAURI_UPDATER_PUBLIC_KEY`) and commit that. A
+  fork that signs with its own key can instead set the
+  `TAURI_UPDATER_PUBKEY` repository variable, which the workflow writes into
+  the CI config.
+
+With the key present the bundler writes `Netcatty.app.tar.gz` plus `.sig`
+on macOS and a `.sig` next to every installer; the release job turns them
+into `latest.json`, which the configured endpoint
+(`.../releases/latest/download/latest.json`) serves. Without the key the
+workflow still builds installers, but switches `createUpdaterArtifacts` off
+(the bundler refuses to sign without a key) and the app reports updates as
+"download manually". The same applies to `npm run tauri:build` on a
+developer machine: either export `TAURI_SIGNING_PRIVATE_KEY` or pass
+`--config '{"bundle":{"createUpdaterArtifacts":false}}'`. Debug builds never
+auto-update.
 
 ## Headless IPC tests
 

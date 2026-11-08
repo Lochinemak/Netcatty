@@ -77,6 +77,15 @@ jobs:
       VITE_SYNC_GOOGLE_CLIENT_ID: ${{ secrets.VITE_SYNC_GOOGLE_CLIENT_ID }}
       VITE_SYNC_GOOGLE_CLIENT_SECRET: ${{ secrets.VITE_SYNC_GOOGLE_CLIENT_SECRET }}
       VITE_SYNC_ONEDRIVE_CLIENT_ID: ${{ secrets.VITE_SYNC_ONEDRIVE_CLIENT_ID }}
+      # Updater signing key (`tauri signer generate`, see rust/README.md).
+      # With it the bundler also writes the updater artifacts (.app.tar.gz
+      # on macOS, the installers' .sig files); without it they are skipped
+      # and the app reports updates as "download manually".
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+      # Public key matching the secret, when it differs from the one in
+      # tauri.conf.json (forks). Optional repository variable.
+      TAURI_UPDATER_PUBKEY: ${{ vars.TAURI_UPDATER_PUBKEY || '' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -173,6 +182,12 @@ jobs:
           # "damaged" app. Fetched mosh-client / et binaries are bundled as
           # resources (<resource_dir>/mosh/, <resource_dir>/et/), the layout
           # the backend looks up first.
+          #
+          # Updater: the endpoint points at this repository's latest release
+          # (the release job writes latest.json there), the public key can be
+          # overridden per repository, and updater artifacts are only
+          # requested when the signing key is available (the bundler fails
+          # when asked to sign without one).
           version=""
           if [[ "$GITHUB_REF" =~ $STRICT_VERSION_REF_RE ]]; then
             version="${GITHUB_REF_NAME#v}"
@@ -190,11 +205,19 @@ jobs:
             aarch64-unknown-linux-gnu) client_dir=linux-arm64; exe="" ;;
             *) client_dir=""; exe="" ;;
           esac
-          VERSION="$version" CLIENT_DIR="$client_dir" EXE="$exe" node -e '
+          if [[ -z "$TAURI_SIGNING_PRIVATE_KEY" ]]; then
+            echo "::warning::TAURI_SIGNING_PRIVATE_KEY is not set; updater artifacts are skipped and this build cannot auto-update"
+          fi
+          VERSION="$version" CLIENT_DIR="$client_dir" EXE="$exe" REPOSITORY="$GITHUB_REPOSITORY" node -e '
             const fs = require("node:fs");
             const path = require("node:path");
             const conf = { bundle: { macOS: { signingIdentity: "-" } } };
             if (process.env.VERSION) conf.version = process.env.VERSION;
+            conf.bundle.createUpdaterArtifacts = Boolean(process.env.TAURI_SIGNING_PRIVATE_KEY);
+            conf.plugins = { updater: {
+              endpoints: [`https://github.com/${process.env.REPOSITORY}/releases/latest/download/latest.json`],
+            } };
+            if (process.env.TAURI_UPDATER_PUBKEY) conf.plugins.updater.pubkey = process.env.TAURI_UPDATER_PUBKEY;
             const resources = {};
             const dir = process.env.CLIENT_DIR;
             const exe = process.env.EXE;
@@ -226,9 +249,28 @@ jobs:
         run: |
           bundle_dir="rust/target/${{ matrix.target }}/release/bundle"
           mkdir -p out
+          # Installers plus the updater artifacts next to them: each
+          # installer's minisign `.sig`, and on macOS the `.app.tar.gz` the
+          # updater downloads (renamed per architecture, the bundler names
+          # it after the app only). Nothing is signed without the key.
           find "$bundle_dir" -maxdepth 2 -type f \( \
             -name '*.dmg' -o -name '*-setup.exe' -o -name '*.msi' -o -name '*.deb' -o \
-            -name '*.rpm' -o -name '*.AppImage' \) -exec cp -v {} out/ \;
+            -name '*.rpm' -o -name '*.AppImage' -o -name '*-setup.exe.sig' -o -name '*.msi.sig' -o \
+            -name '*.deb.sig' -o -name '*.rpm.sig' -o -name '*.AppImage.sig' \) -exec cp -v {} out/ \;
+          case "${{ matrix.target }}" in
+            aarch64-apple-darwin) mac_arch=aarch64 ;;
+            x86_64-apple-darwin) mac_arch=x86_64 ;;
+            *) mac_arch="" ;;
+          esac
+          if [[ -n "$mac_arch" ]]; then
+            for archive in "$bundle_dir"/macos/*.app.tar.gz; do
+              [[ -f "$archive" ]] || continue
+              cp -v "$archive" "out/Netcatty_${mac_arch}.app.tar.gz"
+              if [[ -f "$archive.sig" ]]; then
+                cp -v "$archive.sig" "out/Netcatty_${mac_arch}.app.tar.gz.sig"
+              fi
+            done
+          fi
           if [[ -z "$(ls -A out)" ]]; then
             echo "::error::No bundles found under $bundle_dir"
             find "$bundle_dir" -maxdepth 3 || true
@@ -270,6 +312,64 @@ jobs:
 
       - name: List bundles
         run: ls -la artifacts/
+
+      - name: Write updater manifest
+        shell: bash
+        env:
+          REPOSITORY: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          # latest.json for tauri-plugin-updater (the endpoint configured in
+          # tauri.conf.json): one entry per platform key the updater looks
+          # up — {os}-{arch}[-{bundle}] — with the installer's download URL
+          # and the contents of its .sig file. Platforms whose artifact was
+          # not signed are left out; with no signed artifact at all no
+          # manifest is written and installed apps offer manual download.
+          node -e '
+            const fs = require("node:fs");
+            const path = require("node:path");
+            const dir = "artifacts";
+            const files = fs.readdirSync(dir);
+            const repo = process.env.REPOSITORY;
+            const tag = process.env.TAG;
+            const version = tag.replace(/^v/, "");
+            const targets = [
+              ["darwin-aarch64", /^Netcatty_aarch64\.app\.tar\.gz$/],
+              ["darwin-x86_64", /^Netcatty_x86_64\.app\.tar\.gz$/],
+              ["windows-x86_64", /_x64-setup\.exe$/],
+              ["windows-x86_64-nsis", /_x64-setup\.exe$/],
+              ["windows-x86_64-msi", /_x64.*\.msi$/],
+              ["linux-x86_64", /_amd64\.AppImage$/],
+              ["linux-x86_64-appimage", /_amd64\.AppImage$/],
+              ["linux-x86_64-deb", /_amd64\.deb$/],
+              ["linux-x86_64-rpm", /\.x86_64\.rpm$/],
+              ["linux-aarch64-deb", /_arm64\.deb$/],
+              ["linux-aarch64-rpm", /\.aarch64\.rpm$/],
+            ];
+            const platforms = {};
+            for (const [key, pattern] of targets) {
+              const file = files.find((name) => pattern.test(name));
+              if (!file) { console.log(`${key}: no artifact`); continue; }
+              const sig = path.join(dir, `${file}.sig`);
+              if (!fs.existsSync(sig)) { console.log(`${key}: ${file} is not signed, skipped`); continue; }
+              platforms[key] = {
+                url: `https://github.com/${repo}/releases/download/${tag}/${file}`,
+                signature: fs.readFileSync(sig, "utf8").trim(),
+              };
+            }
+            if (Object.keys(platforms).length === 0) {
+              console.log("::warning::no signed updater artifacts; latest.json not written");
+              process.exit(0);
+            }
+            const manifest = {
+              version,
+              notes: `Netcatty ${tag}: https://github.com/${repo}/releases/tag/${tag}`,
+              pub_date: new Date().toISOString(),
+              platforms,
+            };
+            fs.writeFileSync(path.join(dir, "latest.json"), JSON.stringify(manifest, null, 2) + "\n");
+            console.log(JSON.stringify(manifest, null, 2));
+          '
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
