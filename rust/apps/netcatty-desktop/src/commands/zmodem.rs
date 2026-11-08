@@ -360,7 +360,11 @@ pub fn filter_output<R: Runtime>(app: &AppHandle<R>, session_id: &str, raw: &mut
     }
     let (result, deadline) = {
         let mut sentry = entry.sentry.lock();
-        let result = sentry.consume(raw, Instant::now());
+        let now = Instant::now();
+        if sentry.passes_through(raw, now) {
+            return;
+        }
+        let result = sentry.consume(raw, now);
         let writes = sentry.take_outgoing();
         entry.flush_writes(writes);
         (result, sentry.next_deadline())
@@ -379,8 +383,12 @@ pub fn filter_output<R: Runtime>(app: &AppHandle<R>, session_id: &str, raw: &mut
     if let Some(role) = detected {
         start_transfer(app, &state, &entry, role);
     }
-    let sender = entry.transfer.lock().as_ref().map(|t| t.events.clone());
-    if let Some(tx) = sender {
+    let transfer = entry
+        .transfer
+        .lock()
+        .as_ref()
+        .map(|t| (t.id, t.events.clone()));
+    if let Some((id, tx)) = transfer {
         for e in rx_events {
             let _ = tx.send(TransferEvent::Rx(e));
         }
@@ -392,6 +400,9 @@ pub fn filter_output<R: Runtime>(app: &AppHandle<R>, session_id: &str, raw: &mut
         }
         if let Some(message) = &error {
             let _ = tx.send(TransferEvent::Failed(message.clone()));
+            // Report at once (Electron's sentry does), even while the task
+            // still waits for a dialog; this also stops the task.
+            finish_transfer(app, &entry, id, Some(Err(message.clone())));
         }
     } else if let Some(message) = &error {
         tracing::debug!(session_id, %message, "zmodem detection rejected");
@@ -1740,8 +1751,8 @@ async fn begin_ymodem<R: Runtime>(
     state: &AppState<R>,
     session_id: &str,
     what: &str,
-) -> Result<(Arc<SessionZ>, SessionYmodemIo<R>), YmodemResult> {
-    let not_serial = || YmodemResult::fail(format!("YMODEM {what} requires an active serial session"));
+) -> Result<(Arc<SessionZ>, SessionYmodemIo<R>), String> {
+    let not_serial = || format!("YMODEM {what} requires an active serial session");
     let Some(session) = state.sessions.get(session_id) else {
         return Err(not_serial());
     };
@@ -1753,12 +1764,10 @@ async fn begin_ymodem<R: Runtime>(
     };
     let entry = zstate.get_or_create(&state.app, session_id);
     if entry.ymodem.lock().is_some() {
-        return Err(YmodemResult::fail("A YMODEM transfer is already in progress"));
+        return Err("A YMODEM transfer is already in progress".into());
     }
     if entry.sentry.lock().is_active() {
-        return Err(YmodemResult::fail(
-            "Another serial file transfer is already in progress",
-        ));
+        return Err("Another serial file transfer is already in progress".into());
     }
     let (tx, rx) = mpsc::unbounded_channel();
     let cancel = CancellationToken::new();
@@ -1793,7 +1802,7 @@ pub async fn serial_ymodem_send<R: Runtime>(
     };
     let (entry, mut io) = match begin_ymodem(&state, &payload.session_id, "send").await {
         Ok(v) => v,
-        Err(result) => return Ok(result),
+        Err(message) => return Ok(YmodemResult::fail(message)),
     };
     let result = ymodem::send_file(
         &mut io,
@@ -1830,7 +1839,7 @@ pub async fn serial_ymodem_receive<R: Runtime>(
     };
     let (entry, mut io) = match begin_ymodem(&state, &payload.session_id, "receive").await {
         Ok(v) => v,
-        Err(result) => return Ok(result),
+        Err(message) => return Ok(YmodemResult::fail(message)),
     };
     let dir = std::path::absolute(&dir).unwrap_or_else(|_| PathBuf::from(&dir));
     let result = ymodem::receive_files(

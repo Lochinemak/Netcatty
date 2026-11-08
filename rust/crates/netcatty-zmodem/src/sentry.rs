@@ -179,6 +179,16 @@ impl Sentry {
             && self.expect_oo_until.is_none_or(|t| now >= t)
     }
 
+    /// `true` when [`Sentry::consume`] would return `data` unchanged and
+    /// change no state, so a caller may skip it (no transfer, nothing
+    /// pending, and the chunk cannot start or continue a header).
+    pub fn passes_through(&self, data: &[u8], now: Instant) -> bool {
+        self.is_idle(now)
+            && !self.suppress_next_xon
+            && !data.contains(&ZDLE)
+            && data.last() != Some(&b'*')
+    }
+
     fn push_out(&mut self, bytes: Vec<u8>, now: Instant) {
         if bytes.is_empty() {
             return;
@@ -384,7 +394,7 @@ impl Sentry {
             match outcome {
                 Ok((garbage, ended, trailing)) => {
                     if !garbage.is_empty() {
-                        result.terminal.extend(self.to_terminal(&garbage, now));
+                        result.terminal.extend(self.sanitize_for_terminal(&garbage, now));
                     }
                     if !ended {
                         return result;
@@ -455,7 +465,7 @@ impl Sentry {
             }
         }
 
-        result.terminal.extend(self.to_terminal(&input, now));
+        result.terminal.extend(self.sanitize_for_terminal(&input, now));
         result
     }
 
@@ -514,7 +524,7 @@ impl Sentry {
 
     // -- terminal sanitising --------------------------------------------------
 
-    fn to_terminal(&mut self, octets: &[u8], now: Instant) -> Vec<u8> {
+    fn sanitize_for_terminal(&mut self, octets: &[u8], now: Instant) -> Vec<u8> {
         let mut buf = self.assemble(octets);
         if self.suppress_next_xon {
             self.suppress_next_xon = false;
@@ -721,10 +731,15 @@ mod tests {
     fn plain_output_passes_through() {
         let mut s = Sentry::default();
         let now = Instant::now();
+        assert!(s.passes_through(b"hello world\r\n", now));
         let r = s.consume(b"hello world\r\n", now);
         assert_eq!(r.terminal, b"hello world\r\n");
         assert!(r.detected.is_none());
         assert!(s.is_idle(now));
+        assert!(!s.passes_through(b"a*", now));
+        assert!(!s.passes_through(b"\x18", now));
+        s.arm_command_echo(b"rz\r", now);
+        assert!(!s.passes_through(b"x", now));
     }
 
     #[test]

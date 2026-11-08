@@ -20,7 +20,7 @@ pub const MAX_CHUNK_LENGTH: usize = 8192;
 /// What Netcatty's ZRINIT advertises: full duplex, overlapped I/O, CRC32.
 pub const ZRINIT_FLAGS: u8 = zrinit_flags::CANFDX | zrinit_flags::CANOVIO | zrinit_flags::CANFC32;
 /// The "over and out" bytes that end a session.
-pub const OVER_AND_OUT: [u8; 2] = [b'O', b'O'];
+pub const OVER_AND_OUT: [u8; 2] = *b"OO";
 
 /// Byte buffer with a moving start so repeated front removal is cheap.
 #[derive(Debug, Default)]
