@@ -1,0 +1,39 @@
+[package]
+name = "netcatty-agents"
+description = "Managed SDK agents (Claude Code, Codex, Grok, OpenCode, MiMo, Copilot, Cursor, CodeBuddy): CLI drivers, discovery, auth probes, shell env"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+netcatty-core = { workspace = true }
+tokio = { workspace = true }
+tokio-util = { workspace = true }
+futures = { workspace = true }
+async-trait = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+regex = { workspace = true }
+sha2 = { workspace = true }
+hex = { workspace = true }
+parking_lot = { workspace = true }
+dashmap = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+base64 = { workspace = true }
+dirs = { workspace = true }
+url = { workspace = true }
+bytes = { workspace = true }
+rand = { workspace = true }
+reqwest = { workspace = true, features = ["stream"] }
+percent-encoding = "2.3"
+encoding_rs = "0.8"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[dev-dependencies]
+tempfile = "3"

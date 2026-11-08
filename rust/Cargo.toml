@@ -16,6 +16,7 @@ members = [
   "crates/netcatty-telnet",
   "crates/netcatty-serial",
   "crates/netcatty-mosh",
+  "crates/netcatty-agents",
   "apps/netcatty-desktop",
 ]
 
@@ -40,6 +41,7 @@ netcatty-rdesktop = { path = "crates/netcatty-rdesktop" }
 netcatty-telnet = { path = "crates/netcatty-telnet" }
 netcatty-serial = { path = "crates/netcatty-serial" }
 netcatty-mosh = { path = "crates/netcatty-mosh" }
+netcatty-agents = { path = "crates/netcatty-agents" }
 netcatty-sysmgr = { path = "crates/netcatty-sysmgr" }
 netcatty-sessionlog = { path = "crates/netcatty-sessionlog" }
 
