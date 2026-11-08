@@ -645,6 +645,8 @@ commands do not appear in logs. A new session kind needs the three hooks:
 Dialogs, clipboard and opening URLs use the Tauri plugins directly from the
 adapter (`window.__TAURI__.dialog`, `.clipboardManager`, `.opener`).
 
+AI control plane (Catty exec, capabilities, MCP host, approvals, tool-output store, External MCP): see [`ipc-mcp.md`](ipc-mcp.md).
+
 ## Mapping `NetcattyBridge` → commands (adapter cheat-sheet)
 
 | Bridge method | Command / plugin |

@@ -26,6 +26,8 @@ import {
 } from '../../domain/remoteDesktop';
 import { pluginClipboard, pluginDialog, pluginOpener } from './plugins';
 import { cancelStagedUpload, stageUploadFile } from './uploadStaging';
+import { createMcpBridge } from './bridge/mcp';
+import { McpMarkerFilter } from './bridge/mcpMarkerFilter';
 
 // ---------------------------------------------------------------------------
 // Contract constants (see `netcatty_core::ipc::events`)
@@ -133,7 +135,7 @@ interface StartSessionResult { sessionId: string }
 interface OpenSftpResult { sftpId: string; homeDir?: string; reusedConnection?: boolean }
 interface SuccessResult { success: boolean; error?: string }
 
-interface SessionDataEvent { sessionId: string; data: string; meta?: SessionDataMeta }
+interface SessionDataEvent { sessionId: string; data: string; meta?: SessionDataMeta; syntheticEcho?: boolean }
 type SessionDataMeta = Parameters<SessionDataCallback>[1];
 interface SessionExitEvent {
   sessionId: string;
@@ -422,6 +424,10 @@ class SessionEventRouter {
   private readonly displayListeners = new Map<string, Set<SessionDataCallback>>();
   private readonly exitListeners = new Map<string, Set<SessionExitCallback>>();
   private readonly backlog: SessionDataBacklog;
+  /** Hides AI exec marker lines (`__NCMCP_…`) from terminal display. */
+  private readonly mcpFilter = new McpMarkerFilter<SessionDataMeta>({
+    deliver: (sessionId, data, meta) => this.dispatchData(sessionId, data, meta),
+  });
 
   constructor(hub: EventHub, backlog: SessionDataBacklog) {
     this.backlog = backlog;
@@ -455,14 +461,18 @@ class SessionEventRouter {
 
   private handleData(event: SessionDataEvent | undefined): void {
     if (!event || typeof event.sessionId !== 'string' || !event.data) return;
-    if ((this.displayListeners.get(event.sessionId)?.size ?? 0) === 0) {
-      this.backlog.append(event.sessionId, event.data);
+    this.mcpFilter.push(event.sessionId, event.data, event.meta, event.syntheticEcho === true);
+  }
+
+  private dispatchData(sessionId: string, data: string, meta: SessionDataMeta | undefined): void {
+    if ((this.displayListeners.get(sessionId)?.size ?? 0) === 0) {
+      this.backlog.append(sessionId, data);
     }
-    const listeners = this.dataListeners.get(event.sessionId);
+    const listeners = this.dataListeners.get(sessionId);
     if (!listeners || listeners.size === 0) return;
     for (const cb of Array.from(listeners)) {
       try {
-        cb(event.data, event.meta);
+        cb(data, meta);
       } catch (error) {
         warn('session data callback failed', error);
       }
@@ -490,6 +500,7 @@ class SessionEventRouter {
       }
     }
     this.backlog.clear(event.sessionId);
+    this.mcpFilter.clear(event.sessionId);
   }
 }
 
@@ -1449,6 +1460,7 @@ export function createTauriBridge(options: CreateTauriBridgeOptions = {}): Netca
       platform: detectPlatform(),
     }),
     getTempDirPath: () => invoke<string>('app_get_temp_dir_path'),
+    ...createMcpBridge({ hub }),
   };
 
   return bridge as NetcattyBridge;
