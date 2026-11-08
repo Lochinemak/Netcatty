@@ -567,7 +567,10 @@ pub fn on_run_event<R: Runtime>(app: &AppHandle<R>, event: &RunEvent) {
         // The renderer shows the warning in its own window: bring every
         // dirty owner forward (it may be hidden to the tray).
         for (label, _) in &dirty {
-            if let Some(window) = app.get_webview_window(label) {
+            if label == MAIN_LABEL {
+                // Also cancels a pending hide-to-tray.
+                super::tray::bring_main_to_foreground(&app);
+            } else if let Some(window) = app.get_webview_window(label) {
                 show_and_focus(&window);
             }
         }

@@ -652,6 +652,7 @@ AI core (provider proxy, chat streaming, privacy, user skills, sessions backup):
 Host browser (in-app browser panel / window, `hostbrowser_*` commands): see [ipc-hostbrowser.md](ipc-hostbrowser.md).
 Managed SDK agents, agent discovery and Codex login: see [ipc-agents.md](ipc-agents.md).
 AI control plane (Catty exec, capabilities, MCP host, approvals, tool-output store, External MCP): see [`ipc-mcp.md`](ipc-mcp.md).
+Multi-window (detached editor, terminal popups, session windows, attach hand-over, per-window output routing, quit guard, opacity / blur, macOS menu): see [ipc-windows.md](ipc-windows.md).
 
 ## Mapping `NetcattyBridge` → commands (adapter cheat-sheet)
 
