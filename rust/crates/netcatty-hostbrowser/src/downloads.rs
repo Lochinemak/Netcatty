@@ -126,7 +126,7 @@ pub struct DownloadStoreOptions {
 impl Default for DownloadStoreOptions {
     fn default() -> Self {
         Self {
-            writer: Arc::new(|file, bytes| atomic_write(file, bytes)),
+            writer: Arc::new(atomic_write),
             spawn_timer: Arc::new(|store: DownloadStore| {
                 std::thread::Builder::new()
                     .name("hostbrowser-download-progress".into())
@@ -233,7 +233,7 @@ impl DownloadStore {
     pub fn list(&self, host_id: &str) -> Vec<DownloadListed> {
         let inner = self.shared.inner.lock();
         let mut items: Vec<&Download> = inner.items.iter().filter(|i| i.host_id == host_id).collect();
-        items.sort_by(|a, b| b.started_at.cmp(&a.started_at));
+        items.sort_by_key(|item| std::cmp::Reverse(item.started_at));
         items
             .into_iter()
             .map(|item| DownloadListed {
@@ -280,7 +280,7 @@ impl DownloadStore {
             Some(i) => inner.items[i] = next.clone(),
             None => inner.items.insert(0, next.clone()),
         }
-        inner.items.sort_by(|a, b| b.started_at.cmp(&a.started_at));
+        inner.items.sort_by_key(|item| std::cmp::Reverse(item.started_at));
         inner.items.truncate(MAX_DOWNLOADS);
         inner.dirty = true;
         if replaceable_progress {

@@ -686,6 +686,23 @@ fn position_downloads_window<R: Runtime>(app: &AppHandle<R>, record: &Record) {
     ));
 }
 
+/// `WebviewWindowBuilder::parent` with the real runtime only: under
+/// `tauri::test::MockRuntime` native window handles are fake pointers that
+/// `parent` would dereference on macOS.
+trait ParentExt<R: Runtime>: Sized {
+    fn pipe_parent(self, owner: &WebviewWindow<R>) -> tauri::Result<Self>;
+}
+
+impl<'a, R: Runtime, M: Manager<R>> ParentExt<R> for WebviewWindowBuilder<'a, R, M> {
+    fn pipe_parent(self, owner: &WebviewWindow<R>) -> tauri::Result<Self> {
+        if std::any::TypeId::of::<R>() == std::any::TypeId::of::<tauri::Wry>() {
+            self.parent(owner)
+        } else {
+            Ok(self)
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Page windows
 // ---------------------------------------------------------------------------
@@ -729,7 +746,7 @@ fn create_page<R: Runtime>(
         .incognito(true)
         .devtools(false)
         .initialization_script(SHORTCUT_SCRIPT)
-        .parent(&owner)
+        .pipe_parent(&owner)
         .map_err(|e| e.to_string())?
         .on_navigation(move |url| {
             if url.scheme() == SHORTCUT_SCHEME {
@@ -1207,9 +1224,9 @@ fn set_downloads_panel<R: Runtime>(app: &AppHandle<R>, record: &mut Record, open
                 .visible(false)
                 .focused(false)
                 .accept_first_mouse(true)
-                .parent(&owner)
+                .pipe_parent(&owner)
                 .map_err(internal)?
-                .on_navigation(|url| is_asset_url(url))
+                .on_navigation(is_asset_url)
                 .build()
                 .map_err(internal)?;
             record.downloads_label = Some(label);
@@ -1421,22 +1438,16 @@ async fn dial_route<R: Runtime>(app: &AppHandle<R>, options: Option<Value>) -> R
 }
 
 fn flush_panel_urls<R: Runtime>(app: &AppHandle<R>, inner: &mut Inner, browser_id: &str) {
-    let Some(urls) = inner
-        .layouts
-        .get_mut(browser_id)
-        .map(|layout| std::mem::take(&mut layout.pending_urls))
-    else {
-        return;
-    };
-    let Some(record) = inner.records.get_mut(browser_id) else {
+    let Inner {
+        records, layouts, ..
+    } = inner;
+    let (Some(record), Some(layout)) = (records.get_mut(browser_id), layouts.get_mut(browser_id)) else {
         return;
     };
     if record.route != Route::Connected {
-        if let Some(layout) = inner.layouts.get_mut(browser_id) {
-            layout.pending_urls = urls;
-        }
         return;
     }
+    let urls = std::mem::take(&mut layout.pending_urls);
     for url in urls {
         let active = record.tab(None);
         match active {
@@ -1779,7 +1790,7 @@ pub async fn hostbrowser_open<R: Runtime>(
                 } else {
                     tauri::window::Color(0x0f, 0x12, 0x1a, 255)
                 })
-                .on_navigation(|url| is_asset_url(url));
+                .on_navigation(is_asset_url);
             #[cfg(target_os = "macos")]
             let builder = builder
                 .title_bar_style(tauri::TitleBarStyle::Overlay)
@@ -2355,7 +2366,7 @@ pub async fn hostbrowser_bookmarks_remove<R: Runtime>(
     let store = &stores(&app).bookmarks;
     match store.find(&id) {
         Some(previous) if previous.scope != "host" || previous.host_id.as_deref() == Some(host_id.as_str()) => {
-            store.remove(&id).map_err(|e| internal(e))
+            store.remove(&id).map_err(internal)
         }
         _ => Ok(false),
     }
