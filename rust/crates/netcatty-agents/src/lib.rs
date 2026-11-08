@@ -29,7 +29,7 @@ pub mod catalog;
 pub mod cli;
 pub mod codex_helpers;
 pub mod context;
-// WIP pub mod discovery;
+pub mod discovery;
 pub mod drivers;
 pub mod emit;
 pub mod env;
