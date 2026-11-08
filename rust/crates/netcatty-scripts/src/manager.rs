@@ -559,11 +559,15 @@ impl<H: ManagerHost> ScriptManager<H> {
             self.sync_output_buffer_from_snapshot(session_id, run_id).await;
             runtime.execute(content).await
         };
+        // Biased: a stop settles the run with its reason even when the
+        // operation fails at the same moment (Electron's `Promise.race` sees
+        // the abort first because `handleScriptStop` rejects synchronously).
         let outcome: Result<(), ScriptError> = tokio::select! {
-            result = operation => result,
+            biased;
             _ = cancel.cancelled() => Err(ScriptError::new(
                 self.run_error(run_id).unwrap_or_else(|| "Script stopped".into()),
             )),
+            result = operation => result,
         };
         // The runtime may still be tearing down its worker after a stop.
         runtime.stop("Script stopped");
@@ -649,16 +653,18 @@ impl<H: ManagerHost> ScriptManager<H> {
                 .map(|c| (c.runtime.clone(), c.cancel.clone()));
             (session_id, control)
         };
+        // Cancel first: settling the pending requests below wakes the run,
+        // which must already see the stop.
+        if let Some((runtime, cancel)) = control {
+            cancel.cancel();
+            if let Some(runtime) = runtime {
+                runtime.stop("Stopped by user");
+            }
+        }
         if let Some(buffer) = self.inner.buffers.get(&session_id) {
             buffer.abort_waiters("Stopped by user");
         }
         self.settle_pending_run_requests(run_id, false, "Stopped by user");
-        if let Some((runtime, cancel)) = control {
-            if let Some(runtime) = runtime {
-                runtime.stop("Stopped by user");
-            }
-            cancel.cancel();
-        }
         self.broadcast_runs();
         OkResult { ok: true }
     }

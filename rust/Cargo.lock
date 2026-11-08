@@ -3992,6 +3992,7 @@ dependencies = [
  "netcatty-mosh",
  "netcatty-pty",
  "netcatty-rdesktop",
+ "netcatty-scripts",
  "netcatty-serial",
  "netcatty-sessionlog",
  "netcatty-sftp",
