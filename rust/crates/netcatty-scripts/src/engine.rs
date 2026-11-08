@@ -245,7 +245,11 @@ const PRELUDE: &str = r#"
     return error;
   }
 
+  // Keep `undefined` arguments distinguishable from `null` (Electron's
+  // structured clone preserves them; defaults such as `timeoutMs = 30000`
+  // depend on it). The host strips the marker again.
   function replacer(_key, value) {
+    if (value === undefined) return { __nctUndefined: true };
     if (value instanceof RegExp) {
       return { __nctRegExp: true, source: value.source, flags: value.flags };
     }
@@ -818,6 +822,23 @@ mod tests {
         assert_eq!(result, Ok(()));
         assert_eq!(notifications[0].1[0], "READY:undefined");
         assert_eq!(notifications[1].1[0], "TypeError:nope");
+    }
+
+    #[tokio::test]
+    async fn undefined_arguments_are_marked() {
+        let (result, _) = run_script("await nct.screen.waitFor('x'); await nct.screen.getText(undefined, 2);", 1000, |method, args| {
+            match method {
+                "screen.waitFor" => assert_eq!(args[1], serde_json::json!({ "__nctUndefined": true })),
+                "screen.getText" => {
+                    assert_eq!(args[0], serde_json::json!({ "__nctUndefined": true }));
+                    assert_eq!(args[1], 2);
+                }
+                _ => {}
+            }
+            Ok(None)
+        })
+        .await;
+        assert_eq!(result, Ok(()));
     }
 
     #[tokio::test]

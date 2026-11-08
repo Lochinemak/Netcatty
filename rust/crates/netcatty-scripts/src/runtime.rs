@@ -1161,9 +1161,13 @@ impl ScriptRuntime {
             return Err(plain_error(reason));
         }
 
-        let mut tasks = tokio::task::JoinSet::new();
-        let mut pending_requests = 0usize;
-        let (done_tx, mut done_rx) = tokio::sync::mpsc::unbounded_channel::<()>();
+        // In-flight host requests, polled by this loop (biased first) so
+        // each request's synchronous prefix — e.g. emitting a dialog request —
+        // runs before a later `completed` message is handled, like the
+        // microtask ordering of Electron's worker message handler.
+        let mut rpc_futures: futures::stream::FuturesUnordered<
+            std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>>,
+        > = futures::stream::FuturesUnordered::new();
         let max_pending = self.inner.options.limits.max_pending_host_requests;
 
         // Progress coalescing (`handleProgressNotification`).
@@ -1184,18 +1188,18 @@ impl ScriptRuntime {
                 }
             };
             tokio::select! {
+                biased;
+                Some(()) = futures::StreamExt::next(&mut rpc_futures), if !rpc_futures.is_empty() => {}
                 event = events.recv() => match event {
                     Some(EngineEvent::Rpc { request_id, method, args }) => {
-                        if pending_requests >= max_pending {
+                        if rpc_futures.len() >= max_pending {
                             break Err(plain_error(format!(
                                 "Script exceeded the {max_pending} pending host request limit"
                             )));
                         }
-                        pending_requests += 1;
                         let runtime = self.clone();
                         let engine = engine.clone();
-                        let done = done_tx.clone();
-                        tasks.spawn(async move {
+                        rpc_futures.push(Box::pin(async move {
                             let result = runtime.invoke_rpc(&method, Args::new(args)).await;
                             if !runtime.inner.closed.load(Ordering::SeqCst) {
                                 engine.send(EngineInbound::RpcResult {
@@ -1204,8 +1208,7 @@ impl ScriptRuntime {
                                     snapshot: runtime.snapshot(),
                                 });
                             }
-                            let _ = done.send(());
-                        });
+                        }));
                     }
                     Some(EngineEvent::Notify { method, args }) => {
                         let handled: Result<(), ScriptError> = (|| {
@@ -1291,9 +1294,6 @@ impl ScriptRuntime {
                     Some(EngineEvent::Failed(error)) => break Err(error),
                     None => break Err(plain_error("Script worker exited before completion")),
                 },
-                Some(()) = done_rx.recv() => {
-                    pending_requests = pending_requests.saturating_sub(1);
-                }
                 _ = flush_sleep => {
                     progress_flush_at = None;
                     if let Some((m, a)) = pending_progress.take() {
@@ -1330,14 +1330,20 @@ impl ScriptRuntime {
         // in-flight host requests observe the closed token.
         self.inner.closed.store(true, Ordering::SeqCst);
         engine.stop();
-        tasks.shutdown().await;
+        // Dropping the futures cancels requests still in flight.
+        drop(rpc_futures);
         *self.inner.engine.lock() = None;
         if let Ok(engine) = Arc::try_unwrap(engine) {
             let _ = tokio::task::spawn_blocking(move || engine.join()).await;
         }
         drop(events);
         outcome?;
-        self.assert_not_aborted()
+        // Outside the execution context only the run's abort flag counts
+        // (the closed execution token is expected here).
+        if self.inner.host.is_aborted() {
+            return Err(stopped());
+        }
+        Ok(())
     }
 
     pub fn step_index(&self) -> u64 {
