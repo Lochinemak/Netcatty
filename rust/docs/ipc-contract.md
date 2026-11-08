@@ -646,6 +646,7 @@ Dialogs, clipboard and opening URLs use the Tauri plugins directly from the
 adapter (`window.__TAURI__.dialog`, `.clipboardManager`, `.opener`).
 
 Auto-update (`update_*`, `app_report_dirty_editors`, `netcatty:update:*` and `app:query-dirty-editors`): see [ipc-update.md](./ipc-update.md).
+AI core (provider proxy, chat streaming, privacy, user skills, sessions backup): see [ipc-ai.md](ipc-ai.md).
 
 ## Mapping `NetcattyBridge` → commands (adapter cheat-sheet)
 

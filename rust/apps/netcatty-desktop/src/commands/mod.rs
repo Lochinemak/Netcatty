@@ -8,6 +8,7 @@
 //! * Binary responses use `tauri::ipc::Response` so the renderer receives an
 //!   `ArrayBuffer`; binary requests use `tauri::ipc::Request` raw bodies.
 
+pub mod ai;
 pub mod app;
 pub mod autostart;
 pub mod clipboard;
@@ -327,6 +328,27 @@ pub fn handler<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + 
         update::update_get_auto_update,
         update::update_set_auto_update,
         update::app_report_dirty_editors,
+        // AI core: provider proxy, chat streaming, privacy, user skills,
+        // sessions backup (commands/ai.rs, logic in netcatty-ai).
+        ai::ai_sync_providers,
+        ai::ai_sync_web_search,
+        ai::ai_allowlist_add_host,
+        ai::ai_fetch,
+        ai::ai_chat_stream,
+        ai::ai_chat_cancel,
+        ai::ai_set_chat_session_cancelled,
+        ai::ai_privacy_status,
+        ai::ai_privacy_transform,
+        ai::ai_privacy_clear,
+        ai::ai_privacy_initialize,
+        ai::ai_user_skills_status,
+        ai::ai_user_skills_open,
+        ai::ai_user_skills_build_context,
+        ai::ai_skills_cli_invocation,
+        ai::ai_sessions_backup_write,
+        ai::ai_sessions_backup_read_latest,
+        ai::ai_sessions_backup_export,
+        ai::ai_sessions_backup_import,
     ]
 }
 
