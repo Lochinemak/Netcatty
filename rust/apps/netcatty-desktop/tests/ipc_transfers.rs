@@ -350,6 +350,159 @@ fn drag_requests_are_validated_before_any_native_call() {
     assert!(invoke(&h.webview, "local_drag_cancel", json!({ "requestId": "r2" })).is_ok());
 }
 
+/// Telnet sessions (like serial / Mosh / ET) feed the automatic session log
+/// through the shared `session_starting` / `deliver` / `remove_and_release`
+/// hooks.
+#[test]
+fn telnet_session_output_reaches_the_automatic_log() {
+    use std::io::Write;
+    let h = build_app();
+    let exits = collect(&h.app, "netcatty:exit");
+    let logs = tempfile::tempdir().unwrap();
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let server = std::thread::spawn(move || {
+        let (mut s, _) = listener.accept().unwrap();
+        s.write_all(b"hello from telnet log\r\n").unwrap();
+        std::thread::sleep(Duration::from_millis(300));
+        s.shutdown(std::net::Shutdown::Both).ok();
+    });
+    ok(
+        &h.webview,
+        "telnet_start",
+        json!({ "payload": {
+            "sessionId": "tel-log",
+            "hostname": "127.0.0.1",
+            "port": port,
+            "label": "Router",
+            "sessionLog": { "enabled": true, "directory": logs.path().to_string_lossy(), "format": "raw" }
+        }}),
+    );
+    server.join().unwrap();
+    assert!(wait_for(&exits, Duration::from_secs(10), |e| e
+        .iter()
+        .any(|ev| ev["sessionId"] == "tel-log")));
+    let host_dir = logs.path().join("Router");
+    let found = (0..100).any(|_| {
+        let text: String = std::fs::read_dir(&host_dir)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .filter_map(|entry| std::fs::read_to_string(entry.path()).ok())
+            .collect();
+        if text.contains("hello from telnet log") {
+            return true;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+        false
+    });
+    assert!(found, "no telnet output in {}", host_dir.display());
+}
+
+/// Opt-in end-to-end run against a real sshd (skipped unless
+/// `NETCATTY_TRANSFERS_E2E_KEY` names a private key authorized for the
+/// current user on `127.0.0.1:${NETCATTY_TRANSFERS_E2E_PORT:-22}`; the
+/// server's filesystem must be this machine's, e.g. a private sshd):
+/// interactive-shell cwd discovery and a compressed folder upload.
+#[test]
+fn e2e_cwd_probe_and_compressed_upload() {
+    let Ok(key_path) = std::env::var("NETCATTY_TRANSFERS_E2E_KEY") else {
+        return;
+    };
+    let port: u16 = std::env::var("NETCATTY_TRANSFERS_E2E_PORT")
+        .ok()
+        .and_then(|p| p.parse().ok())
+        .unwrap_or(22);
+    let user = std::env::var("USER").expect("USER");
+    let key = std::fs::read_to_string(key_path).expect("key");
+    let h = build_app();
+    let data = collect(&h.app, "netcatty:data");
+    let transfers = collect(&h.app, "netcatty:sftp:global-transfer");
+    let base = json!({
+        "hostname": "127.0.0.1",
+        "port": port,
+        "username": user,
+        "authMethod": "key",
+        "privateKey": key,
+        "verifyHostKeys": false,
+    });
+    let mut ssh = base.clone();
+    ssh["sessionId"] = json!("e2e-ssh");
+    ok(&h.webview, "session_start_ssh", json!({ "payload": ssh }));
+    let work = tempfile::tempdir().unwrap();
+    let work_path = std::fs::canonicalize(work.path()).unwrap();
+    ok(
+        &h.webview,
+        "session_write",
+        json!({ "payload": {
+            "sessionId": "e2e-ssh",
+            "data": format!("cd '{}' && echo CWD-$((40+2))\n", work_path.display()),
+        }}),
+    );
+    assert!(wait_for(&data, Duration::from_secs(10), |e| e
+        .iter()
+        .filter_map(|ev| ev["data"].as_str())
+        .collect::<String>()
+        .contains("CWD-42")));
+    let pwd = ok(&h.webview, "session_pwd", json!({ "sessionId": "e2e-ssh" }));
+    assert_eq!(pwd["success"], true, "{pwd}");
+    assert_eq!(pwd["cwd"].as_str().map(std::path::PathBuf::from), Some(work_path.clone()));
+
+    // Compressed upload of a local folder into `<work>/remote`.
+    let mut sftp = base.clone();
+    sftp["sessionId"] = json!("e2e-sftp");
+    let sftp_id = ok(&h.webview, "sftp_open", json!({ "payload": sftp }))["sftpId"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let support = ok(&h.webview, "compress_check_support", json!({ "sftpId": sftp_id }));
+    assert_eq!(support["supported"], true, "{support}");
+    let folder = work_path.join("local").join("my folder");
+    std::fs::create_dir_all(folder.join("sub")).unwrap();
+    std::fs::write(folder.join("a.txt"), "alpha").unwrap();
+    std::fs::write(folder.join("sub/b.txt"), "beta").unwrap();
+    let remote = work_path.join("remote");
+    std::fs::create_dir_all(remote.join("my folder")).unwrap();
+    std::fs::write(remote.join("my folder/old.txt"), "old").unwrap();
+    let result = ok(
+        &h.webview,
+        "compress_start",
+        json!({ "payload": {
+            "compressionId": "e2e-c1",
+            "folderPath": folder.to_string_lossy(),
+            "targetPath": remote.to_string_lossy(),
+            "sftpId": sftp_id,
+            "folderName": "my folder",
+            "totalBytes": 9
+        }}),
+    );
+    assert_eq!(result["success"], true, "{result}");
+    let out = remote.join("my folder");
+    assert_eq!(std::fs::read_to_string(out.join("a.txt")).unwrap(), "alpha");
+    assert_eq!(std::fs::read_to_string(out.join("sub/b.txt")).unwrap(), "beta");
+    assert_eq!(std::fs::read_to_string(out.join("old.txt")).unwrap(), "old", "merge semantics");
+    let leftovers: Vec<String> = std::fs::read_dir(&remote)
+        .unwrap()
+        .flatten()
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .filter(|n| n.contains("netcatty"))
+        .collect();
+    assert!(leftovers.is_empty(), "{leftovers:?}");
+    let seen = transfers.lock().unwrap();
+    let mine: Vec<&Value> = seen.iter().filter(|e| e["transferId"] == "e2e-c1").collect();
+    assert_eq!(mine.first().unwrap()["type"], "started");
+    assert_eq!(mine.last().unwrap()["type"], "completed");
+    assert!(mine.iter().any(|e| e["phase"] == "uploading"));
+    assert!(mine.iter().any(|e| e["phase"] == "extracting"));
+    assert!(
+        !seen.iter().any(|e| e["transferId"] == "compress-e2e-c1"),
+        "the internal archive transfer stays silent"
+    );
+    drop(seen);
+    ok(&h.webview, "sftp_close", json!({ "sftpId": sftp_id }));
+    ok(&h.webview, "session_close", json!({ "sessionId": "e2e-ssh" }));
+}
+
 #[test]
 fn session_pwd_accepts_renderer_options() {
     let h = build_app();
