@@ -958,11 +958,8 @@ fn install_failed<R: Runtime>(app: &AppHandle<R>, message: String) {
 /// `getDirtyEditorWindows`): the main window only; the settings and tray
 /// panel windows do not take part in the protocol.
 fn dirty_editor_windows<R: Runtime>(app: &AppHandle<R>) -> Vec<String> {
-    app.webview_windows()
-        .keys()
-        .filter(|label| label.as_str() == super::window::MAIN_LABEL)
-        .cloned()
-        .collect()
+    // Main, session and editor windows (`windows.rs`).
+    super::windows::dirty_editor_windows(app)
 }
 
 async fn install_update<R: Runtime>(app: &AppHandle<R>) {

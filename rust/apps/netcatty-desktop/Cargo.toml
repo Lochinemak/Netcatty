@@ -81,6 +81,10 @@ uuid = { workspace = true }
 # Host browser favicon fetches through the SOCKS route.
 reqwest = { workspace = true, features = ["socks"] }
 
+# Window opacity / vibrancy on the NSWindow (commands/windows).
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+
 [dev-dependencies]
 tauri = { version = "2.12", features = ["test", "tray-icon", "image-png"] }
 tempfile = "3"

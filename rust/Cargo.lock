@@ -4122,6 +4122,7 @@ dependencies = [
  "netcatty-sync",
  "netcatty-sysmgr",
  "netcatty-telnet",
+ "objc2",
  "parking_lot 0.13.0",
  "percent-encoding",
  "png",

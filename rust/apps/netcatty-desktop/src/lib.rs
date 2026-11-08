@@ -65,6 +65,7 @@ pub fn configure_with<R: tauri::Runtime>(
             app.manage(state);
             commands::scripts::setup(app);
             app.manage(commands::window::WindowState::default());
+            commands::windows::setup(app);
             let crash_log = commands::diagnostics::crash_log_for(
                 &netcatty_store::AppPaths::resolve(),
                 &app.package_info().version.to_string(),
@@ -110,7 +111,11 @@ pub fn run() {
     configure(tauri::Builder::default())
         .build(context)
         .expect("error while building Netcatty")
-        .run(commands::tray::on_run_event);
+        .run(|app, event| {
+            // Unsaved-editor quit guard first; it may hold the exit.
+            commands::windows::on_run_event(app, &event);
+            commands::tray::on_run_event(app, event);
+        });
 }
 
 fn init_tracing() {
