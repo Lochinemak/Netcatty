@@ -7,5 +7,8 @@ fn main() {
     if let Some(code) = netcatty_desktop_lib::askpass::run_if_requested() {
         std::process::exit(code);
     }
+    if let Some(code) = netcatty_desktop_lib::mcp_helper::run_if_requested() {
+        std::process::exit(code);
+    }
     netcatty_desktop_lib::run()
 }

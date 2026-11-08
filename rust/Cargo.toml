@@ -20,6 +20,9 @@ members = [
   "crates/netcatty-ai",
   "crates/netcatty-hostbrowser",
   "crates/netcatty-agents",
+  "crates/netcatty-ptyexec",
+  "crates/netcatty-capabilities",
+  "crates/netcatty-mcp",
   "apps/netcatty-desktop",
 ]
 
@@ -50,6 +53,9 @@ netcatty-sessionlog = { path = "crates/netcatty-sessionlog" }
 netcatty-ai = { path = "crates/netcatty-ai" }
 netcatty-scripts = { path = "crates/netcatty-scripts" }
 netcatty-hostbrowser = { path = "crates/netcatty-hostbrowser" }
+netcatty-ptyexec = { path = "crates/netcatty-ptyexec" }
+netcatty-capabilities = { path = "crates/netcatty-capabilities" }
+netcatty-mcp = { path = "crates/netcatty-mcp" }
 
 # async runtime
 tokio = { version = "1.54", features = ["full"] }

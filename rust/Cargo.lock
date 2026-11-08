@@ -1899,6 +1899,17 @@ dependencies = [
 
 [[package]]
 name = "fancy-regex"
+version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6e24cb5a94bcae1e5408b0effca5cd7172ea3c5755049c5f3af4cd283a165298"
+dependencies = [
+ "bit-set",
+ "regex-automata",
+ "regex-syntax",
+]
+
+[[package]]
+name = "fancy-regex"
 version = "0.20.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "20ed7f62ce0ae0da1a8b93c3c7104ab7e0760a74491e097c701fff966e945390"
@@ -2783,6 +2794,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6dbf3de79e51f3d586ab4cb9d5c3e2c14aa28ed23d180cf89b4df0454a69cc87"
 
 [[package]]
+name = "httpdate"
+version = "1.0.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "df3b46402a9d5adb4c86a0cf463f42e19994e3ee891101b1841f30a545cb49a9"
+
+[[package]]
 name = "hybrid-array"
 version = "0.4.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2808,6 +2825,7 @@ dependencies = [
  "http",
  "http-body",
  "httparse",
+ "httpdate",
  "itoa",
  "pin-project-lite",
  "smallvec",
@@ -4026,7 +4044,7 @@ version = "0.1.0"
 dependencies = [
  "bytes",
  "chrono",
- "fancy-regex",
+ "fancy-regex 0.20.0",
  "hex",
  "ipnet",
  "netcatty-core",
@@ -4042,6 +4060,20 @@ dependencies = [
  "tokio-util",
  "tracing",
  "url",
+]
+
+[[package]]
+name = "netcatty-capabilities"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "fancy-regex 0.14.0",
+ "parking_lot 0.13.0",
+ "regex",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -4071,12 +4103,15 @@ dependencies = [
  "hmac 0.13.0",
  "netcatty-agents",
  "netcatty-ai",
+ "netcatty-capabilities",
  "netcatty-core",
  "netcatty-forward",
  "netcatty-hostbrowser",
  "netcatty-localfs",
+ "netcatty-mcp",
  "netcatty-mosh",
  "netcatty-pty",
+ "netcatty-ptyexec",
  "netcatty-rdesktop",
  "netcatty-scripts",
  "netcatty-serial",
@@ -4184,6 +4219,35 @@ dependencies = [
 ]
 
 [[package]]
+name = "netcatty-mcp"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "base64 0.23.1",
+ "bytes",
+ "dirs 7.0.0",
+ "fancy-regex 0.14.0",
+ "hex",
+ "hmac 0.13.0",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
+ "ipnet",
+ "netcatty-capabilities",
+ "netcatty-ptyexec",
+ "parking_lot 0.13.0",
+ "rand 0.10.3",
+ "regex",
+ "serde",
+ "serde_json",
+ "sha2 0.11.1",
+ "tempfile",
+ "tokio",
+ "tokio-util",
+ "tracing",
+]
+
+[[package]]
 name = "netcatty-mosh"
 version = "0.1.0"
 dependencies = [
@@ -4205,6 +4269,24 @@ dependencies = [
  "serde",
  "tempfile",
  "thiserror 2.0.21",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "netcatty-ptyexec"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "bytes",
+ "fancy-regex 0.14.0",
+ "hex",
+ "netcatty-sessionlog",
+ "parking_lot 0.13.0",
+ "rand 0.10.3",
+ "regex",
+ "serde",
+ "serde_json",
  "tokio",
  "tracing",
 ]

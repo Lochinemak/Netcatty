@@ -84,6 +84,44 @@ pub struct SessionFlags {
     /// Charset requested by `session_set_encoding`, applied by the pump
     /// before it decodes the next chunk.
     pub charset_change: parking_lot::Mutex<Option<String>>,
+    /// AI exec state: rolling idle-prompt tracker, output taps, shell kind
+    /// and the "prompt never returned" latch (see [`AiExecTap`]).
+    pub ai: AiExecTap,
+}
+
+/// Output tap of a session for AI command execution (`catty exec`, MCP
+/// `terminal_execute`). Every decoded chunk of every session kind passes
+/// through [`deliver_with_meta`] once; it updates the prompt tracker and is
+/// copied to each live subscriber. Subscribers see the channel close when
+/// the session ends (the flags are dropped with the pump).
+#[derive(Default)]
+pub struct AiExecTap {
+    pub prompt: parking_lot::Mutex<netcatty_ptyexec::PromptTracker>,
+    subscribers: parking_lot::Mutex<Vec<mpsc::UnboundedSender<String>>>,
+    pub shell_kind: Arc<netcatty_ptyexec::ShellKindState>,
+    pub prompt_recovery_pending: Arc<AtomicBool>,
+    /// `(protocol, label, host_id)` recorded at insert (no entry lock needed).
+    pub info: parking_lot::Mutex<(&'static str, String, Option<String>)>,
+}
+
+impl AiExecTap {
+    fn observe(&self, text: &str) {
+        if text.is_empty() {
+            return;
+        }
+        self.prompt.lock().track(text, netcatty_core::ids::now_ms());
+        let mut subs = self.subscribers.lock();
+        if !subs.is_empty() {
+            subs.retain(|tx| tx.send(text.to_string()).is_ok());
+        }
+    }
+
+    /// New subscriber receiving decoded output from now on.
+    pub fn subscribe(&self) -> mpsc::UnboundedReceiver<String> {
+        let (tx, rx) = mpsc::unbounded_channel();
+        self.subscribers.lock().push(tx);
+        rx
+    }
 }
 
 pub type SftpMap = Arc<dashmap::DashMap<String, Arc<SftpClient>>>;
@@ -309,6 +347,13 @@ impl<R: Runtime> SessionRegistry<R> {
         let decoder = StreamDecoder::new(Some(&entry.charset));
         let charset = crate::decoder::resolve_charset(Some(&entry.charset));
         let flags = Arc::new(SessionFlags::default());
+        // Local shells have a confirmed kind from the executable; remote
+        // kinds are probed lazily on the first AI exec.
+        *flags.ai.info.lock() = (entry.protocol, entry.label.clone(), entry.host_id.clone());
+        if entry.protocol == "local" {
+            let kind = netcatty_ptyexec::shell_kind::classify_local_shell_type(&entry.label, std::env::consts::OS);
+            flags.ai.shell_kind.set_shell_kind(Some(kind.to_string()));
+        }
         if let Some(conn) = &entry.connection {
             self.shared
                 .connections
@@ -345,6 +390,22 @@ impl<R: Runtime> SessionRegistry<R> {
 
     pub fn get(&self, session_id: &str) -> Option<Arc<Mutex<SessionEntry>>> {
         self.shared.sessions.get(session_id).map(|e| e.clone())
+    }
+
+    /// AI exec tap of a live session (prompt tracker, output subscription,
+    /// shell kind). `None` for unknown / ended sessions.
+    pub fn flags_of(&self, session_id: &str) -> Option<Arc<SessionFlags>> {
+        self.shared.flags.get(session_id).map(|f| f.clone())
+    }
+
+    /// Subscribe to decoded output of a live session (closed on exit).
+    pub fn tap_output(&self, session_id: &str) -> Option<mpsc::UnboundedReceiver<String>> {
+        self.flags_of(session_id).map(|f| f.ai.subscribe())
+    }
+
+    /// Ids of every live terminal session.
+    pub fn session_ids(&self) -> Vec<String> {
+        self.shared.sessions.iter().map(|e| e.key().clone()).collect()
     }
 
     pub fn contains(&self, session_id: &str) -> bool {
@@ -626,6 +687,8 @@ fn deliver_with_meta<R: Runtime>(
     crate::commands::sessionlog::tap_output(app, session_id, text);
     // Generic output taps (script automation, ...): same point, same rules.
     publish_output(app, session_id, text);
+    // AI exec tap (prompt tracking + subscribers), same single pass.
+    flags.ai.observe(text);
     if !force && flags.paused.load(Ordering::SeqCst) {
         if pending.len() + text.len() > PAUSE_BUFFER_LIMIT {
             if !flags.dropped_output.swap(true, Ordering::SeqCst) {

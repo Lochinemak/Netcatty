@@ -34,14 +34,82 @@ impl AgentsState {
         let mut config = RuntimeConfig::new(&app.package_info().version.to_string(), paths.data_dir.clone(), paths.temp_dir());
         config.temp_dir = Arc::new(move || super::tempdir::current(&temp_app));
         let runtime = Arc::new(AgentsRuntime::new(config, Arc::new(TauriSink { app })));
-        // TODO(mcp-injection): plug the netcatty MCP server in here once
-        // `netcatty_mcp` is merged, e.g.
-        //   runtime.set_mcp_provider(Arc::new(NetcattyMcpProvider::new(...)));
-        // wrapping `netcatty_mcp::build_injected_mcp_servers(...)` (it returns
-        // the neutral `[{ name, type: "stdio", command, args, env }]` shape of
-        // `netcatty_agents::McpServerConfig`). The same bridge should provide
-        // the renderer approval channel via `runtime.set_approval_provider(...)`.
         Self { runtime }
+    }
+}
+
+/// Plug the netcatty MCP host into the agents runtime: MCP server injection,
+/// chat cancellation / attachment / cleanup hooks and the renderer approval
+/// channel. Called from `lib.rs` setup once both states are managed.
+pub fn wire_mcp<R: Runtime>(app: &AppHandle<R>) {
+    use tauri::Manager;
+    let (Some(agents), Some(mcp)) = (app.try_state::<AgentsState>(), app.try_state::<super::mcp::McpState>()) else {
+        return;
+    };
+    let paths = netcatty_store::AppPaths::resolve();
+    let discovery = netcatty_mcp::discovery::tool_cli_discovery_path(&paths.data_dir).to_string_lossy().into_owned();
+    let bridge = Arc::new(McpBridge { host: mcp.host.clone(), discovery });
+    agents.runtime.set_mcp_provider(bridge.clone());
+    agents.runtime.set_approval_provider(bridge);
+}
+
+/// Adapter from `netcatty_mcp::McpHost` to the agents runtime hooks
+/// (Electron: `injectMcp.cjs` + `mcpServerBridge` calls in `sdkStreamHandlers`).
+struct McpBridge {
+    host: Arc<netcatty_mcp::host::McpHost>,
+    discovery: String,
+}
+
+#[async_trait::async_trait]
+impl netcatty_agents::McpInjectionProvider for McpBridge {
+    async fn build_injected_mcp_servers(
+        &self,
+        chat_session_id: &str,
+        tool_integration_mode: &str,
+    ) -> Result<Vec<netcatty_agents::McpServerConfig>, String> {
+        let servers = netcatty_mcp::build_injected_mcp_servers(&self.host, chat_session_id, tool_integration_mode).await;
+        Ok(servers
+            .into_iter()
+            .map(|s| netcatty_agents::McpServerConfig {
+                name: s.name,
+                kind: s.server_type,
+                command: s.command,
+                args: s.args,
+                env: s.env.into_iter().map(|p| netcatty_agents::mcp::EnvPair { name: p.name, value: p.value }).collect(),
+            })
+            .collect())
+    }
+
+    fn discovery_file_path(&self) -> Option<String> {
+        Some(self.discovery.clone())
+    }
+
+    fn update_attachment_metadata(&self, attachments: &[netcatty_agents::session::StagedAttachment], chat_session_id: &str) {
+        let values: Vec<Value> = attachments.iter().filter_map(|a| serde_json::to_value(a).ok()).collect();
+        self.host.update_attachment_metadata(&values, chat_session_id);
+    }
+
+    fn set_chat_session_cancelled(&self, chat_session_id: &str, cancelled: bool) {
+        self.host.set_chat_session_cancelled(chat_session_id, cancelled);
+        if cancelled {
+            self.host.cancel_pty_execs_for_session(chat_session_id);
+            self.host.clear_pending_approvals(Some(chat_session_id));
+        }
+    }
+
+    async fn cleanup_scoped_metadata(&self, chat_session_id: &str) {
+        self.host.cleanup_scoped_metadata(chat_session_id).await;
+    }
+}
+
+#[async_trait::async_trait]
+impl netcatty_agents::ApprovalProvider for McpBridge {
+    async fn request_approval(&self, tool_name: &str, args: Value, chat_session_id: &str) -> bool {
+        self.host.request_approval(tool_name, args, Some(chat_session_id.to_string()), None, None).await
+    }
+
+    fn clear_pending_approvals(&self, chat_session_id: &str) {
+        self.host.clear_pending_approvals(Some(chat_session_id));
     }
 }
 

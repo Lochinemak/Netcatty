@@ -447,6 +447,14 @@ pub fn ai_set_chat_session_cancelled<R: Runtime>(app: AppHandle<R>, window: taur
     } else {
         set.remove(chat_session_id);
     }
+    drop(set);
+    // Kill running commands, background jobs, SFTP ops and pending approvals
+    // of this chat in the AI control plane (Electron: mcpServerBridge).
+    let app2 = app.clone();
+    let chat = chat_session_id.to_owned();
+    tauri::async_runtime::spawn(async move {
+        super::mcp::apply_chat_session_cancelled(&app2, &chat, cancelled).await;
+    });
     json!({ "ok": true, "chatSessionId": chat_session_id, "cancelled": cancelled })
 }
 
