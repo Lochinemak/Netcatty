@@ -35,12 +35,12 @@ pub mod emit;
 pub mod env;
 pub mod mcp;
 pub mod process;
-// WIP pub mod runtime;
+pub mod runtime;
 pub mod session;
 pub mod shell_env;
 
 pub use mcp::{McpInjectionProvider, McpServerConfig, NoopMcpInjectionProvider};
-// WIP pub use runtime::{AgentEventSink, AgentsRuntime, ApprovalProvider, NoopApprovalProvider, RuntimeConfig};
+pub use runtime::{AgentEventSink, AgentsRuntime, ApprovalProvider, NoopApprovalProvider, RuntimeConfig};
 
 /// Env map handed to child processes (`Record<string,string>` on the JS side).
 pub type EnvMap = std::collections::BTreeMap<String, String>;

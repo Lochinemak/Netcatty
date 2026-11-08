@@ -83,7 +83,8 @@ impl StreamJsonProcess {
         let (events_tx, events_rx) = mpsc::unbounded_channel();
         let mut reader = spawned.stdout;
         let pending_reader = pending.clone();
-        let responder = stdin_tx.clone();
+        // Weak: `end_input()` must be able to close stdin while this task lives.
+        let responder = stdin_tx.downgrade();
         tokio::spawn(async move {
             loop {
                 match reader.next_line().await {
@@ -112,7 +113,9 @@ impl StreamJsonProcess {
                                         Ok(body) => json!({ "type": "control_response", "response": { "subtype": "success", "request_id": request_id, "response": body } }),
                                         Err(error) => json!({ "type": "control_response", "response": { "subtype": "error", "request_id": request_id, "error": error } }),
                                     };
-                                    let _ = responder.send(format!("{response}\n"));
+                                    if let Some(tx) = responder.upgrade() {
+                                        let _ = tx.send(format!("{response}\n"));
+                                    }
                                 });
                             }
                             Some("control_cancel_request") | Some("keep_alive") => {}
