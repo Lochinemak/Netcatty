@@ -33,6 +33,7 @@ import { createHostBrowserBridge } from './bridge/hostBrowser';
 import { createAgentsBridge } from './bridge/agents';
 import { createMcpBridge } from './bridge/mcp';
 import { McpMarkerFilter } from './bridge/mcpMarkerFilter';
+import { SessionOutputRoutes, createWindowsBridge, listenToCurrentWindow } from './bridge/windows';
 
 // ---------------------------------------------------------------------------
 // Contract constants (see `netcatty_core::ipc::events`)
@@ -413,8 +414,12 @@ class SessionEventRouter {
     deliver: (sessionId, data, meta) => this.dispatchData(sessionId, data, meta),
   });
 
-  constructor(hub: EventHub, backlog: SessionDataBacklog) {
+  /** Output of sessions displayed by another window is dropped (`bridge/windows.ts`). */
+  private readonly accepts: (sessionId: string) => boolean;
+
+  constructor(hub: EventHub, backlog: SessionDataBacklog, accepts: (sessionId: string) => boolean = () => true) {
     this.backlog = backlog;
+    this.accepts = accepts;
     hub.subscribe<SessionDataEvent>(TAURI_EVENTS.sessionData, (event) => this.handleData(event));
     hub.subscribe<SessionExitEvent>(TAURI_EVENTS.sessionExit, (event) => this.handleExit(event));
   }
@@ -445,6 +450,7 @@ class SessionEventRouter {
 
   private handleData(event: SessionDataEvent | undefined): void {
     if (!event || typeof event.sessionId !== 'string' || !event.data) return;
+    if (!this.accepts(event.sessionId)) return;
     this.mcpFilter.push(event.sessionId, event.data, event.meta, event.syntheticEcho === true);
   }
 
@@ -511,6 +517,8 @@ function removeFrom<T>(map: Map<string, Set<T>>, key: string, value: T): void {
 export interface CreateTauriBridgeOptions {
   /** Injected for tests; defaults to the real `window.__TAURI__` hub. */
   hub?: EventHub;
+  /** Hub for events addressed to this window; defaults to `hub` when injected. */
+  windowHub?: EventHub;
   /** Plugin namespaces; defaults to `window.__TAURI__`. */
   plugins?: Pick<NetcattyTauriGlobal, 'dialog' | 'clipboardManager' | 'opener'>;
 }
@@ -519,7 +527,10 @@ export function createTauriBridge(options: CreateTauriBridgeOptions = {}): Netca
   const hub = options.hub ?? new EventHub();
   const plugins = options.plugins ?? (typeof window !== 'undefined' ? window.__TAURI__ : undefined) ?? {};
   const backlog = new SessionDataBacklog(SESSION_BACKLOG_MAX_CHARS);
-  const sessions = new SessionEventRouter(hub, backlog);
+  // Events Rust addresses to one window (`emit_to`) reach only this hub.
+  const windowHub = options.windowHub ?? options.hub ?? new EventHub({ listen: listenToCurrentWindow });
+  const outputRoutes = new SessionOutputRoutes({ hub, onRoutedAway: (sessionId) => backlog.clear(sessionId) });
+  const sessions = new SessionEventRouter(hub, backlog, (sessionId) => outputRoutes.accepts(sessionId));
 
   // Subscribe eagerly so output emitted right after a start command cannot be
   // lost while the async `listen` registration is still pending.
@@ -536,6 +547,8 @@ export function createTauriBridge(options: CreateTauriBridgeOptions = {}): Netca
   const startSession = async (command: string, payload: Record<string, unknown>): Promise<string> => {
     await sessionEventsReady;
     const result = await invoke<StartSessionResult>(command, { payload });
+    // Owner window: output routing and close-with-window (`bridge/windows.ts`).
+    outputRoutes.track(result.sessionId);
     return result.sessionId;
   };
 
@@ -1448,13 +1461,15 @@ export function createTauriBridge(options: CreateTauriBridgeOptions = {}): Netca
     getTempDirPath: () => invoke<string>('app_get_temp_dir_path'),
 
     // Auto-update + dirty-editor round trip (bridge/update.ts).
-    ...createUpdateBridge({ hub }),
+    ...createUpdateBridge({ hub: windowHub }),
     // AI core (provider proxy, chat streaming, privacy, skills, sessions backup).
     ...createAiBridge({ hub }),
     // In-app host browser (rust/docs/ipc-hostbrowser.md).
     ...createHostBrowserBridge({ hub }),
     ...createAgentsBridge({ hub }),
     ...createMcpBridge({ hub }),
+    // Editor / popup / session windows, attach hand-over, window chrome.
+    ...createWindowsBridge({ hub: windowHub, routes: outputRoutes }),
   };
 
   return bridge as NetcattyBridge;
