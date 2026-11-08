@@ -32,6 +32,7 @@ import { createScriptsBridge } from './bridge/scripts';
 import { createHostBrowserBridge } from './bridge/hostBrowser';
 import { createAgentsBridge } from './bridge/agents';
 import { createMcpBridge } from './bridge/mcp';
+import { createPluginsBridge } from './bridge/plugins';
 import { McpMarkerFilter } from './bridge/mcpMarkerFilter';
 
 // ---------------------------------------------------------------------------
@@ -1455,6 +1456,7 @@ export function createTauriBridge(options: CreateTauriBridgeOptions = {}): Netca
     ...createHostBrowserBridge({ hub }),
     ...createAgentsBridge({ hub }),
     ...createMcpBridge({ hub }),
+    ...createPluginsBridge({ hub }),
   };
 
   return bridge as NetcattyBridge;
