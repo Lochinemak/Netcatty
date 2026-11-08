@@ -80,6 +80,8 @@ pub fn configure_with<R: tauri::Runtime>(
                 &netcatty_store::AppPaths::resolve(),
             ));
             app.manage(commands::mcp::McpState::new(app.handle()));
+            app.manage(commands::zmodem::ZmodemState::default());
+            app.manage(commands::terminal::TerminalState::default());
             commands::agents::wire_mcp(app.handle());
             // Tray (+ hidden auto-launch), global hotkey, autostart, notifications.
             commands::tray::setup(app);

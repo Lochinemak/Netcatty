@@ -41,6 +41,7 @@ netcatty-agents = { workspace = true }
 netcatty-ptyexec = { workspace = true }
 netcatty-capabilities = { workspace = true }
 netcatty-mcp = { workspace = true }
+netcatty-zmodem = { workspace = true }
 tauri = { version = "2.12", features = ["tray-icon", "image-png"] }
 tauri-plugin-shell = "2.6"
 tauri-plugin-dialog = "2.8"
