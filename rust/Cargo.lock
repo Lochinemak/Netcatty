@@ -3989,6 +3989,38 @@ dependencies = [
 ]
 
 [[package]]
+name = "netcatty-agents"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "base64 0.23.1",
+ "bytes",
+ "chrono",
+ "dashmap",
+ "dirs 7.0.0",
+ "encoding_rs",
+ "futures",
+ "hex",
+ "libc",
+ "netcatty-core",
+ "parking_lot 0.13.0",
+ "percent-encoding",
+ "rand 0.10.3",
+ "regex",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sha2 0.11.1",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "url",
+ "uuid",
+]
+
+[[package]]
 name = "netcatty-ai"
 version = "0.1.0"
 dependencies = [
@@ -4037,6 +4069,7 @@ dependencies = [
  "encoding_rs",
  "futures",
  "hmac 0.13.0",
+ "netcatty-agents",
  "netcatty-ai",
  "netcatty-core",
  "netcatty-forward",

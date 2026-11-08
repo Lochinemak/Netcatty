@@ -30,6 +30,7 @@ import { cancelStagedUpload, stageUploadFile } from './uploadStaging';
 import { createAiBridge } from './bridge/ai';
 import { createScriptsBridge } from './bridge/scripts';
 import { createHostBrowserBridge } from './bridge/hostBrowser';
+import { createAgentsBridge } from './bridge/agents';
 
 // ---------------------------------------------------------------------------
 // Contract constants (see `netcatty_core::ipc::events`)
@@ -1441,6 +1442,7 @@ export function createTauriBridge(options: CreateTauriBridgeOptions = {}): Netca
     ...createAiBridge({ hub }),
     // In-app host browser (rust/docs/ipc-hostbrowser.md).
     ...createHostBrowserBridge({ hub }),
+    ...createAgentsBridge({ hub }),
   };
 
   return bridge as NetcattyBridge;

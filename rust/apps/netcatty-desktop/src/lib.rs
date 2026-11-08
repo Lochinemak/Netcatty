@@ -74,6 +74,7 @@ pub fn configure_with<R: tauri::Runtime>(
             app.manage(commands::sessionlog::SessionLogState::default());
             app.manage(commands::ai::AiState::new(&netcatty_store::AppPaths::resolve()));
             app.manage(commands::hostbrowser::HostBrowserState::default());
+            app.manage(commands::agents::AgentsState::new(app.handle().clone()));
             app.manage(commands::tempdir::TempDirState::load(
                 &netcatty_store::AppPaths::resolve(),
             ));
