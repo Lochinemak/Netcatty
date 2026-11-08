@@ -19,6 +19,7 @@ pub mod filewatch;
 pub mod forward;
 pub mod hostbrowser;
 pub mod hotkey;
+pub mod integration;
 pub mod localfs;
 pub mod mcp;
 pub mod monitor;
@@ -427,6 +428,16 @@ pub fn handler<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + 
         hostbrowser::hostbrowser_downloads_list,
         hostbrowser::hostbrowser_downloads_theme,
         hostbrowser::hostbrowser_downloads_command,
+        // OS shell integration: deep links, launch intents, Explorer verbs,
+        // app icon variants (commands/integration.rs, rust/docs/ipc-integration.md).
+        integration::integration_renderer_attach,
+        integration::integration_get_ssh_deep_link_enabled,
+        integration::integration_set_ssh_deep_link_enabled,
+        integration::integration_get_jms_deep_link_enabled,
+        integration::integration_set_jms_deep_link_enabled,
+        integration::integration_get_explorer_context_menu_enabled,
+        integration::integration_set_explorer_context_menu_enabled,
+        integration::integration_set_app_icon_variant,
         // Managed SDK agents, discovery, Codex login / App Server (commands/agents.rs).
         agents::ai_agents_discover,
         agents::ai_resolve_cli,
