@@ -14,6 +14,7 @@ pub mod clipboard;
 pub mod diagnostics;
 pub mod filewatch;
 pub mod forward;
+pub mod hostbrowser;
 pub mod hotkey;
 pub mod localfs;
 pub mod monitor;
@@ -318,6 +319,23 @@ pub fn handler<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + 
         monitor::monitor_snapshot,
         monitor::monitor_stop_all,
         monitor::monitor_retry,
+        // In-app host browser (commands/hostbrowser.rs).
+        hostbrowser::hostbrowser_open,
+        hostbrowser::hostbrowser_focus,
+        hostbrowser::hostbrowser_request_panel,
+        hostbrowser::hostbrowser_panel_layout,
+        hostbrowser::hostbrowser_panel_url,
+        hostbrowser::hostbrowser_panel_close,
+        hostbrowser::hostbrowser_snapshot,
+        hostbrowser::hostbrowser_command,
+        hostbrowser::hostbrowser_bookmarks_list,
+        hostbrowser::hostbrowser_bookmarks_upsert,
+        hostbrowser::hostbrowser_bookmarks_remove,
+        hostbrowser::hostbrowser_bookmarks_get_all,
+        hostbrowser::hostbrowser_bookmarks_apply,
+        hostbrowser::hostbrowser_downloads_list,
+        hostbrowser::hostbrowser_downloads_theme,
+        hostbrowser::hostbrowser_downloads_command,
     ]
 }
 

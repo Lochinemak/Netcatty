@@ -3977,6 +3977,7 @@ dependencies = [
  "hmac 0.13.0",
  "netcatty-core",
  "netcatty-forward",
+ "netcatty-hostbrowser",
  "netcatty-localfs",
  "netcatty-mosh",
  "netcatty-pty",
@@ -3992,6 +3993,7 @@ dependencies = [
  "parking_lot 0.13.0",
  "percent-encoding",
  "png",
+ "reqwest",
  "russh",
  "serde",
  "serde_json",
@@ -4046,6 +4048,21 @@ dependencies = [
  "tokio",
  "tokio-util",
  "tracing",
+]
+
+[[package]]
+name = "netcatty-hostbrowser"
+version = "0.1.0"
+dependencies = [
+ "base64 0.23.1",
+ "netcatty-core",
+ "parking_lot 0.13.0",
+ "regex",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tracing",
+ "url",
 ]
 
 [[package]]

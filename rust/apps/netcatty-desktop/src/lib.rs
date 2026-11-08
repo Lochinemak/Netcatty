@@ -70,6 +70,7 @@ pub fn configure_with<R: tauri::Runtime>(
             app.manage(crash_log);
             app.manage(commands::filewatch::FileWatchState::default());
             app.manage(commands::sessionlog::SessionLogState::default());
+            app.manage(commands::hostbrowser::HostBrowserState::default());
             app.manage(commands::tempdir::TempDirState::load(
                 &netcatty_store::AppPaths::resolve(),
             ));
@@ -81,6 +82,10 @@ pub fn configure_with<R: tauri::Runtime>(
             tracing::info!("netcatty-desktop started");
             Ok(())
         })
+        .register_uri_scheme_protocol(
+            commands::hostbrowser::ASSET_SCHEME,
+            commands::hostbrowser::asset_protocol,
+        )
         .on_window_event(commands::window::on_window_event)
         .invoke_handler(commands::handler())
 }
