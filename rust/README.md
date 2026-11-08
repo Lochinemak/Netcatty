@@ -27,7 +27,8 @@ rust/
 │   ├── netcatty-sysmgr        system manager + server stats: remote command builders and parsers (processes, tmux, docker/podman/nerdctl, kubectl, GPUs, ports, systemd, stats)
 │   ├── netcatty-telnet        telnet framing / option negotiation, login-prompt auto-login (pure)
 │   ├── netcatty-serial        serial ports (serialport, no libudev), port listing, Windows named pipes
-│   └── netcatty-mosh          Mosh handshake sniffer + ssh/mosh-client command lines, ET invocation, askpass (pure)
+│   ├── netcatty-mosh          Mosh handshake sniffer + ssh/mosh-client command lines, ET invocation, askpass (pure)
+│   └── netcatty-zmodem        ZMODEM (rz/sz) sessions + terminal sentry, serial YMODEM
 └── apps/
     └── netcatty-desktop       Tauri 2 app: commands, session registry, prompt broker, events
 ```
@@ -178,8 +179,7 @@ hides the features when they are absent):
 
 * AI bridge (chat streaming, SDK agents, MCP server), plugin runtime, external
   MCP controller
-* ZMODEM/YMODEM file transfer (terminal sessions and serial), the Mosh / ET
-  host-stats companion SSH connection
+* The Mosh / ET host-stats companion SSH connection
 * FIDO2 security keys and Windows Hello / app lock
 * Plugin-provided sync providers (they need the plugin runtime)
 * Deep links, Explorer context menu, the macOS Dock menu (saved hosts),

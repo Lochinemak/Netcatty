@@ -103,10 +103,8 @@ resources (`<resource_dir>/mosh/`, `<resource_dir>/et/`; in debug builds also
 development layout), then on the session's `PATH`. `ssh` comes from `PATH`
 (Windows: also `%SystemRoot%\System32\OpenSSH\ssh.exe`).
 
-Not ported: ZMODEM / YMODEM (`onZmodemEvent`, `cancelZmodem`,
-`startZmodemDragDropUpload`, `onZmodemOverwriteRequest`,
-`respondZmodemOverwrite`, `sendSerialYmodem`, `receiveSerialYmodem` stay
-undefined), the Mosh / ET host-stats companion SSH connection, session
+ZMODEM and serial YMODEM: see [`ipc-zmodem.md`](ipc-zmodem.md). Not
+ported: the Mosh / ET host-stats companion SSH connection, session
 logging for these sessions, and FIDO2 agent preparation for the external ssh.
 
 ## Remote desktop (VNC / RDP)
@@ -652,6 +650,8 @@ AI core (provider proxy, chat streaming, privacy, user skills, sessions backup):
 Host browser (in-app browser panel / window, `hostbrowser_*` commands): see [ipc-hostbrowser.md](ipc-hostbrowser.md).
 Managed SDK agents, agent discovery and Codex login: see [ipc-agents.md](ipc-agents.md).
 AI control plane (Catty exec, capabilities, MCP host, approvals, tool-output store, External MCP): see [`ipc-mcp.md`](ipc-mcp.md).
+ZMODEM (`rz` / `sz`) and serial YMODEM transfers (`zmodem_*`, `serial_ymodem_*`, `netcatty:zmodem:*`): see [`ipc-zmodem.md`](ipc-zmodem.md).
+Terminal plumbing and autocomplete (paste receipts, reuse fallback, Windows PTY info, fig specs, directory listings): see [`ipc-terminal.md`](ipc-terminal.md).
 
 ## Mapping `NetcattyBridge` → commands (adapter cheat-sheet)
 
@@ -714,7 +714,7 @@ AI control plane (Catty exec, capabilities, MCP host, approvals, tool-output sto
 | `prepareSessionLog`, `revealSessionLog` | `session_log_prepare`, `session_log_reveal` (`payload: { sessionId }` only) |
 
 Bridge methods that have no Rust counterpart in this version (AI, plugins,
-MCP, ZMODEM/YMODEM, FIDO, plugin sync providers) are left
+MCP, FIDO, plugin sync providers) are left
 `undefined` on the adapter; the renderer already treats them as optional.
 `onTrayPanelCloseRequest` stays undefined too: the Electron main process
 never sends that event.
