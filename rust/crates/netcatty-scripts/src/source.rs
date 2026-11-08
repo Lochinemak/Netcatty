@@ -153,7 +153,10 @@ mod tests {
 
     #[test]
     fn formats_input_for_logs() {
-        assert_eq!(format_script_input_for_log("ls\r\n\x03\x1b[A"), "ls\\r\\n^C\\e[A");
+        assert_eq!(
+            format_script_input_for_log("ls\r\n\x03\x1b[A"),
+            "ls\\r\\n^C\\e[A"
+        );
         assert_eq!(truncate_activity_label("abcdef", 4), "abc…");
         assert_eq!(truncate_activity_label("abc", 4), "abc");
     }

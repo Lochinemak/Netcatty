@@ -396,7 +396,10 @@ impl ScriptRuntime {
 
     /// `ignoreIfStopped`: a `"Script stopped"` failure after an abort is a
     /// silent `undefined`.
-    fn ignore_if_stopped(&self, result: Result<(), ScriptError>) -> Result<Option<Value>, ScriptError> {
+    fn ignore_if_stopped(
+        &self,
+        result: Result<(), ScriptError>,
+    ) -> Result<Option<Value>, ScriptError> {
         match result {
             Ok(()) => Ok(None),
             Err(err) if self.is_execution_aborted() && err.message == SCRIPT_STOPPED => Ok(None),
@@ -503,7 +506,9 @@ impl ScriptRuntime {
         waiting_label: &str,
         timeout_ms: u64,
         skip_value: T,
-        mut wait: impl FnMut() -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<T, WaitError>> + Send>>,
+        mut wait: impl FnMut() -> std::pin::Pin<
+            Box<dyn std::future::Future<Output = Result<T, WaitError>> + Send>,
+        >,
     ) -> Result<T, ScriptError> {
         let mut step_tracked = false;
         loop {
@@ -568,28 +573,39 @@ impl ScriptRuntime {
         timeout_ms: u64,
     ) -> Result<Option<Value>, ScriptError> {
         let pattern_label = pattern.label();
-        let step_label = format!(
-            "{method} {}",
-            truncate_activity_label(&pattern_label, 60)
-        );
+        let step_label = format!("{method} {}", truncate_activity_label(&pattern_label, 60));
         let buffer = self.inner.host.output_buffer();
         let abort = self.abort_check();
         let method_name = method.to_string();
         let value = self
-            .wait_with_recovery(&step_label, &pattern_label, timeout_ms, SkipValue::Text, move || {
-                let buffer = buffer.clone();
-                let pattern = pattern.clone();
-                let abort = abort.clone();
-                let method_name = method_name.clone();
-                Box::pin(async move {
-                    match method_name.as_str() {
-                        "waitForText" => buffer.wait_for_text(&pattern, timeout_ms, Some(abort)).await,
-                        "waitForRegex" => buffer.wait_for_regex(&pattern, timeout_ms, Some(abort)).await,
-                        _ => buffer.wait_for(&pattern, timeout_ms, Some(abort)).await,
-                    }
-                    .map(SkipValue::Matched)
-                })
-            })
+            .wait_with_recovery(
+                &step_label,
+                &pattern_label,
+                timeout_ms,
+                SkipValue::Text,
+                move || {
+                    let buffer = buffer.clone();
+                    let pattern = pattern.clone();
+                    let abort = abort.clone();
+                    let method_name = method_name.clone();
+                    Box::pin(async move {
+                        match method_name.as_str() {
+                            "waitForText" => {
+                                buffer
+                                    .wait_for_text(&pattern, timeout_ms, Some(abort))
+                                    .await
+                            }
+                            "waitForRegex" => {
+                                buffer
+                                    .wait_for_regex(&pattern, timeout_ms, Some(abort))
+                                    .await
+                            }
+                            _ => buffer.wait_for(&pattern, timeout_ms, Some(abort)).await,
+                        }
+                        .map(SkipValue::Matched)
+                    })
+                },
+            )
             .await?;
         Ok(Some(value.into_json()))
     }
@@ -599,17 +615,23 @@ impl ScriptRuntime {
         let abort = self.abort_check();
         let patterns = shell_prompt_patterns();
         let value = self
-            .wait_with_recovery("waitForPrompt", "shell prompt", timeout_ms, SkipValue::Index, move || {
-                let buffer = buffer.clone();
-                let patterns = patterns.clone();
-                let abort = abort.clone();
-                Box::pin(async move {
-                    buffer
-                        .wait_for_any(&patterns, timeout_ms, Some(abort), true)
-                        .await
-                        .map(SkipValue::Found)
-                })
-            })
+            .wait_with_recovery(
+                "waitForPrompt",
+                "shell prompt",
+                timeout_ms,
+                SkipValue::Index,
+                move || {
+                    let buffer = buffer.clone();
+                    let patterns = patterns.clone();
+                    let abort = abort.clone();
+                    Box::pin(async move {
+                        buffer
+                            .wait_for_any(&patterns, timeout_ms, Some(abort), true)
+                            .await
+                            .map(SkipValue::Found)
+                    })
+                },
+            )
             .await?;
         Ok(Some(value.into_json()))
     }
@@ -628,17 +650,23 @@ impl ScriptRuntime {
         let buffer = self.inner.host.output_buffer();
         let abort = self.abort_check();
         let value = self
-            .wait_with_recovery(&step_label, &label, timeout_ms, SkipValue::Index, move || {
-                let buffer = buffer.clone();
-                let patterns = patterns.clone();
-                let abort = abort.clone();
-                Box::pin(async move {
-                    buffer
-                        .wait_for_any(&patterns, timeout_ms, Some(abort), false)
-                        .await
-                        .map(SkipValue::Found)
-                })
-            })
+            .wait_with_recovery(
+                &step_label,
+                &label,
+                timeout_ms,
+                SkipValue::Index,
+                move || {
+                    let buffer = buffer.clone();
+                    let patterns = patterns.clone();
+                    let abort = abort.clone();
+                    Box::pin(async move {
+                        buffer
+                            .wait_for_any(&patterns, timeout_ms, Some(abort), false)
+                            .await
+                            .map(SkipValue::Found)
+                    })
+                },
+            )
             .await?;
         Ok(Some(value.into_json()))
     }
@@ -892,13 +920,18 @@ impl ScriptRuntime {
                 if lines.is_empty() {
                     return Ok(Some(Value::String(self.inner.host.output_buffer().text())));
                 }
-                let as_row = |value: Option<&Value>| value.and_then(|v| v.as_f64()).map(|n| n.trunc() as i64);
+                let as_row = |value: Option<&Value>| {
+                    value.and_then(|v| v.as_f64()).map(|n| n.trunc() as i64)
+                };
                 let start = as_row(args.get(0)).map_or(0, |n| n.max(0));
-                let end = as_row(args.get(1)).map_or(lines.len() as i64 - 1, |n| {
-                    n.min(lines.len() as i64 - 1)
-                });
+                let end = as_row(args.get(1))
+                    .map_or(lines.len() as i64 - 1, |n| n.min(lines.len() as i64 - 1));
                 let start = (start as usize).min(lines.len());
-                let end_exclusive = if end < 0 { 0 } else { (end as usize + 1).min(lines.len()) };
+                let end_exclusive = if end < 0 {
+                    0
+                } else {
+                    (end as usize + 1).min(lines.len())
+                };
                 let text = if end_exclusive > start {
                     lines[start..end_exclusive].join("\n")
                 } else {
@@ -973,7 +1006,9 @@ impl ScriptRuntime {
                     .await?;
                 Ok(Some(Value::Bool(value.as_ref().is_some_and(js_truthy))))
             }
-            other => Err(plain_error(format!("Unsupported script API method: {other}"))),
+            other => Err(plain_error(format!(
+                "Unsupported script API method: {other}"
+            ))),
         }
     }
 
@@ -996,10 +1031,7 @@ impl ScriptRuntime {
             None | Some(Value::Null) => String::new(),
             Some(v) => js_string(v),
         };
-        let label = truncate_activity_label(
-            if label.is_empty() { "Progress" } else { &label },
-            60,
-        );
+        let label = truncate_activity_label(if label.is_empty() { "Progress" } else { &label }, 60);
         let total = total
             .and_then(js_number)
             .filter(|n| n.is_finite() && *n != 0.0)
@@ -1122,7 +1154,9 @@ impl ScriptRuntime {
                 self.progress_done();
                 Ok(())
             }
-            other => Err(plain_error(format!("Unsupported script notification: {other}"))),
+            other => Err(plain_error(format!(
+                "Unsupported script notification: {other}"
+            ))),
         }
     }
 
@@ -1236,7 +1270,7 @@ impl ScriptRuntime {
                                     }
                                     "set" => {
                                         let current = args
-                                            .get(0)
+                                            .first()
                                             .and_then(js_number)
                                             .filter(|n| n.is_finite())
                                             .unwrap_or(0.0);
@@ -1260,7 +1294,7 @@ impl ScriptRuntime {
                                 {
                                     return self.handle_notification(&method, &args);
                                 }
-                                let detail = args.get(1).or(args.get(0)).cloned().unwrap_or(Value::Null);
+                                let detail = args.get(1).or(args.first()).cloned().unwrap_or(Value::Null);
                                 pending_progress = Some((
                                     "progress.set".into(),
                                     vec![json!(progress_current), detail],

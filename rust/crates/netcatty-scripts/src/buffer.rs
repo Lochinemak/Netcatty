@@ -289,7 +289,10 @@ impl BufferState {
         &self.text[self.scan_offset..]
     }
 
-    pub fn try_match_pending(&self, pattern: &WaitPattern) -> Result<Option<MatchEnd>, PatternError> {
+    pub fn try_match_pending(
+        &self,
+        pattern: &WaitPattern,
+    ) -> Result<Option<MatchEnd>, PatternError> {
         try_match_with_end(self.pending_text(), pattern, compile_pattern)
     }
 
@@ -355,7 +358,8 @@ impl BufferState {
         } else {
             format!("{screen_text}\n")
         };
-        let trailing = trim_overlapping_trailing_fresh(&normalized, trailing_fresh, sync_start_text);
+        let trailing =
+            trim_overlapping_trailing_fresh(&normalized, trailing_fresh, sync_start_text);
         self.clear();
         self.append(&normalized);
         self.seeded_length = Some(self.text.len());
@@ -496,10 +500,7 @@ impl BufferState {
         fresh_boundary: usize,
     ) -> Result<Option<AnyMatch>, PatternError> {
         for (index, pattern) in patterns.iter().enumerate() {
-            loop {
-                let Some(matched) = self.try_match_pending(pattern)? else {
-                    break;
-                };
+            while let Some(matched) = self.try_match_pending(pattern)? {
                 let absolute_end = self.scan_offset + matched.end_offset;
                 if absolute_end >= fresh_boundary {
                     return Ok(Some(AnyMatch { index, matched }));
@@ -720,7 +721,11 @@ impl OutputBuffer {
             .mark_current_output_consumed(preserve_tail_patterns);
     }
 
-    pub fn mark_output_consumed_through(&self, length: usize, preserve_tail_patterns: &[WaitPattern]) {
+    pub fn mark_output_consumed_through(
+        &self,
+        length: usize,
+        preserve_tail_patterns: &[WaitPattern],
+    ) {
         self.inner
             .state
             .lock()
@@ -825,22 +830,34 @@ impl OutputBuffer {
         let fresh_boundary = self.inner.state.lock().current_fresh_boundary();
         let pattern = pattern.clone();
         if pattern.is_regex() {
-            return self.wait_with("waitFor", timeout_ms, should_abort, Some(fresh_boundary), move |state, boundary| {
-                let matched = state.consume_fresh_pending_regex(&pattern, boundary)?;
+            return self.wait_with(
+                "waitFor",
+                timeout_ms,
+                should_abort,
+                Some(fresh_boundary),
+                move |state, boundary| {
+                    let matched = state.consume_fresh_pending_regex(&pattern, boundary)?;
+                    Ok(matched.map(|m| {
+                        state.advance_scan_offset(m.end_offset);
+                        m.value
+                    }))
+                },
+            );
+        }
+        self.wait_with(
+            "waitFor",
+            timeout_ms,
+            should_abort,
+            Some(fresh_boundary),
+            move |state, boundary| {
+                let boundary = boundary.unwrap_or_else(|| state.current_fresh_boundary());
+                let matched = state.consume_fresh_pending_match(&pattern, boundary)?;
                 Ok(matched.map(|m| {
                     state.advance_scan_offset(m.end_offset);
                     m.value
                 }))
-            });
-        }
-        self.wait_with("waitFor", timeout_ms, should_abort, Some(fresh_boundary), move |state, boundary| {
-            let boundary = boundary.unwrap_or_else(|| state.current_fresh_boundary());
-            let matched = state.consume_fresh_pending_match(&pattern, boundary)?;
-            Ok(matched.map(|m| {
-                state.advance_scan_offset(m.end_offset);
-                m.value
-            }))
-        })
+            },
+        )
     }
 
     pub fn wait_for_text(
@@ -851,14 +868,20 @@ impl OutputBuffer {
     ) -> WaitFuture<String> {
         let fresh_boundary = self.inner.state.lock().current_fresh_boundary();
         let pattern = pattern.clone();
-        self.wait_with("waitForText", timeout_ms, should_abort, Some(fresh_boundary), move |state, boundary| {
-            let boundary = boundary.unwrap_or_else(|| state.current_fresh_boundary());
-            let matched = state.consume_fresh_pending_text(&pattern, boundary)?;
-            Ok(matched.map(|m| {
-                state.advance_scan_offset(m.end_offset);
-                m.value
-            }))
-        })
+        self.wait_with(
+            "waitForText",
+            timeout_ms,
+            should_abort,
+            Some(fresh_boundary),
+            move |state, boundary| {
+                let boundary = boundary.unwrap_or_else(|| state.current_fresh_boundary());
+                let matched = state.consume_fresh_pending_text(&pattern, boundary)?;
+                Ok(matched.map(|m| {
+                    state.advance_scan_offset(m.end_offset);
+                    m.value
+                }))
+            },
+        )
     }
 
     pub fn wait_for_regex(
@@ -869,13 +892,19 @@ impl OutputBuffer {
     ) -> WaitFuture<String> {
         let fresh_boundary = self.inner.state.lock().current_fresh_boundary();
         let pattern = pattern.clone();
-        self.wait_with("waitForRegex", timeout_ms, should_abort, Some(fresh_boundary), move |state, boundary| {
-            let matched = state.consume_fresh_pending_regex(&pattern, boundary)?;
-            Ok(matched.map(|m| {
-                state.advance_scan_offset(m.end_offset);
-                m.value
-            }))
-        })
+        self.wait_with(
+            "waitForRegex",
+            timeout_ms,
+            should_abort,
+            Some(fresh_boundary),
+            move |state, boundary| {
+                let matched = state.consume_fresh_pending_regex(&pattern, boundary)?;
+                Ok(matched.map(|m| {
+                    state.advance_scan_offset(m.end_offset);
+                    m.value
+                }))
+            },
+        )
     }
 
     /// `waitForAny`: index of the first pattern that matches fresh output.
@@ -909,19 +938,25 @@ impl OutputBuffer {
             }
         };
         let patterns = patterns.to_vec();
-        self.wait_with("waitForAny", timeout_ms, should_abort, Some(fresh_boundary), move |state, boundary| {
-            if allow_preserved_tail_match {
-                if let Some(preserved) = state.consume_preserved_tail_match_any(&patterns)? {
-                    return Ok(Some(preserved.index));
+        self.wait_with(
+            "waitForAny",
+            timeout_ms,
+            should_abort,
+            Some(fresh_boundary),
+            move |state, boundary| {
+                if allow_preserved_tail_match {
+                    if let Some(preserved) = state.consume_preserved_tail_match_any(&patterns)? {
+                        return Ok(Some(preserved.index));
+                    }
                 }
-            }
-            let boundary = boundary.unwrap_or_else(|| state.current_fresh_boundary());
-            let fresh = state.consume_fresh_pending_match_any(&patterns, boundary)?;
-            Ok(fresh.map(|f| {
-                state.advance_scan_offset(f.matched.end_offset);
-                f.index
-            }))
-        })
+                let boundary = boundary.unwrap_or_else(|| state.current_fresh_boundary());
+                let fresh = state.consume_fresh_pending_match_any(&patterns, boundary)?;
+                Ok(fresh.map(|f| {
+                    state.advance_scan_offset(f.matched.end_offset);
+                    f.index
+                }))
+            },
+        )
     }
 }
 

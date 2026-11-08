@@ -78,7 +78,10 @@ mod tests {
 
     #[test]
     fn sends_sensitive_prompt_result() {
-        let code = steps_to_javascript(&[json!({ "type": "send", "value": "secret", "sensitive": true })], None);
+        let code = steps_to_javascript(
+            &[json!({ "type": "send", "value": "secret", "sensitive": true })],
+            None,
+        );
         assert!(code.contains("const sensitiveValue0 = await nct.dialog.prompt(\"Enter sensitive value\", \"\", { sensitive: true });"));
         assert!(code.contains("await nct.screen.sendLine(sensitiveValue0, { sensitive: true });"));
         assert!(!code.contains("secret"));

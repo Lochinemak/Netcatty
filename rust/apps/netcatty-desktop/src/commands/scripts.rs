@@ -13,8 +13,7 @@ use crate::state::AppState;
 use crate::stream::{InputMeta, SessionInput};
 use netcatty_core::CoreError;
 use netcatty_scripts::manager::{
-    AppendStepResult, HostSessionInfo, ManagerHost, OkResult, RecordingResult, RunParams,
-    RunResult,
+    AppendStepResult, HostSessionInfo, ManagerHost, OkResult, RecordingResult, RunParams, RunResult,
 };
 use netcatty_scripts::{ScriptManager, SerializedRun};
 use netcatty_sessionlog::{FileStreamOptions, LogFormat};

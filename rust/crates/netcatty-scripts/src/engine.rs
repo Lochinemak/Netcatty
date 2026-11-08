@@ -412,12 +412,26 @@ struct Shared {
 
 fn exception_to_error<'js>(ctx: &rquickjs::Ctx<'js>, value: rquickjs::Value<'js>) -> ScriptError {
     if let Some(object) = value.as_object() {
-        let name: Option<String> = object.get::<_, Option<rquickjs::Coerced<String>>>("name").ok().flatten().map(|c| c.0);
-        let message: Option<String> = object.get::<_, Option<rquickjs::Coerced<String>>>("message").ok().flatten().map(|c| c.0);
-        let stack: Option<String> = object.get::<_, Option<rquickjs::Coerced<String>>>("stack").ok().flatten().map(|c| c.0);
+        let name: Option<String> = object
+            .get::<_, Option<rquickjs::Coerced<String>>>("name")
+            .ok()
+            .flatten()
+            .map(|c| c.0);
+        let message: Option<String> = object
+            .get::<_, Option<rquickjs::Coerced<String>>>("message")
+            .ok()
+            .flatten()
+            .map(|c| c.0);
+        let stack: Option<String> = object
+            .get::<_, Option<rquickjs::Coerced<String>>>("stack")
+            .ok()
+            .flatten()
+            .map(|c| c.0);
         if message.is_some() || name.is_some() {
             return ScriptError {
-                name: name.filter(|n| !n.is_empty()).unwrap_or_else(|| "Error".into()),
+                name: name
+                    .filter(|n| !n.is_empty())
+                    .unwrap_or_else(|| "Error".into()),
                 message: message.unwrap_or_default(),
                 stack: stack.filter(|s| !s.is_empty()),
             };
@@ -459,7 +473,8 @@ fn run_engine(
     use rquickjs::{Context, Function, Runtime};
 
     let limits = config.limits.clone();
-    let runtime = Runtime::new().map_err(|e| ScriptError::new(format!("Script worker failed to start: {e}")))?;
+    let runtime = Runtime::new()
+        .map_err(|e| ScriptError::new(format!("Script worker failed to start: {e}")))?;
     runtime.set_memory_limit(limits.memory_limit_bytes);
     runtime.set_max_stack_size(SCRIPT_WORKER_STACK_SIZE_BYTES);
 
@@ -482,7 +497,8 @@ fn run_engine(
         })));
     }
 
-    let context = Context::full(&runtime).map_err(|e| ScriptError::new(format!("Script worker failed to start: {e}")))?;
+    let context = Context::full(&runtime)
+        .map_err(|e| ScriptError::new(format!("Script worker failed to start: {e}")))?;
     let shared = Arc::new(Shared {
         events: events.clone(),
         pending: AtomicUsize::new(0),
@@ -493,101 +509,119 @@ fn run_engine(
     });
 
     // Install the host natives, the shim and the user's script.
-    let start: Result<Option<rquickjs::Persistent<rquickjs::Promise<'static>>>, ScriptError> = context.with(|ctx| {
-        let globals = ctx.globals();
-        let host_call = {
-            let shared = shared.clone();
-            Function::new(ctx.clone(), move |ctx: rquickjs::Ctx<'_>, method: String, args_json: String| -> rquickjs::Result<f64> {
-                if shared.pending.load(Ordering::SeqCst) >= shared.limits.max_pending_host_requests {
-                    return Err(rquickjs::Exception::throw_message(
-                        &ctx,
-                        &format!(
-                            "Script exceeded the {} pending host request limit",
-                            shared.limits.max_pending_host_requests
-                        ),
-                    ));
-                }
-                let args: Vec<Value> = serde_json::from_str(&args_json).unwrap_or_default();
-                let request_id = shared.next_request_id.fetch_add(1, Ordering::SeqCst) as u64;
-                shared.pending.fetch_add(1, Ordering::SeqCst);
-                let _ = shared.events.send(EngineEvent::Rpc {
-                    request_id,
-                    method,
-                    args,
-                });
-                Ok(request_id as f64)
+    let start: Result<Option<rquickjs::Persistent<rquickjs::Promise<'static>>>, ScriptError> =
+        context.with(|ctx| {
+            let globals = ctx.globals();
+            let host_call = {
+                let shared = shared.clone();
+                Function::new(
+                    ctx.clone(),
+                    move |ctx: rquickjs::Ctx<'_>,
+                          method: String,
+                          args_json: String|
+                          -> rquickjs::Result<f64> {
+                        if shared.pending.load(Ordering::SeqCst)
+                            >= shared.limits.max_pending_host_requests
+                        {
+                            return Err(rquickjs::Exception::throw_message(
+                                &ctx,
+                                &format!(
+                                    "Script exceeded the {} pending host request limit",
+                                    shared.limits.max_pending_host_requests
+                                ),
+                            ));
+                        }
+                        let args: Vec<Value> = serde_json::from_str(&args_json).unwrap_or_default();
+                        let request_id =
+                            shared.next_request_id.fetch_add(1, Ordering::SeqCst) as u64;
+                        shared.pending.fetch_add(1, Ordering::SeqCst);
+                        let _ = shared.events.send(EngineEvent::Rpc {
+                            request_id,
+                            method,
+                            args,
+                        });
+                        Ok(request_id as f64)
+                    },
+                )
+            }
+            .map_err(|e| ScriptError::new(e.to_string()))?;
+            let host_notify = {
+                let shared = shared.clone();
+                Function::new(
+                    ctx.clone(),
+                    move |ctx: rquickjs::Ctx<'_>,
+                          method: String,
+                          args_json: String|
+                          -> rquickjs::Result<()> {
+                        let total = shared.total_notifications.fetch_add(1, Ordering::SeqCst) + 1;
+                        if total > shared.limits.max_total_notifications {
+                            return Err(rquickjs::Exception::throw_message(
+                                &ctx,
+                                &format!(
+                                    "Script exceeded the {} notification limit",
+                                    shared.limits.max_total_notifications
+                                ),
+                            ));
+                        }
+                        if method == "log" || method == "console.log" {
+                            let logs = shared.log_notifications.fetch_add(1, Ordering::SeqCst) + 1;
+                            if logs > shared.limits.max_log_notifications {
+                                return Err(rquickjs::Exception::throw_message(
+                                    &ctx,
+                                    &format!(
+                                        "Script exceeded the {} log notification limit",
+                                        shared.limits.max_log_notifications
+                                    ),
+                                ));
+                            }
+                        }
+                        let args: Vec<Value> = serde_json::from_str(&args_json).unwrap_or_default();
+                        let _ = shared.events.send(EngineEvent::Notify { method, args });
+                        Ok(())
+                    },
+                )
+            }
+            .map_err(|e| ScriptError::new(e.to_string()))?;
+            let config_json = serde_json::json!({
+                "version": config.version,
+                "snapshot": config.snapshot,
             })
-        }
-        .map_err(|e| ScriptError::new(e.to_string()))?;
-        let host_notify = {
-            let shared = shared.clone();
-            Function::new(ctx.clone(), move |ctx: rquickjs::Ctx<'_>, method: String, args_json: String| -> rquickjs::Result<()> {
-                let total = shared.total_notifications.fetch_add(1, Ordering::SeqCst) + 1;
-                if total > shared.limits.max_total_notifications {
-                    return Err(rquickjs::Exception::throw_message(
-                        &ctx,
-                        &format!(
-                            "Script exceeded the {} notification limit",
-                            shared.limits.max_total_notifications
-                        ),
-                    ));
-                }
-                if method == "log" || method == "console.log" {
-                    let logs = shared.log_notifications.fetch_add(1, Ordering::SeqCst) + 1;
-                    if logs > shared.limits.max_log_notifications {
-                        return Err(rquickjs::Exception::throw_message(
-                            &ctx,
-                            &format!(
-                                "Script exceeded the {} log notification limit",
-                                shared.limits.max_log_notifications
-                            ),
-                        ));
+            .to_string();
+            globals
+                .set("__nctHostCall", host_call)
+                .and_then(|_| globals.set("__nctHostNotify", host_notify))
+                .and_then(|_| globals.set("__nctConfigJson", config_json))
+                .map_err(|e| ScriptError::new(e.to_string()))?;
+            if let Err(err) = ctx.eval::<(), _>(PRELUDE) {
+                let value = ctx.catch();
+                return Err(match err {
+                    rquickjs::Error::Exception => exception_to_error(&ctx, value),
+                    other => ScriptError::new(other.to_string()),
+                });
+            }
+
+            *slice_started.lock() = Instant::now();
+            let mut options = rquickjs::context::EvalOptions::default();
+            options.global = true;
+            options.strict = false;
+            options.backtrace_barrier = false;
+            options.promise = false;
+            options.filename = Some(config.filename.clone());
+            match ctx
+                .eval_with_options::<rquickjs::Value, _>(config.source.as_bytes().to_vec(), options)
+            {
+                Ok(value) => Ok(value
+                    .into_promise()
+                    .map(|p| rquickjs::Persistent::save(&ctx, p))),
+                Err(rquickjs::Error::Exception) => {
+                    match execution_failure(&ctx, &abort, &timed_out, &limits) {
+                        Some(error) => Err(error),
+                        None => Ok(None),
                     }
                 }
-                let args: Vec<Value> = serde_json::from_str(&args_json).unwrap_or_default();
-                let _ = shared.events.send(EngineEvent::Notify { method, args });
-                Ok(())
-            })
-        }
-        .map_err(|e| ScriptError::new(e.to_string()))?;
-        let config_json = serde_json::json!({
-            "version": config.version,
-            "snapshot": config.snapshot,
-        })
-        .to_string();
-        globals
-            .set("__nctHostCall", host_call)
-            .and_then(|_| globals.set("__nctHostNotify", host_notify))
-            .and_then(|_| globals.set("__nctConfigJson", config_json))
-            .map_err(|e| ScriptError::new(e.to_string()))?;
-        if let Err(err) = ctx.eval::<(), _>(PRELUDE) {
-            let value = ctx.catch();
-            return Err(match err {
-                rquickjs::Error::Exception => exception_to_error(&ctx, value),
-                other => ScriptError::new(other.to_string()),
-            });
-        }
-
-        *slice_started.lock() = Instant::now();
-        let mut options = rquickjs::context::EvalOptions::default();
-        options.global = true;
-        options.strict = false;
-        options.backtrace_barrier = false;
-        options.promise = false;
-        options.filename = Some(config.filename.clone());
-        match ctx.eval_with_options::<rquickjs::Value, _>(config.source.as_bytes().to_vec(), options) {
-            Ok(value) => Ok(value
-                .into_promise()
-                .map(|p| rquickjs::Persistent::save(&ctx, p))),
-            Err(rquickjs::Error::Exception) => {
-                match execution_failure(&ctx, &abort, &timed_out, &limits) {
-                    Some(error) => Err(error),
-                    None => Ok(None),
-                }
+                Err(other) => Err(ScriptError::new(other.to_string())),
             }
-            Err(other) => Err(ScriptError::new(other.to_string())),
-        }
-    });
+        });
 
     let main_promise = match start {
         Ok(promise) => promise,
@@ -670,7 +704,13 @@ fn run_engine(
                         ),
                     };
                     let snapshot_json = serde_json::to_string(&snapshot).unwrap_or_default();
-                    match settle.call::<_, ()>((request_id as f64, ok, value_json, error_json, snapshot_json)) {
+                    match settle.call::<_, ()>((
+                        request_id as f64,
+                        ok,
+                        value_json,
+                        error_json,
+                        snapshot_json,
+                    )) {
                         Ok(()) => Ok(()),
                         Err(rquickjs::Error::Exception) => {
                             Err(execution_failure(&ctx, &abort, &timed_out, &limits))
@@ -773,7 +813,9 @@ mod tests {
                 None => break Err(ScriptError::new("engine gone")),
             }
         };
-        tokio::task::spawn_blocking(move || handle.join()).await.unwrap();
+        tokio::task::spawn_blocking(move || handle.join())
+            .await
+            .unwrap();
         (result, notifications)
     }
 
@@ -788,7 +830,10 @@ mod tests {
         assert_eq!(result, Ok(()));
         assert_eq!(notifications[0].0, "log");
         assert_eq!(notifications[0].1[0], "box/host/1.2.3");
-        assert_eq!(notifications[1], ("console.log".into(), vec![Value::String("a 1".into())]));
+        assert_eq!(
+            notifications[1],
+            ("console.log".into(), vec![Value::String("a 1".into())])
+        );
     }
 
     #[tokio::test]
@@ -826,17 +871,23 @@ mod tests {
 
     #[tokio::test]
     async fn undefined_arguments_are_marked() {
-        let (result, _) = run_script("await nct.screen.waitFor('x'); await nct.screen.getText(undefined, 2);", 1000, |method, args| {
-            match method {
-                "screen.waitFor" => assert_eq!(args[1], serde_json::json!({ "__nctUndefined": true })),
-                "screen.getText" => {
-                    assert_eq!(args[0], serde_json::json!({ "__nctUndefined": true }));
-                    assert_eq!(args[1], 2);
+        let (result, _) = run_script(
+            "await nct.screen.waitFor('x'); await nct.screen.getText(undefined, 2);",
+            1000,
+            |method, args| {
+                match method {
+                    "screen.waitFor" => {
+                        assert_eq!(args[1], serde_json::json!({ "__nctUndefined": true }))
+                    }
+                    "screen.getText" => {
+                        assert_eq!(args[0], serde_json::json!({ "__nctUndefined": true }));
+                        assert_eq!(args[1], 2);
+                    }
+                    _ => {}
                 }
-                _ => {}
-            }
-            Ok(None)
-        })
+                Ok(None)
+            },
+        )
         .await;
         assert_eq!(result, Ok(()));
     }
@@ -862,10 +913,13 @@ mod tests {
 
     #[tokio::test]
     async fn enforces_the_deadline_across_promise_continuations() {
-        let (result, _) =
-            run_script("await Promise.resolve(); while (true) {}", 20, |_, _| Ok(None)).await;
+        let (result, _) = run_script("await Promise.resolve(); while (true) {}", 20, |_, _| {
+            Ok(None)
+        })
+        .await;
         assert!(result.unwrap_err().message.contains("timed out"));
-        let (result, _) = run_script("await nct.sleep(1); while (true) {}", 20, |_, _| Ok(None)).await;
+        let (result, _) =
+            run_script("await nct.sleep(1); while (true) {}", 20, |_, _| Ok(None)).await;
         assert!(result.unwrap_err().message.contains("timed out"));
         let (result, _) = run_script(
             "await nct.sleep(1); Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 250);",
@@ -904,7 +958,10 @@ mod tests {
     async fn explicit_stop_terminates_a_blocked_worker() {
         let (tx, mut rx) = mpsc::unbounded_channel();
         let handle = spawn_engine(
-            config("await nct.sleep(1); /^(a+)+$/.test('a'.repeat(30) + '!');", 5_000),
+            config(
+                "await nct.sleep(1); /^(a+)+$/.test('a'.repeat(30) + '!');",
+                5_000,
+            ),
             tx,
         );
         let started = Instant::now();
@@ -917,7 +974,9 @@ mod tests {
             snapshot: RuntimeSnapshot::default(),
         });
         tokio::time::sleep(Duration::from_millis(50)).await;
-        tokio::task::spawn_blocking(move || handle.join()).await.unwrap();
+        tokio::task::spawn_blocking(move || handle.join())
+            .await
+            .unwrap();
         assert!(started.elapsed() < Duration::from_secs(1));
         // No completion is reported after an abort.
         assert!(rx.try_recv().is_err());
@@ -928,7 +987,10 @@ mod tests {
         let started = Instant::now();
         let (tx, mut rx) = mpsc::unbounded_channel();
         let handle = spawn_engine(
-            config("for (let i = 0; i < 20000; i += 1) void nct.sleep(60000);", 5_000),
+            config(
+                "for (let i = 0; i < 20000; i += 1) void nct.sleep(60000);",
+                5_000,
+            ),
             tx,
         );
         let mut rpcs = 0;
@@ -944,7 +1006,9 @@ mod tests {
             error.message,
             format!("Script exceeded the {SCRIPT_WORKER_MAX_PENDING_HOST_REQUESTS} pending host request limit")
         );
-        tokio::task::spawn_blocking(move || handle.join()).await.unwrap();
+        tokio::task::spawn_blocking(move || handle.join())
+            .await
+            .unwrap();
         assert!(started.elapsed() < Duration::from_secs(1));
     }
 
@@ -970,7 +1034,9 @@ mod tests {
         .await;
         assert_eq!(
             result.unwrap_err().message,
-            format!("Script exceeded the {SCRIPT_WORKER_MAX_LOG_NOTIFICATIONS} log notification limit")
+            format!(
+                "Script exceeded the {SCRIPT_WORKER_MAX_LOG_NOTIFICATIONS} log notification limit"
+            )
         );
         assert_eq!(notifications.len(), SCRIPT_WORKER_MAX_LOG_NOTIFICATIONS);
     }

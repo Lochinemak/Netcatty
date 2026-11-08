@@ -466,9 +466,10 @@ mod tests {
 
     #[test]
     fn regex_match_reports_fresh_core() {
-        let m = try_regex_match_with_end("old READY\nfoo READY tail", &WaitPattern::text(".*READY.*"))
-            .unwrap()
-            .unwrap();
+        let m =
+            try_regex_match_with_end("old READY\nfoo READY tail", &WaitPattern::text(".*READY.*"))
+                .unwrap()
+                .unwrap();
         // The `s` flag makes `.*` span lines: the whole text matches and the
         // latest `READY` is the fresh core.
         assert_eq!(m.start_offset, 0);

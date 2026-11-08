@@ -46,8 +46,14 @@ mod tests {
             run.ended_at = Some(index + 1);
             runs.insert(id, run);
         }
-        runs.insert("active".into(), ScriptRun::new("active", None, None, "s", 0));
-        assert_eq!(prune_completed_runs(&mut runs, MAX_RETAINED_COMPLETED_RUNS), 25);
+        runs.insert(
+            "active".into(),
+            ScriptRun::new("active", None, None, "s", 0),
+        );
+        assert_eq!(
+            prune_completed_runs(&mut runs, MAX_RETAINED_COMPLETED_RUNS),
+            25
+        );
         assert_eq!(runs.len(), MAX_RETAINED_COMPLETED_RUNS + 1);
         assert!(runs.contains_key("active"));
         assert!(!runs.contains_key("completed-0"));

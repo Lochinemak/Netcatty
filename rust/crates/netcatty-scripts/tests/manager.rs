@@ -138,9 +138,9 @@ impl Harness {
                         events::SCREEN_SNAPSHOT_REQUEST => {
                             let request_id = payload["requestId"].as_str().unwrap().to_string();
                             let session_id = payload["sessionId"].as_str().unwrap().to_string();
-                            let value = snapshot(&session_id).unwrap_or_else(|| {
-                                json!({ "rows": 24, "cols": 80, "currentRow": 0, "lines": [] })
-                            });
+                            let value = snapshot(&session_id).unwrap_or_else(
+                                || json!({ "rows": 24, "cols": 80, "currentRow": 0, "lines": [] }),
+                            );
                             manager.screen_snapshot_response(&request_id, Some(value));
                         }
                         events::DIALOG_REQUEST => {
@@ -236,7 +236,10 @@ async fn wait_until<T>(mut predicate: impl FnMut() -> Option<T>) -> T {
         if let Some(value) = predicate() {
             return value;
         }
-        assert!(started.elapsed() < Duration::from_secs(3), "condition not met");
+        assert!(
+            started.elapsed() < Duration::from_secs(3),
+            "condition not met"
+        );
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
 }
@@ -249,7 +252,11 @@ fn snapshot_lines(lines: &[&str]) -> Value {
 async fn run_completion_stores_actual_executed_step_count() {
     let h = Harness::simple();
     let run = h
-        .run("session-1", "script-loop", "for (let i = 0; i < 3; i += 1) { nct.log(`step ${i}`); }")
+        .run(
+            "session-1",
+            "script-loop",
+            "for (let i = 0; i < 3; i += 1) { nct.log(`step ${i}`); }",
+        )
         .await;
     assert_eq!(run["status"], "completed");
     assert_eq!(run["stepIndex"], 3);
@@ -264,8 +271,16 @@ async fn run_completion_stores_actual_executed_step_count() {
 #[tokio::test(flavor = "multi_thread")]
 async fn same_session_runs_are_serialized_through_the_session_queue() {
     let h = Harness::new(false, |_| None, |_| DialogAnswer::Ignore);
-    let slow = h.run("session-mutex", "slow", "await nct.sleep(40); await nct.screen.sendLine('slow-run');");
-    let fast = h.run("session-mutex", "fast", "await nct.screen.sendLine('fast-run');");
+    let slow = h.run(
+        "session-mutex",
+        "slow",
+        "await nct.sleep(40); await nct.screen.sendLine('slow-run');",
+    );
+    let fast = h.run(
+        "session-mutex",
+        "fast",
+        "await nct.screen.sendLine('fast-run');",
+    );
     tokio::join!(slow, fast);
     let order: Vec<String> = h
         .writes()
@@ -319,7 +334,11 @@ async fn a_caller_can_cancel_its_queued_script_by_run_id() {
         json!({ "runId": "queued-connect-run", "runIds": ["queued-connect-run"] })
     );
     assert!(h.manager.stop("queued-connect-run").ok);
-    assert!(h.manager.dialog_response(&request_id, Some(json!(true)), false).ok);
+    assert!(
+        h.manager
+            .dialog_response(&request_id, Some(json!(true)), false)
+            .ok
+    );
     active.await.unwrap().unwrap();
     tokio::time::sleep(Duration::from_millis(60)).await;
     let writes = h.writes();
@@ -351,7 +370,9 @@ async fn stopping_a_script_releases_the_session_queue_so_it_can_run_again() {
     });
     let dialogs = h.dialogs.clone();
     wait_until(|| dialogs.lock().first().cloned()).await;
-    let run_id = h.manager.get_runs(Some("session-stop-queue"))[0].run_id.clone();
+    let run_id = h.manager.get_runs(Some("session-stop-queue"))[0]
+        .run_id
+        .clone();
     assert!(h.manager.stop(&run_id).ok);
     first.await.unwrap().unwrap();
     let stopped = h.final_run("blocked").await;
@@ -359,7 +380,11 @@ async fn stopping_a_script_releases_the_session_queue_so_it_can_run_again() {
     assert_eq!(stopped["error"], "Stopped by user");
 
     let again = h
-        .run("session-stop-queue", "again", "await nct.screen.sendLine('again-ran');")
+        .run(
+            "session-stop-queue",
+            "again",
+            "await nct.screen.sendLine('again-ran');",
+        )
         .await;
     assert_eq!(again["status"], "completed");
     assert!(h.writes().iter().any(|w| w == "again-ran"));
@@ -370,7 +395,11 @@ async fn stopping_a_script_releases_the_session_queue_so_it_can_run_again() {
 async fn completed_scripts_clear_unawaited_dialog_requests() {
     let h = Harness::new(true, |_| None, |_| DialogAnswer::Ignore);
     let run = h
-        .run("session-unawaited-dialog", "unawaited", "void nct.dialog.confirm('background'); nct.log('done');")
+        .run(
+            "session-unawaited-dialog",
+            "unawaited",
+            "void nct.dialog.confirm('background'); nct.log('done');",
+        )
         .await;
     assert_eq!(run["status"], "completed");
     let request_id = wait_until(|| {
@@ -381,7 +410,11 @@ async fn completed_scripts_clear_unawaited_dialog_requests() {
     })
     .await;
     // The pending request was settled when the run ended.
-    assert!(!h.manager.dialog_response(&request_id, Some(json!(true)), false).ok);
+    assert!(
+        !h.manager
+            .dialog_response(&request_id, Some(json!(true)), false)
+            .ok
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -458,14 +491,26 @@ async fn stopping_a_script_releases_its_session_log_so_the_next_run_can_start_on
 async fn start_log_without_path_uses_the_default_directory() {
     let h = Harness::simple();
     let run = h
-        .run("session-default-log", "default-log", "await nct.session.startLog(); await nct.session.stopLog();")
+        .run(
+            "session-default-log",
+            "default-log",
+            "await nct.session.startLog(); await nct.session.stopLog();",
+        )
         .await;
     assert_eq!(run["status"], "completed");
     let started = h.state.lock().started_logs.clone();
     assert_eq!(started.len(), 1);
     assert_eq!(started[0].parent().unwrap(), std::env::temp_dir().as_path());
-    let name = started[0].file_name().unwrap().to_str().unwrap().to_string();
-    assert!(name.starts_with("netcatty-script-") && name.ends_with(".log"), "{name}");
+    let name = started[0]
+        .file_name()
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .to_string();
+    assert!(
+        name.starts_with("netcatty-script-") && name.ends_with(".log"),
+        "{name}"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -499,7 +544,11 @@ async fn renderer_session_meta_and_registry_labels_are_exposed() {
     assert_eq!(log_text(&run), "true|Main label|main.example|root");
 
     let run = h
-        .run("unknown-session", "no-meta", "nct.log(String(nct.session.connected) + '|' + nct.session.name);")
+        .run(
+            "unknown-session",
+            "no-meta",
+            "nct.log(String(nct.session.connected) + '|' + nct.session.name);",
+        )
         .await;
     assert_eq!(log_text(&run), "false|");
     // Unused type import guard.
@@ -570,14 +619,18 @@ async fn cancelled_form_dialogs_fail_the_script() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn convenience_dialogs_return_single_values() {
-    let h = Harness::new(true, |_| None, |request| {
-        let field = &request["form"]["fields"][0];
-        DialogAnswer::Value(match field["type"].as_str() {
-            Some("checkbox") => json!({ "value": true }),
-            Some("radio") => json!({ "value": "b" }),
-            _ => json!({ "value": "y" }),
-        })
-    });
+    let h = Harness::new(
+        true,
+        |_| None,
+        |request| {
+            let field = &request["form"]["fields"][0];
+            DialogAnswer::Value(match field["type"].as_str() {
+                Some("checkbox") => json!({ "value": true }),
+                Some("radio") => json!({ "value": "b" }),
+                _ => json!({ "value": "y" }),
+            })
+        },
+    );
     let run = h
         .run(
             "session-convenience",
@@ -601,7 +654,11 @@ async fn convenience_dialogs_return_single_values() {
 async fn invalid_form_specs_fail_with_the_validation_message() {
     let h = Harness::simple();
     let run = h
-        .run("session-bad-form", "bad-form", "await nct.dialog.form({ fields: [] });")
+        .run(
+            "session-bad-form",
+            "bad-form",
+            "await nct.dialog.form({ fields: [] });",
+        )
         .await;
     assert_eq!(run["status"], "failed");
     assert_eq!(run["error"], "Dialog form requires at least one field");
@@ -625,13 +682,22 @@ async fn without_a_renderer_dialogs_resolve_with_defaults() {
 async fn wait_for_matches_text_already_visible_on_the_startup_screen() {
     let h = Harness::new(
         true,
-        |_| Some(json!({ "rows": 24, "cols": 80, "currentRow": 1, "lines": ["visible READY marker", "user@host:~$ "] })),
+        |_| {
+            Some(
+                json!({ "rows": 24, "cols": 80, "currentRow": 1, "lines": ["visible READY marker", "user@host:~$ "] }),
+            )
+        },
         |_| DialogAnswer::Value(json!("abort")),
     );
     let sid = "session-visible-startup-output";
-    h.manager.append_session_output(sid, "scrolled-off READY marker\n");
+    h.manager
+        .append_session_output(sid, "scrolled-off READY marker\n");
     let run = h
-        .run(sid, "visible-output", "const value = await nct.screen.waitFor('READY', 1000); nct.log('matched ' + value);")
+        .run(
+            sid,
+            "visible-output",
+            "const value = await nct.screen.waitFor('READY', 1000); nct.log('matched ' + value);",
+        )
         .await;
     assert_eq!(run["status"], "completed");
     assert!(log_text(&run).contains("matched READY"));
@@ -648,7 +714,11 @@ async fn wait_for_ignores_keywords_that_have_scrolled_off_the_visible_screen() {
     h.manager
         .append_session_output(sid, "old deployment READY marker\nuser@host:~$ \n");
     let run = h
-        .run(sid, "scrolled-off", "await nct.screen.waitFor('READY', 100); nct.log('unexpected');")
+        .run(
+            sid,
+            "scrolled-off",
+            "await nct.screen.waitFor('READY', 100); nct.log('unexpected');",
+        )
         .await;
     assert_eq!(run["status"], "failed");
     assert_eq!(run["error"], "Script stopped by user");
@@ -694,7 +764,11 @@ async fn wait_for_sees_output_that_arrives_while_startup_snapshot_sync_is_pendin
     );
     *h_slot.lock() = Some(h.buffer(sid));
     let run = h
-        .run(sid, "sync-race", "const v = await nct.screen.waitForText('READY', 500); nct.log('matched ' + v);")
+        .run(
+            sid,
+            "sync-race",
+            "const v = await nct.screen.waitForText('READY', 500); nct.log('matched ' + v);",
+        )
         .await;
     assert_eq!(run["status"], "completed", "{run}");
 }
@@ -707,7 +781,11 @@ async fn wait_for_prompt_can_still_use_the_current_startup_prompt() {
         |_| DialogAnswer::Value(json!("abort")),
     );
     let run = h
-        .run("session-startup-prompt", "startup-prompt", "const i = await nct.screen.waitForPrompt(500); nct.log('prompt ' + i);")
+        .run(
+            "session-startup-prompt",
+            "startup-prompt",
+            "const i = await nct.screen.waitForPrompt(500); nct.log('prompt ' + i);",
+        )
         .await;
     assert_eq!(run["status"], "completed", "{run}");
     assert!(log_text(&run).contains("prompt 0"));
@@ -773,11 +851,19 @@ async fn send_line_keeps_prompts_that_arrive_between_body_and_cr_waitable() {
 #[tokio::test(flavor = "multi_thread")]
 async fn wait_timeout_dialog_can_skip_and_retry() {
     let answers = Arc::new(Mutex::new(vec!["retry", "skip"]));
-    let h = Harness::new(true, |_| None, move |_| {
-        let mut answers = answers.lock();
-        let answer = if answers.is_empty() { "abort" } else { answers.remove(0) };
-        DialogAnswer::Value(json!(answer))
-    });
+    let h = Harness::new(
+        true,
+        |_| None,
+        move |_| {
+            let mut answers = answers.lock();
+            let answer = if answers.is_empty() {
+                "abort"
+            } else {
+                answers.remove(0)
+            };
+            DialogAnswer::Value(json!(answer))
+        },
+    );
     let run = h
         .run(
             "session-timeout-skip",
@@ -788,7 +874,10 @@ async fn wait_timeout_dialog_can_skip_and_retry() {
     // First wait: retry, then skip → "". Second wait: abort → rejection.
     assert_eq!(h.dialogs.lock().len(), 3);
     assert_eq!(run["status"], "completed", "{run}");
-    assert!(log_text(&run).contains("\"\"|Script stopped by user"), "{run}");
+    assert!(
+        log_text(&run).contains("\"\"|Script stopped by user"),
+        "{run}"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -848,7 +937,10 @@ async fn regex_waits_work_over_multiline_output() {
         )
         .await;
     assert_eq!(run["status"], "completed", "{run}");
-    assert_eq!(log_text(&run).lines().last().unwrap(), "Version: 2.0\nREADY".lines().last().unwrap());
+    assert_eq!(
+        log_text(&run).lines().last().unwrap(),
+        "Version: 2.0\nREADY".lines().last().unwrap()
+    );
     assert!(log_text(&run).contains("Version: 2.0"));
 }
 
@@ -864,7 +956,8 @@ async fn determinate_progress_is_reported_and_cleared() {
     let observer = tokio::spawn(async move {
         wait_until(|| {
             updates.lock().iter().flatten().find_map(|r| {
-                (r["progressMode"] == "determinate" && r["progressCurrent"] == 3.0).then(|| r.clone())
+                (r["progressMode"] == "determinate" && r["progressCurrent"] == 3.0)
+                    .then(|| r.clone())
             })
         })
         .await
@@ -896,7 +989,12 @@ async fn pause_blocks_writes_until_resume() {
             .await
     });
     let m = h.manager.clone();
-    let run_id = wait_until(|| m.get_runs(Some("session-pause")).first().map(|r| r.run_id.clone())).await;
+    let run_id = wait_until(|| {
+        m.get_runs(Some("session-pause"))
+            .first()
+            .map(|r| r.run_id.clone())
+    })
+    .await;
     assert!(h.manager.pause(&run_id).ok);
     tokio::time::sleep(Duration::from_millis(300)).await;
     assert!(h.writes().is_empty());
@@ -914,15 +1012,18 @@ async fn pause_blocks_writes_until_resume() {
 #[tokio::test(flavor = "multi_thread")]
 async fn script_errors_and_timeouts_fail_the_run() {
     let h = Harness::simple();
-    let run = h.run("session-throw", "throws", "throw new Error('boom');").await;
+    let run = h
+        .run("session-throw", "throws", "throw new Error('boom');")
+        .await;
     assert_eq!(run["status"], "failed");
     assert_eq!(run["error"], "boom");
     assert!(log_text(&run).ends_with("boom"));
 
-    h.manager.set_engine_limits(netcatty_scripts::engine::EngineLimits {
-        sync_execution_timeout_ms: 30,
-        ..Default::default()
-    });
+    h.manager
+        .set_engine_limits(netcatty_scripts::engine::EngineLimits {
+            sync_execution_timeout_ms: 30,
+            ..Default::default()
+        });
     let run = h.run("session-loop", "loops", "while (true) {}").await;
     assert_eq!(run["status"], "failed");
     assert_eq!(run["error"], "Script execution timed out after 30ms");
@@ -932,7 +1033,11 @@ async fn script_errors_and_timeouts_fail_the_run() {
 async fn disconnect_and_clear_reach_the_session() {
     let h = Harness::simple();
     let run = h
-        .run("session-disconnect", "disconnect", "await nct.screen.clear(); await nct.session.disconnect();")
+        .run(
+            "session-disconnect",
+            "disconnect",
+            "await nct.screen.clear(); await nct.session.disconnect();",
+        )
         .await;
     assert_eq!(run["status"], "completed");
     assert_eq!(h.writes(), vec!["\x1b[2J\x1b[H"]);
@@ -943,7 +1048,9 @@ async fn disconnect_and_clear_reach_the_session() {
 async fn get_text_reads_the_renderer_snapshot() {
     let h = Harness::new(
         true,
-        |_| Some(json!({ "rows": 30, "cols": 100, "currentRow": 2, "lines": ["a", "b", "c", "d"] })),
+        |_| {
+            Some(json!({ "rows": 30, "cols": 100, "currentRow": 2, "lines": ["a", "b", "c", "d"] }))
+        },
         |_| DialogAnswer::Ignore,
     );
     let run = h
@@ -968,8 +1075,14 @@ async fn run_parameter_validation_matches_electron() {
                 .unwrap_err()
         }
     };
-    assert_eq!(err(json!({ "content": "x" })).await, "No target session for script run");
-    assert_eq!(err(json!({ "sessionId": "s", "content": "  " })).await, "Script content is empty");
+    assert_eq!(
+        err(json!({ "content": "x" })).await,
+        "No target session for script run"
+    );
+    assert_eq!(
+        err(json!({ "sessionId": "s", "content": "  " })).await,
+        "Script content is empty"
+    );
     assert_eq!(
         err(json!({ "sessionIds": ["a", "b"], "content": "x", "runId": "r" })).await,
         "A caller-provided runId requires exactly one target session"
@@ -978,9 +1091,14 @@ async fn run_parameter_validation_matches_electron() {
         err(json!({ "sessionIds": ["a", "b"], "content": "x", "returnWhenQueued": true })).await,
         "returnWhenQueued requires exactly one target session"
     );
-    assert_eq!(err(json!({ "sessionId": "s", "content": "x", "runId": " " })).await, "Invalid script run id");
-    h.run_with(json!({ "scriptId": "dup", "sessionId": "s", "content": "nct.log(1)", "runId": "dup-id" }))
-        .await;
+    assert_eq!(
+        err(json!({ "sessionId": "s", "content": "x", "runId": " " })).await,
+        "Invalid script run id"
+    );
+    h.run_with(
+        json!({ "scriptId": "dup", "sessionId": "s", "content": "nct.log(1)", "runId": "dup-id" }),
+    )
+    .await;
     assert_eq!(
         err(json!({ "sessionId": "s", "content": "x", "runId": "dup-id" })).await,
         "Script run id already exists: dup-id"
@@ -1028,14 +1146,24 @@ async fn recording_generates_javascript() {
         "sessionId required"
     );
     h.manager.recording_start(sid).unwrap();
-    assert!(h.manager.recording_append_step(sid, Some(json!({ "type": "send", "value": "ls" }))).ok);
-    assert!(h.manager.recording_append_step(sid, Some(json!({ "type": "waitForPrompt" }))).ok);
+    assert!(
+        h.manager
+            .recording_append_step(sid, Some(json!({ "type": "send", "value": "ls" })))
+            .ok
+    );
+    assert!(
+        h.manager
+            .recording_append_step(sid, Some(json!({ "type": "waitForPrompt" })))
+            .ok
+    );
     let missing = h.manager.recording_append_step(sid, None);
     assert_eq!(missing.error.as_deref(), Some("Recording step is required"));
     let result = h.manager.recording_stop(sid);
     assert_eq!(result.steps.len(), 2);
     assert!(result.code.contains("await nct.screen.sendLine(\"ls\");"));
-    assert!(result.code.contains("await nct.screen.waitForPrompt(30000);"));
+    assert!(result
+        .code
+        .contains("await nct.screen.waitForPrompt(30000);"));
     assert!(result.code.contains("// Recorded on 20"));
     assert_eq!(h.manager.recording_stop(sid).code, "");
 }
@@ -1055,7 +1183,10 @@ async fn recording_stops_explicitly_when_the_retained_step_limit_is_reached() {
     let result = result.unwrap();
     assert_eq!(result.stopped, Some(true));
     assert_eq!(result.error.as_deref(), Some(SCRIPT_RECORDING_LIMIT_ERROR));
-    assert_eq!(result.steps.as_ref().unwrap().len(), MAX_SCRIPT_RECORDING_STEPS);
+    assert_eq!(
+        result.steps.as_ref().unwrap().len(),
+        MAX_SCRIPT_RECORDING_STEPS
+    );
     assert!(result.code.as_ref().unwrap().contains("sleep"));
     let after = h
         .manager

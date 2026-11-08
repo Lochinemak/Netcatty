@@ -183,7 +183,10 @@ fn script_drives_a_local_shell() {
             "#,
         } }),
     ));
-    assert_eq!(queued, json!({ "runId": "local-shell-run", "runIds": ["local-shell-run"] }));
+    assert_eq!(
+        queued,
+        json!({ "runId": "local-shell-run", "runIds": ["local-shell-run"] })
+    );
 
     let run = drive_until_ended(&h, "local-shell-run", &snapshots, &dialogs, |_| json!(true));
     assert_eq!(run["status"], "completed", "{run}");
@@ -200,10 +203,18 @@ fn script_drives_a_local_shell() {
     assert!(!updates.lock().unwrap().is_empty());
 
     // Filters by session.
-    let none = ok(invoke(&h.webview, "script_get_runs", json!({ "sessionId": "other" })));
+    let none = ok(invoke(
+        &h.webview,
+        "script_get_runs",
+        json!({ "sessionId": "other" }),
+    ));
     assert_eq!(none, json!([]));
 
-    ok(invoke(&h.webview, "session_close", json!({ "sessionId": session_id })));
+    ok(invoke(
+        &h.webview,
+        "session_close",
+        json!({ "sessionId": session_id }),
+    ));
 }
 
 #[cfg(unix)]
@@ -237,30 +248,75 @@ fn stop_pause_resume_and_errors() {
     // Wait until it runs, then pause / resume / stop it.
     let started = Instant::now();
     loop {
-        let runs = ok(invoke(&h.webview, "script_get_runs", json!({ "sessionId": "no-such-session" })));
-        if runs.as_array().unwrap().iter().any(|r| r["runId"] == "stoppable") {
+        let runs = ok(invoke(
+            &h.webview,
+            "script_get_runs",
+            json!({ "sessionId": "no-such-session" }),
+        ));
+        if runs
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|r| r["runId"] == "stoppable")
+        {
             break;
         }
         assert!(started.elapsed() < Duration::from_secs(5));
         std::thread::sleep(Duration::from_millis(10));
     }
-    assert_eq!(ok(invoke(&h.webview, "script_pause", json!({ "runId": "stoppable" }))), json!({ "ok": true }));
+    assert_eq!(
+        ok(invoke(
+            &h.webview,
+            "script_pause",
+            json!({ "runId": "stoppable" })
+        )),
+        json!({ "ok": true })
+    );
     let runs = ok(invoke(&h.webview, "script_get_runs", json!({})));
     assert_eq!(runs[0]["status"], "paused");
-    assert_eq!(ok(invoke(&h.webview, "script_resume", json!({ "runId": "stoppable" }))), json!({ "ok": true }));
-    assert_eq!(ok(invoke(&h.webview, "script_stop", json!({ "runId": "stoppable" }))), json!({ "ok": true }));
+    assert_eq!(
+        ok(invoke(
+            &h.webview,
+            "script_resume",
+            json!({ "runId": "stoppable" })
+        )),
+        json!({ "ok": true })
+    );
+    assert_eq!(
+        ok(invoke(
+            &h.webview,
+            "script_stop",
+            json!({ "runId": "stoppable" })
+        )),
+        json!({ "ok": true })
+    );
     let run = drive_until_ended(&h, "stoppable", &snapshots, &dialogs, |_| Value::Null);
     assert_eq!(run["status"], "failed");
     assert_eq!(run["error"], "Stopped by user");
-    assert_eq!(ok(invoke(&h.webview, "script_stop", json!({ "runId": "missing" }))), json!({ "ok": false }));
+    assert_eq!(
+        ok(invoke(
+            &h.webview,
+            "script_stop",
+            json!({ "runId": "missing" })
+        )),
+        json!({ "ok": false })
+    );
 
     // Unknown request ids.
     assert_eq!(
-        ok(invoke(&h.webview, "script_dialog_response", json!({ "payload": { "requestId": "x", "value": true } }))),
+        ok(invoke(
+            &h.webview,
+            "script_dialog_response",
+            json!({ "payload": { "requestId": "x", "value": true } })
+        )),
         json!({ "ok": false })
     );
     assert_eq!(
-        ok(invoke(&h.webview, "script_screen_snapshot_response", json!({ "payload": { "requestId": "x", "snapshot": null } }))),
+        ok(invoke(
+            &h.webview,
+            "script_screen_snapshot_response",
+            json!({ "payload": { "requestId": "x", "snapshot": null } })
+        )),
         json!({ "ok": false })
     );
 }
@@ -269,7 +325,11 @@ fn stop_pause_resume_and_errors() {
 fn recording_round_trip() {
     let h = build_app();
     assert_eq!(
-        ok(invoke(&h.webview, "script_recording_start", json!({ "sessionId": "rec" }))),
+        ok(invoke(
+            &h.webview,
+            "script_recording_start",
+            json!({ "sessionId": "rec" })
+        )),
         json!({ "ok": true })
     );
     assert_eq!(
@@ -280,8 +340,15 @@ fn recording_round_trip() {
         )),
         json!({ "ok": true })
     );
-    let stopped = ok(invoke(&h.webview, "script_recording_stop", json!({ "sessionId": "rec" })));
-    assert_eq!(stopped["steps"], json!([{ "type": "send", "value": "uptime" }]));
+    let stopped = ok(invoke(
+        &h.webview,
+        "script_recording_stop",
+        json!({ "sessionId": "rec" }),
+    ));
+    assert_eq!(
+        stopped["steps"],
+        json!([{ "type": "send", "value": "uptime" }])
+    );
     assert!(stopped["code"]
         .as_str()
         .unwrap()

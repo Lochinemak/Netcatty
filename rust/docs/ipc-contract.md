@@ -634,6 +634,8 @@ commands do not appear in logs. A new session kind needs the three hooks:
 | `session_log_prepare` | `payload: { sessionId }` | `{ success, filePath?, error? }` — flushes the live log (or returns the finalized one; manual before automatic) |
 | `session_log_reveal` | `payload: { sessionId }` | as prepare, then reveals the file (opener plugin) |
 
+Script automation (`script_*` commands, `netcatty:script:*` events, the `nct` script API): see [`ipc-scripts.md`](ipc-scripts.md).
+
 ## App
 
 | Command | Args | Returns |

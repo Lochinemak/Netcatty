@@ -216,7 +216,10 @@ fn number_json(n: f64) -> Value {
     }
 }
 
-fn normalize_dialog_field(field: &Value, seen_names: &mut HashSet<String>) -> Result<Value, String> {
+fn normalize_dialog_field(
+    field: &Value,
+    seen_names: &mut HashSet<String>,
+) -> Result<Value, String> {
     let Value::Object(map) = field else {
         return Err("Dialog form field must be an object".into());
     };
@@ -459,49 +462,119 @@ mod tests {
         assert_eq!(fields[3]["required"], false);
         assert_eq!(fields[4]["defaultValue"], 4);
         assert_eq!(fields[4]["step"], 2);
-        assert_eq!(fields[4]["visibleWhen"], json!({ "field": "force", "truthy": true }));
+        assert_eq!(
+            fields[4]["visibleWhen"],
+            json!({ "field": "force", "truthy": true })
+        );
     }
 
     #[test]
     fn rejects_invalid_fields() {
         let cases: Vec<(Value, &str)> = vec![
             (json!(null), "Dialog form spec must be an object"),
-            (json!({ "fields": [] }), "Dialog form requires at least one field"),
-            (json!({ "fields": [1] }), "Dialog form field must be an object"),
-            (json!({ "fields": [{ "type": "text", "name": "x" }] }), "Unsupported dialog field type: text"),
-            (json!({ "fields": [{ "type": "select" }] }), "Dialog form field name is required"),
-            (json!({ "fields": [{ "type": "select", "name": "__proto__" }] }), "Dialog form field name is reserved: __proto__"),
+            (
+                json!({ "fields": [] }),
+                "Dialog form requires at least one field",
+            ),
+            (
+                json!({ "fields": [1] }),
+                "Dialog form field must be an object",
+            ),
+            (
+                json!({ "fields": [{ "type": "text", "name": "x" }] }),
+                "Unsupported dialog field type: text",
+            ),
+            (
+                json!({ "fields": [{ "type": "select" }] }),
+                "Dialog form field name is required",
+            ),
+            (
+                json!({ "fields": [{ "type": "select", "name": "__proto__" }] }),
+                "Dialog form field name is reserved: __proto__",
+            ),
             (
                 json!({ "fields": [{ "type": "checkbox", "name": "a" }, { "type": "checkbox", "name": "a" }] }),
                 "Duplicate dialog form field name: a",
             ),
-            (json!({ "fields": [{ "type": "select", "name": "a", "options": [] }] }), "Dialog select field requires at least one option"),
-            (json!({ "fields": [{ "type": "select", "name": "a", "options": [""] }] }), "Dialog option value is required"),
-            (json!({ "fields": [{ "type": "select", "name": "a", "options": [1] }] }), "Dialog option must be a string or object"),
-            (json!({ "fields": [{ "type": "select", "name": "a", "options": ["x", "x"] }] }), "Dialog select field option values must be unique: x"),
+            (
+                json!({ "fields": [{ "type": "select", "name": "a", "options": [] }] }),
+                "Dialog select field requires at least one option",
+            ),
+            (
+                json!({ "fields": [{ "type": "select", "name": "a", "options": [""] }] }),
+                "Dialog option value is required",
+            ),
+            (
+                json!({ "fields": [{ "type": "select", "name": "a", "options": [1] }] }),
+                "Dialog option must be a string or object",
+            ),
+            (
+                json!({ "fields": [{ "type": "select", "name": "a", "options": ["x", "x"] }] }),
+                "Dialog select field option values must be unique: x",
+            ),
             (
                 json!({ "fields": [{ "type": "radio", "name": "a", "options": [{ "value": "x", "disabled": true }] }] }),
                 "Dialog radio field requires at least one enabled option",
             ),
-            (json!({ "fields": [{ "type": "number", "name": "n", "defaultValue": "abc" }] }), "Dialog number field defaultValue must be a finite number: n"),
-            (json!({ "fields": [{ "type": "number", "name": "n", "step": 0 }] }), "Dialog number field step must be a positive finite number: n"),
-            (json!({ "fields": [{ "type": "number", "name": "n", "min": 5, "max": 1 }] }), "Dialog number field min cannot be greater than max: n"),
-            (json!({ "fields": [{ "type": "number", "name": "n", "min": 5, "defaultValue": 1 }] }), "Dialog number field defaultValue cannot be less than min: n"),
-            (json!({ "fields": [{ "type": "number", "name": "n", "max": 5, "defaultValue": 9 }] }), "Dialog number field defaultValue cannot be greater than max: n"),
-            (json!({ "fields": [{ "type": "number", "name": "n", "min": 0, "step": 2, "defaultValue": 3 }] }), "Dialog number field defaultValue must match step from min: n"),
-            (json!({ "fields": [{ "type": "checkbox", "name": "a", "visibleWhen": "x" }] }), "Dialog visibleWhen must be an object"),
-            (json!({ "fields": [{ "type": "checkbox", "name": "a", "visibleWhen": {} }] }), "Dialog visibleWhen field is required"),
-            (json!({ "fields": [{ "type": "checkbox", "name": "a", "visibleWhen": { "field": "b" } }] }), "Dialog visibleWhen requires exactly one condition operator"),
-            (json!({ "fields": [{ "type": "checkbox", "name": "a", "visibleWhen": { "field": "b", "truthy": false } }] }), "Dialog visibleWhen truthy must be true"),
-            (json!({ "fields": [{ "type": "checkbox", "name": "a", "visibleWhen": { "field": "b", "equals": {} } }] }), "Dialog visibleWhen equals must be a string, number, or boolean"),
-            (json!({ "fields": [{ "type": "checkbox", "name": "a", "visibleWhen": { "field": "zzz", "truthy": true } }] }), "Dialog visibleWhen references unknown field: zzz"),
+            (
+                json!({ "fields": [{ "type": "number", "name": "n", "defaultValue": "abc" }] }),
+                "Dialog number field defaultValue must be a finite number: n",
+            ),
+            (
+                json!({ "fields": [{ "type": "number", "name": "n", "step": 0 }] }),
+                "Dialog number field step must be a positive finite number: n",
+            ),
+            (
+                json!({ "fields": [{ "type": "number", "name": "n", "min": 5, "max": 1 }] }),
+                "Dialog number field min cannot be greater than max: n",
+            ),
+            (
+                json!({ "fields": [{ "type": "number", "name": "n", "min": 5, "defaultValue": 1 }] }),
+                "Dialog number field defaultValue cannot be less than min: n",
+            ),
+            (
+                json!({ "fields": [{ "type": "number", "name": "n", "max": 5, "defaultValue": 9 }] }),
+                "Dialog number field defaultValue cannot be greater than max: n",
+            ),
+            (
+                json!({ "fields": [{ "type": "number", "name": "n", "min": 0, "step": 2, "defaultValue": 3 }] }),
+                "Dialog number field defaultValue must match step from min: n",
+            ),
+            (
+                json!({ "fields": [{ "type": "checkbox", "name": "a", "visibleWhen": "x" }] }),
+                "Dialog visibleWhen must be an object",
+            ),
+            (
+                json!({ "fields": [{ "type": "checkbox", "name": "a", "visibleWhen": {} }] }),
+                "Dialog visibleWhen field is required",
+            ),
+            (
+                json!({ "fields": [{ "type": "checkbox", "name": "a", "visibleWhen": { "field": "b" } }] }),
+                "Dialog visibleWhen requires exactly one condition operator",
+            ),
+            (
+                json!({ "fields": [{ "type": "checkbox", "name": "a", "visibleWhen": { "field": "b", "truthy": false } }] }),
+                "Dialog visibleWhen truthy must be true",
+            ),
+            (
+                json!({ "fields": [{ "type": "checkbox", "name": "a", "visibleWhen": { "field": "b", "equals": {} } }] }),
+                "Dialog visibleWhen equals must be a string, number, or boolean",
+            ),
+            (
+                json!({ "fields": [{ "type": "checkbox", "name": "a", "visibleWhen": { "field": "zzz", "truthy": true } }] }),
+                "Dialog visibleWhen references unknown field: zzz",
+            ),
             (
                 json!({ "fields": [{ "type": "checkbox", "name": "a", "visibleWhen": { "field": "b", "truthy": true } }, { "type": "checkbox", "name": "b" }] }),
                 "Dialog visibleWhen must reference an earlier field: a",
             ),
         ];
         for (spec, expected) in cases {
-            assert_eq!(normalize_dialog_form_spec(&spec).unwrap_err(), expected, "{spec}");
+            assert_eq!(
+                normalize_dialog_form_spec(&spec).unwrap_err(),
+                expected,
+                "{spec}"
+            );
         }
     }
 

@@ -69,8 +69,12 @@ pub trait ManagerHost: Send + Sync + 'static {
     fn session_info(&self, session_id: &str) -> Option<HostSessionInfo>;
     /// Start a raw log stream of the session into `file_path`; returns an
     /// opaque token for [`ManagerHost::stop_session_log`].
-    fn start_session_log(&self, session_id: &str, file_path: PathBuf, host_label: &str)
-        -> Result<u64, String>;
+    fn start_session_log(
+        &self,
+        session_id: &str,
+        file_path: PathBuf,
+        host_label: &str,
+    ) -> Result<u64, String>;
     /// Stop the stream started with `token` (blocking is fine).
     fn stop_session_log(&self, session_id: &str, token: u64);
     /// Directory for `session.startLog()` without a path (Electron:
@@ -331,7 +335,9 @@ impl<H: ManagerHost> ScriptManager<H> {
             .map(|run| (state.run_order.get(&run.run_id).unwrap_or(&0), run))
             .collect();
         runs.sort_by_key(|(order, _)| **order);
-        runs.into_iter().map(|(_, run)| run.serialize(now)).collect()
+        runs.into_iter()
+            .map(|(_, run)| run.serialize(now))
+            .collect()
     }
 
     fn broadcast_runs(&self) {
@@ -421,7 +427,8 @@ impl<H: ManagerHost> ScriptManager<H> {
 
         if params.return_when_queued {
             let (sid, run_id) = queued.remove(0);
-            let _ = spawn_queued(sid, run_id);
+            // Detached: the run continues in the background.
+            drop(spawn_queued(sid, run_id));
             return Ok(RunResult {
                 run_id: run_ids.first().cloned(),
                 run_ids,
@@ -556,7 +563,8 @@ impl<H: ManagerHost> ScriptManager<H> {
         }
 
         let operation = async {
-            self.sync_output_buffer_from_snapshot(session_id, run_id).await;
+            self.sync_output_buffer_from_snapshot(session_id, run_id)
+                .await;
             runtime.execute(content).await
         };
         // Biased: a stop settles the run with its reason even when the
@@ -855,7 +863,11 @@ impl<H: ManagerHost> ScriptManager<H> {
             Ok(Ok(result)) => result,
             Ok(Err(_)) => Ok(self.buffer_fallback_snapshot(session_id)),
             Err(_) => {
-                self.inner.state.lock().pending_snapshots.remove(&request_id);
+                self.inner
+                    .state
+                    .lock()
+                    .pending_snapshots
+                    .remove(&request_id);
                 Ok(self.buffer_fallback_snapshot(session_id))
             }
         }
@@ -1130,7 +1142,8 @@ impl<H: ManagerHost> ScriptManager<H> {
             .sum();
         let next_count = recording.steps.len() + additions.len();
         let next_bytes = recording.total_bytes + addition_bytes;
-        let exceeds = next_count > MAX_SCRIPT_RECORDING_STEPS || next_bytes > MAX_SCRIPT_RECORDING_BYTES;
+        let exceeds =
+            next_count > MAX_SCRIPT_RECORDING_STEPS || next_bytes > MAX_SCRIPT_RECORDING_BYTES;
         if !exceeds {
             recording.steps.extend(additions);
             recording.total_bytes = next_bytes;
@@ -1211,7 +1224,8 @@ impl<H: ManagerHost> RuntimeHost for RunHost<H> {
         if self.run_finished() {
             return;
         }
-        self.manager.write_to_session(&self.session_id, data, options);
+        self.manager
+            .write_to_session(&self.session_id, data, options);
     }
 
     fn output_buffer(&self) -> OutputBuffer {

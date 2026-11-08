@@ -115,7 +115,8 @@ pub enum OutputTapEvent {
 /// are pruned on the next publish.
 #[derive(Default)]
 pub struct OutputTaps {
-    per_session: parking_lot::Mutex<std::collections::HashMap<String, Vec<mpsc::UnboundedSender<String>>>>,
+    per_session:
+        parking_lot::Mutex<std::collections::HashMap<String, Vec<mpsc::UnboundedSender<String>>>>,
     all: parking_lot::Mutex<Vec<mpsc::UnboundedSender<OutputTapEvent>>>,
 }
 
