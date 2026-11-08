@@ -108,6 +108,9 @@ pub struct NodeRuntimeConfig {
     pub bootstrap: PathBuf,
     /// Bare specifier → file URL (`@netcatty/plugin-sdk`, `@netcatty/plugin-contract`).
     pub module_mappings: HashMap<String, String>,
+    /// Test-only: install inert DOM constructors (MutationObserver) so
+    /// browser-entry plugins can be exercised under Node in CI.
+    pub dom_shim: bool,
 }
 
 /// Locate a node executable: explicit config, `NETCATTY_PLUGIN_NODE`, `PATH`.
@@ -225,6 +228,7 @@ impl RuntimeLauncher for NodeSidecarLauncher {
             "config": config,
             "runtimePeerUrl": file_url(&self.config.runtime_dir.join("runtimePeer.mjs")),
             "loaderUrl": file_url(&self.config.runtime_dir.join("pluginModuleLoader.mjs")),
+            "domShim": self.config.dom_shim,
         });
         let mut command = tokio::process::Command::new(&node);
         command
@@ -330,5 +334,6 @@ pub fn default_node_runtime_config(app_root: &Path) -> NodeRuntimeConfig {
         runtime_dir: app_root.join("electron").join("plugins").join("runtime"),
         bootstrap: app_root.join("rust").join("crates").join("netcatty-plugins").join("runtime").join("nodeStdioRuntime.mjs"),
         module_mappings: mappings,
+        dom_shim: false,
     }
 }

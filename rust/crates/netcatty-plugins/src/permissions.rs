@@ -1207,7 +1207,8 @@ mod tests {
         assert_eq!(canonicalize_resource("network", "https://API.example.com:443/").unwrap(), "https://api.example.com");
         assert!(canonicalize_resource("network", "https://a.com/path").is_err());
         assert_eq!(canonicalize_stream_endpoint("tls://Example.com:443").unwrap().0, "tls://example.com:443");
-        assert!(canonicalize_stream_endpoint("tcp://1.2.3:80").is_ok());
+        assert!(canonicalize_stream_endpoint("tcp://1.2.3:80").is_err());
+        assert!(canonicalize_stream_endpoint("tcp://10.0.0.1:80").is_ok());
         assert!(canonicalize_stream_endpoint("tcp://host:0").is_err());
         assert!(resource_covers("filesystem.read", "/data", "/data/x/y", "directory", "exact"));
         assert!(!resource_covers("filesystem.read", "/data", "/database", "directory", "exact"));

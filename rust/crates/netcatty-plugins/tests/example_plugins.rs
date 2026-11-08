@@ -65,7 +65,8 @@ fn prerequisites() -> Option<PathBuf> {
 }
 
 fn host(dir: &Path, root: &Path, events: Arc<Recorder>) -> Arc<PluginHost> {
-    let node = default_node_runtime_config(root);
+    let mut node = default_node_runtime_config(root);
+    node.dom_shim = true;
     let host = PluginHost::new(HostConfig {
         user_data: dir.to_path_buf(),
         netcatty_version: "1.2.1".into(),

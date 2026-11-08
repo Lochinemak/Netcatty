@@ -981,7 +981,7 @@ mod tests {
                 .is_ok()
         }));
         let (router, mut rx) = router_with(routes);
-        router.accept(json!({ "frame": { "streamId": "s1", "sequence": 0, "kind": "open", "windowBytes": 8 } }));
+        router.accept(json!({ "frame": { "streamId": "s1", "sequence": 0, "kind": "open", "windowBytes": 1024 } }));
         router.accept(json!({ "frame": { "streamId": "s1", "sequence": 1, "kind": "chunk",
             "data": { "encoding": "transfer", "byteLength": 3 } }, "transferBase64": "AQID" }));
         let update = rx.recv().await.unwrap();
@@ -995,9 +995,9 @@ mod tests {
     #[tokio::test]
     async fn outgoing_stream_respects_credit() {
         let (router, mut rx) = router_with(Routes::default());
-        let stream = router.open_outgoing("out-1", 4, None).unwrap();
+        let stream = router.open_outgoing("out-1", 1024, None).unwrap();
         assert_eq!(rx.recv().await.unwrap()["frame"]["kind"], json!("open"));
-        stream.write_bytes(&[1, 2, 3, 4]).await.unwrap();
+        stream.write_bytes(&[7u8; 1024]).await.unwrap();
         assert_eq!(rx.recv().await.unwrap()["frame"]["data"]["encoding"], json!("base64"));
         let r = router.clone();
         let pending = tokio::spawn(async move {
@@ -1006,7 +1006,7 @@ mod tests {
         });
         tokio::time::sleep(Duration::from_millis(10)).await;
         assert!(rx.try_recv().is_err(), "no credit yet");
-        router.accept(json!({ "frame": { "streamId": "out-1", "sequence": 0, "kind": "windowUpdate", "creditBytes": 4 } }));
+        router.accept(json!({ "frame": { "streamId": "out-1", "sequence": 0, "kind": "windowUpdate", "creditBytes": 1024 } }));
         pending.await.unwrap().unwrap();
         assert_eq!(rx.recv().await.unwrap()["frame"]["sequence"], json!(2));
     }

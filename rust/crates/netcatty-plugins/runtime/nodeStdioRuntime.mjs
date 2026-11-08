@@ -133,6 +133,9 @@ function route(envelope) {
 }
 
 const bootstrap = await bootstrapPromise;
+if (bootstrap.domShim === true && typeof globalThis.MutationObserver !== "function") {
+  globalThis.MutationObserver = class { observe() {} disconnect() {} takeRecords() { return []; } };
+}
 register(new URL(bootstrap.loaderUrl), {
   parentURL: import.meta.url,
   data: { mappings: bootstrap.config.moduleMappings },
