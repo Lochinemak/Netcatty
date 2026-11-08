@@ -718,17 +718,20 @@ fn resolve_bin(ctx_bin: Option<&str>, env: &EnvMap) -> Option<String> {
 /// `parseOpenCodeVersionOutput` → major version.
 pub fn parse_opencode_version(text: &str) -> Option<(u64, u64, u64)> {
     let re = regex::Regex::new(r"(?i)(?:^|[^\d.])v?(\d+)\.(\d+)(?:\.(\d+))?(?:[-+][0-9A-Za-z.-]+)?").unwrap();
+    let error_re = regex::Regex::new(r"\b(?:Error|TypeError|ReferenceError|SyntaxError|ERR_[A-Z_]+)\b").unwrap();
+    let ip_re = regex::Regex::new(r"\b\d{1,3}(?:\.\d{1,3}){3}(?::\d+)?\b").unwrap();
+    let runtime_re = regex::Regex::new(r"(?i)(?:^|\b)(?:node\.js|bun)\s*$").unwrap();
     for raw in crate::cli::strip_ansi(text).lines() {
         let line = raw.trim();
-        if line.is_empty() || line.starts_with("at ") || line.contains("://") || regex::Regex::new(r"\b(?:Error|TypeError|ReferenceError|SyntaxError|ERR_[A-Z_]+)\b").unwrap().is_match(line) {
+        if line.is_empty() || line.starts_with("at ") || line.contains("://") || error_re.is_match(line) {
             continue;
         }
-        if regex::Regex::new(r"\b\d{1,3}(?:\.\d{1,3}){3}(?::\d+)?\b").unwrap().is_match(line) {
+        if ip_re.is_match(line) {
             continue;
         }
         let Some(c) = re.captures(line) else { continue };
         let prefix = &line[..c.get(0).unwrap().start()];
-        if regex::Regex::new(r"(?i)(?:^|\b)(?:node\.js|bun)\s*$").unwrap().is_match(prefix.trim_end()) {
+        if runtime_re.is_match(prefix.trim_end()) {
             continue;
         }
         let major: u64 = c[1].parse().ok()?;
@@ -1209,7 +1212,7 @@ pub mod v2 {
             let r = client.json(reqwest::Method::PUT, &format!("/api/experimental/session/{}/instructions/entries/netcatty", enc(&sid)), &[], Some(&json!({ "value": sys }))).await;
             match r {
                 Ok(_) => {}
-                Err((s, _)) if matches!(s, 400 | 404 | 405 | 413) => emitter.warning("opencode-v2-context", "ai.opencode.v2.contextSkipped"),
+                Err((400 | 404 | 405 | 413, _)) => emitter.warning("opencode-v2-context", "ai.opencode.v2.contextSkipped"),
                 Err((s, e)) => return Err(user_error(s, &e)),
             }
         }

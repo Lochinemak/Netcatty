@@ -338,7 +338,7 @@ mod tests {
     fn cursor_status_parsing() {
         assert!(parse_cursor_status_json("{\"ok\":true}").is_none());
         let auth = cursor_auth_from_status("/x/cursor-agent", Some("noise\n{\"isAuthenticated\":true,\"userInfo\":{\"email\":\"a@b\"}}\n"));
-        assert_eq!(auth.authenticated, true);
+        assert!(auth.authenticated);
         assert_eq!(auth.email.as_deref(), Some("a@b"));
         assert_eq!(auth.auth_source.as_deref(), Some("cli-login"));
         let no = cursor_auth_from_status("/x/cursor-agent", Some("{\"status\":\"unauthenticated\"}"));

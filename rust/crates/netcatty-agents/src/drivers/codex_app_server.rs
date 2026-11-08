@@ -103,10 +103,12 @@ enum ConnEvent {
 }
 
 /// One `codex app-server` process.
+type PendingMap = Arc<Mutex<HashMap<u64, oneshot::Sender<Result<Value, RpcError>>>>>;
+
 pub struct Connection {
     key: String,
     stdin_tx: Mutex<Option<mpsc::UnboundedSender<String>>>,
-    pending: Arc<Mutex<HashMap<u64, oneshot::Sender<Result<Value, RpcError>>>>>,
+    pending: PendingMap,
     next_id: AtomicU64,
     closed: Arc<AtomicBool>,
     pid: Option<u32>,

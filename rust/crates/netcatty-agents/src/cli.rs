@@ -421,12 +421,14 @@ pub fn resolve_codebuddy_executable_for_sdk(path: &str) -> Option<String> {
         shims.push(format!("{normalized}.bat"));
     }
     static RE: OnceLock<Regex> = OnceLock::new();
+    static DP0: OnceLock<Regex> = OnceLock::new();
     let re = RE.get_or_init(|| Regex::new(r#"(?i)([^"\s]*codebuddy-code[\\/]bin[\\/]codebuddy)"#).expect("re"));
+    let dp0 = DP0.get_or_init(|| Regex::new(r"(?i)^%~dp0[\\/]?").expect("re"));
     for shim in shims {
         if let Ok(contents) = std::fs::read_to_string(&shim) {
             if let Some(cap) = re.captures(&contents) {
                 let reference = cap[1].to_string();
-                let reference = Regex::new(r"(?i)^%~dp0[\\/]?").unwrap().replace(&reference, "").replace(['\\', '/'], std::path::MAIN_SEPARATOR_STR);
+                let reference = dp0.replace(&reference, "").replace(['\\', '/'], std::path::MAIN_SEPARATOR_STR);
                 let candidate = if Path::new(&reference).is_absolute() {
                     PathBuf::from(&reference)
                 } else {

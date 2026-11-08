@@ -273,11 +273,7 @@ pub fn translate_codex_event(event: &Value, emitter: &Emitter, st: &mut CodexSta
         }
         "web_search" => emitter.web_search(&id, item["query"].as_str().unwrap_or(""), if completed { "completed" } else { "running" }),
         "todo_list" => emitter.plan_update(&id, item["items"].clone(), if completed { "completed" } else { "running" }),
-        "error" => {
-            if completed {
-                emitter.warning(&id, item["message"].as_str().unwrap_or("Codex reported a recoverable error"));
-            }
-        }
+        "error" if completed => emitter.warning(&id, item["message"].as_str().unwrap_or("Codex reported a recoverable error")),
         _ => {}
     }
 }

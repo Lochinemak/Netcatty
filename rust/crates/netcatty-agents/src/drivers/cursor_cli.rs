@@ -31,7 +31,7 @@ pub fn encode_cursor_cli_model(model: Option<&str>) -> String {
         return String::new();
     }
     if let Some(q) = raw.find('?') {
-        let params: Vec<(String, String)> = url::form_urlencoded::parse(raw[q + 1..].as_bytes()).filter(|(k, v)| !k.is_empty() && !v.is_empty()).map(|(k, v)| (k.into_owned(), v.into_owned())).collect();
+        let params: Vec<(String, String)> = url::form_urlencoded::parse(&raw.as_bytes()[q + 1..]).filter(|(k, v)| !k.is_empty() && !v.is_empty()).map(|(k, v)| (k.into_owned(), v.into_owned())).collect();
         let id = &raw[..q];
         if params.is_empty() {
             return id.to_string();

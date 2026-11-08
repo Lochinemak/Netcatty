@@ -118,7 +118,7 @@ pub fn process_env(env: &EnvMap, thinking: Option<&Value>) -> EnvMap {
             env.insert("MAX_THINKING_TOKENS".into(), b.to_string());
         }
     }
-    let ua = format!("User-Agent: CodeBuddy Agent SDK/0.3.258 (Netcatty) CodeBuddy Code/unknown");
+    let ua = "User-Agent: CodeBuddy Agent SDK/0.3.258 (Netcatty) CodeBuddy Code/unknown".to_string();
     let headers = env.get("CODEBUDDY_CUSTOM_HEADERS").filter(|h| !h.is_empty()).map(|h| format!("{ua}\n{h}")).unwrap_or(ua);
     env.insert("CODEBUDDY_CUSTOM_HEADERS".into(), headers);
     env

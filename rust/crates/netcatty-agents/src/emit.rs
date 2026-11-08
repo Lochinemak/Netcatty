@@ -87,8 +87,11 @@ pub struct Emitter {
     /// Extra fields merged into every `session-id` event (backend, binPath, runtime...).
     session_id_extra: Arc<Mutex<Value>>,
     /// Observer for native session ids (the runtime records them for resume).
-    on_session_id: Arc<Mutex<Option<Arc<dyn Fn(&str) + Send + Sync>>>>,
+    on_session_id: Arc<Mutex<Option<SessionIdObserver>>>,
 }
+
+/// Callback receiving native session ids.
+pub type SessionIdObserver = Arc<dyn Fn(&str) + Send + Sync>;
 
 impl Emitter {
     pub fn new(sink: Arc<dyn EventSink>, request_id: &str) -> Self {
@@ -109,7 +112,7 @@ impl Emitter {
         *self.session_id_extra.lock() = extra;
     }
 
-    pub fn set_on_session_id(&self, f: Arc<dyn Fn(&str) + Send + Sync>) {
+    pub fn set_on_session_id(&self, f: SessionIdObserver) {
         *self.on_session_id.lock() = Some(f);
     }
 
