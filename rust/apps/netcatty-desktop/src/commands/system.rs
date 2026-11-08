@@ -78,6 +78,11 @@ fn reply_ok(reply: &Value) -> bool {
 }
 
 impl SystemState {
+    /// Session was started with `singleChannelSsh` (AI exec skips side channels).
+    pub(crate) fn is_single_channel(&self, session_id: &str) -> bool {
+        self.single_channel.contains(session_id)
+    }
+
     /// Record the options of a newly started SSH session.
     pub fn remember_session(&self, session_id: &str, options: &SshSessionOptions) {
         if let Some(password) = options

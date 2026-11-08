@@ -201,6 +201,11 @@ impl ShellKindState {
         Arc::new(state)
     }
 
+    /// Set the confirmed kind (local shells, from the executable).
+    pub fn set_shell_kind(&self, kind: Option<String>) {
+        self.inner.lock().shell_kind = kind;
+    }
+
     pub fn snapshot(&self) -> ShellKindInner {
         self.inner.lock().clone()
     }

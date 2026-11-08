@@ -9,6 +9,12 @@
 pub mod discovery;
 pub mod host;
 pub mod inject;
+pub mod protocol;
+pub mod redaction;
+pub mod stdio_server;
+pub mod tool_cli;
+pub mod tool_output;
+pub mod external;
 
 pub use host::{McpHost, EXTERNAL_MCP_CHAT_SESSION_ID};
 pub use inject::{build_injected_mcp_servers, InjectedMcpServer};

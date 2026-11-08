@@ -11,6 +11,7 @@
 //!   [`netcatty_core::ipc::events`].
 
 pub mod askpass;
+pub mod mcp_helper;
 pub mod commands;
 pub mod connect;
 pub mod decoder;
@@ -73,6 +74,7 @@ pub fn configure_with<R: tauri::Runtime>(
             app.manage(commands::tempdir::TempDirState::load(
                 &netcatty_store::AppPaths::resolve(),
             ));
+            app.manage(commands::mcp::McpState::new(app.handle()));
             // Tray (+ hidden auto-launch), global hotkey, autostart, notifications.
             commands::tray::setup(app);
             commands::hotkey::setup(app);

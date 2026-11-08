@@ -10,12 +10,14 @@
 
 pub mod app;
 pub mod autostart;
+pub mod catty;
 pub mod clipboard;
 pub mod diagnostics;
 pub mod filewatch;
 pub mod forward;
 pub mod hotkey;
 pub mod localfs;
+pub mod mcp;
 pub mod monitor;
 pub mod mosh;
 pub mod notification;
@@ -77,6 +79,38 @@ pub(crate) fn raw_body<'a>(request: &'a tauri::ipc::Request<'_>) -> CmdResult<&'
 pub fn handler<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Send + Sync + 'static
 {
     tauri::generate_handler![
+        // AI control plane: Catty exec, capabilities, MCP host, External MCP.
+        catty::ai_exec,
+        catty::ai_catty_cancel_exec,
+        mcp::ai_capability,
+        mcp::ai_vault_agent_respond,
+        mcp::ai_mcp_update_sessions,
+        mcp::ai_mcp_update_live_sessions,
+        mcp::ai_mcp_merge_sessions,
+        mcp::ai_mcp_update_attachments,
+        mcp::ai_mcp_set_command_blocklist,
+        mcp::ai_mcp_set_command_timeout,
+        mcp::ai_mcp_set_max_iterations,
+        mcp::ai_mcp_set_permission_mode,
+        mcp::ai_mcp_set_tool_integration_mode,
+        mcp::ai_mcp_sync_permission_grants,
+        mcp::ai_mcp_approval_respond,
+        mcp::ai_mcp_approval_cancel_timeout,
+        mcp::mcp_set_approval_alert_mode,
+        mcp::tool_output_persistence_status,
+        mcp::tool_output_write,
+        mcp::tool_output_restore,
+        mcp::tool_output_read,
+        mcp::tool_output_delete,
+        mcp::tool_output_delete_chat,
+        mcp::tool_output_delete_terminal_session,
+        mcp::tool_output_delete_terminal,
+        mcp::external_mcp_get_status,
+        mcp::external_mcp_set_enabled,
+        mcp::external_mcp_set_config,
+        mcp::external_mcp_get_universal_setup_prompt,
+        mcp::external_mcp_client_status,
+        mcp::external_mcp_client_add,
         app::app_get_version,
         app::app_renderer_log,
         temp::temp_upload_begin,
