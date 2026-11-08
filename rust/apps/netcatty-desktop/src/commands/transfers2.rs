@@ -123,7 +123,11 @@ fn queued_event(payload: &StreamTransferOptions) -> Value {
         obj.insert("controlKind".into(), json!("stream"));
         obj.insert("lifecycleState".into(), json!("queued"));
         obj.remove("phase");
-        if let Some(epoch) = payload.extra.get("lifecycleEpoch").filter(|v| v.is_number()) {
+        if let Some(epoch) = payload
+            .extra
+            .get("lifecycleEpoch")
+            .filter(|v| v.is_number())
+        {
             obj.insert("lifecycleEpoch".into(), epoch.clone());
         }
     }
@@ -150,7 +154,11 @@ pub(crate) async fn admit<R: Runtime>(
             payload.transfer_id
         )));
     }
-    if let Some(limit) = payload.extra.get("globalConcurrency").and_then(Value::as_f64) {
+    if let Some(limit) = payload
+        .extra
+        .get("globalConcurrency")
+        .and_then(Value::as_f64)
+    {
         t2.queue.set_limit(limit);
     }
     let keys = resource_keys(
@@ -331,7 +339,11 @@ pub async fn transfer_cleanup<R: Runtime>(
             None => {}
         }
     }
-    if let Some(staged) = payload.staged_target_path.as_deref().filter(|s| !s.is_empty()) {
+    if let Some(staged) = payload
+        .staged_target_path
+        .as_deref()
+        .filter(|s| !s.is_empty())
+    {
         if replace_stage_is_owned(staged, &payload.target_path, &payload.transfer_id) {
             match &client {
                 Some(client) => {
@@ -504,18 +516,29 @@ fn signal_pid(pid: u32, signal: i32) {
     }
 }
 
-fn compress_event<R: Runtime>(app: &AppHandle<R>, comp: &Compression, kind: &str, mut extra: Value) {
+fn compress_event<R: Runtime>(
+    app: &AppHandle<R>,
+    comp: &Compression,
+    kind: &str,
+    mut extra: Value,
+) {
     let (epoch, lifecycle_state) = comp.lifecycle();
     if let Some(obj) = extra.as_object_mut() {
         obj.insert("type".into(), json!(kind));
         obj.insert("transferId".into(), json!(comp.id));
         obj.entry("lifecycleEpoch").or_insert(json!(epoch));
-        obj.entry("lifecycleState").or_insert(json!(lifecycle_state));
+        obj.entry("lifecycleState")
+            .or_insert(json!(lifecycle_state));
     }
     emit_transfer(app, extra);
 }
 
-fn compress_progress<R: Runtime>(app: &AppHandle<R>, comp: &Compression, phase: &str, percent: f64) {
+fn compress_progress<R: Runtime>(
+    app: &AppHandle<R>,
+    comp: &Compression,
+    phase: &str,
+    percent: f64,
+) {
     if comp.is_cancelled() {
         return;
     }
@@ -534,7 +557,12 @@ fn compress_progress<R: Runtime>(app: &AppHandle<R>, comp: &Compression, phase: 
 }
 
 /// Publish the terminal event once.
-fn settle<R: Runtime>(app: &AppHandle<R>, comp: &Compression, kind: &'static str, extra: Value) -> bool {
+fn settle<R: Runtime>(
+    app: &AppHandle<R>,
+    comp: &Compression,
+    kind: &'static str,
+    extra: Value,
+) -> bool {
     {
         let mut s = comp.state.lock();
         if s.terminal.is_some() {
@@ -653,14 +681,19 @@ async fn resolve_support<R: Runtime>(
     let mut cache = t2.support_cache.lock();
     cache.retain(|(id, _, _)| id != sftp_id);
     cache.push((sftp_id.to_string(), Instant::now(), support.clone()));
-    let overflow = cache.len().saturating_sub(compress::SUPPORT_CACHE_MAX_ENTRIES);
+    let overflow = cache
+        .len()
+        .saturating_sub(compress::SUPPORT_CACHE_MAX_ENTRIES);
     cache.drain(..overflow);
     Ok(support)
 }
 
 /// `checkCompressedUploadSupport(sftpId)`.
 #[tauri::command]
-pub async fn compress_check_support<R: Runtime>(state: Ctx<'_, R>, sftp_id: String) -> CmdResult<Support> {
+pub async fn compress_check_support<R: Runtime>(
+    state: Ctx<'_, R>,
+    sftp_id: String,
+) -> CmdResult<Support> {
     let t2 = state.app.state::<Transfers2State>();
     Ok(
         match resolve_support(&state, &t2, &sftp_id, &CancellationToken::new()).await {
@@ -683,8 +716,8 @@ async fn compress_folder<R: Runtime>(
     archive: &Path,
 ) -> Result<(), String> {
     let invocation = compress::local_tar_invocation(folder, archive)?;
-    let file = std::fs::File::create(archive)
-        .map_err(|e| format!("Failed to create tar archive: {e}"))?;
+    let file =
+        std::fs::File::create(archive).map_err(|e| format!("Failed to create tar archive: {e}"))?;
     let mut cmd = tokio::process::Command::new(compress::local_tar_command());
     cmd.args(&invocation.args)
         .current_dir(&invocation.cwd)
@@ -694,7 +727,9 @@ async fn compress_folder<R: Runtime>(
         .kill_on_drop(true);
     #[cfg(windows)]
     cmd.creation_flags(0x0800_0000);
-    let mut child = cmd.spawn().map_err(|e| format!("Failed to start tar: {e}"))?;
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| format!("Failed to start tar: {e}"))?;
     comp.state.lock().tar_pid = child.id();
     let stderr_task = child.stderr.take().map(|mut stderr| {
         tokio::spawn(async move {
@@ -756,8 +791,7 @@ async fn upload_archive<R: Runtime>(
     comp: &Compression,
     client: &Arc<SftpClient>,
     sftp_id: &str,
-    local_archive: &Path,
-    remote_archive: &str,
+    (local_archive, remote_archive): (&Path, &str),
     size: u64,
 ) -> Result<(), String> {
     let transfer_id = format!("compress-{}", comp.id);
@@ -791,7 +825,8 @@ async fn upload_archive<R: Runtime>(
             target: Some(client.clone()),
         };
         let (progress_tx, mut progress_rx) = tokio::sync::mpsc::unbounded_channel();
-        let mut handle = start_transfer(request, endpoints, Some(progress_tx)).map_err(|e| e.to_string())?;
+        let mut handle =
+            start_transfer(request, endpoints, Some(progress_tx)).map_err(|e| e.to_string())?;
         let (_tx, dummy) = tokio::sync::oneshot::channel();
         let done = std::mem::replace(&mut handle.done, dummy);
         *comp.upload.lock() = Some(handle);
@@ -921,8 +956,7 @@ async fn run_compression<R: Runtime>(
         comp,
         &client,
         &payload.sftp_id,
-        &archive,
-        &remote_archive,
+        (&archive, &remote_archive),
         size,
     )
     .await?;
@@ -994,7 +1028,10 @@ async fn run_compression<R: Runtime>(
 /// failed or was cancelled. Progress and the terminal state arrive on
 /// `netcatty:sftp:global-transfer` under `transferId = compressionId`.
 #[tauri::command]
-pub async fn compress_start<R: Runtime>(state: Ctx<'_, R>, payload: CompressStartPayload) -> CmdResult<Value> {
+pub async fn compress_start<R: Runtime>(
+    state: Ctx<'_, R>,
+    payload: CompressStartPayload,
+) -> CmdResult<Value> {
     let t2 = state.app.state::<Transfers2State>();
     let id = payload.compression_id.clone();
     if id.trim().is_empty() {
@@ -1005,7 +1042,10 @@ pub async fn compress_start<R: Runtime>(state: Ctx<'_, R>, payload: CompressStar
             "Compressed upload is already active: {id}"
         )));
     }
-    let total_bytes = payload.total_bytes.filter(|v| v.is_finite() && *v > 0.0).unwrap_or(0.0) as u64;
+    let total_bytes = payload
+        .total_bytes
+        .filter(|v| v.is_finite() && *v > 0.0)
+        .unwrap_or(0.0) as u64;
     let comp = Arc::new(Compression {
         id: id.clone(),
         total_bytes,
@@ -1066,7 +1106,10 @@ pub async fn compress_start<R: Runtime>(state: Ctx<'_, R>, payload: CompressStar
         }
         Err(error) => {
             let cancelled = comp.is_cancelled()
-                || matches!(error.as_str(), "Upload cancelled" | "Compression cancelled" | "Transfer cancelled");
+                || matches!(
+                    error.as_str(),
+                    "Upload cancelled" | "Compression cancelled" | "Transfer cancelled"
+                );
             if cancelled {
                 settle(&state.app, &comp, "cancelled", json!({}));
             } else {
@@ -1277,7 +1320,10 @@ pub async fn local_drag_start<R: Runtime>(
 }
 
 #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
-async fn native_drag<R: Runtime>(window: tauri::WebviewWindow<R>, paths: Vec<String>) -> DragStartResult {
+async fn native_drag<R: Runtime>(
+    window: tauri::WebviewWindow<R>,
+    paths: Vec<String>,
+) -> DragStartResult {
     let (tx, rx) = tokio::sync::oneshot::channel::<Result<(), String>>();
     let target = window.clone();
     let icon = drag_icon_png();
@@ -1286,9 +1332,13 @@ async fn native_drag<R: Runtime>(window: tauri::WebviewWindow<R>, paths: Vec<Str
         let image = drag::Image::Raw(icon);
         #[cfg(target_os = "linux")]
         let result = match target.gtk_window() {
-            Ok(gtk_window) => {
-                drag::start_drag(&gtk_window, item, image, |_, _| {}, drag::Options::default())
-            }
+            Ok(gtk_window) => drag::start_drag(
+                &gtk_window,
+                item,
+                image,
+                |_, _| {},
+                drag::Options::default(),
+            ),
             Err(err) => {
                 let _ = tx.send(Err(err.to_string()));
                 return;
@@ -1312,7 +1362,10 @@ async fn native_drag<R: Runtime>(window: tauri::WebviewWindow<R>, paths: Vec<Str
 }
 
 #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
-async fn native_drag<R: Runtime>(_window: tauri::WebviewWindow<R>, _paths: Vec<String>) -> DragStartResult {
+async fn native_drag<R: Runtime>(
+    _window: tauri::WebviewWindow<R>,
+    _paths: Vec<String>,
+) -> DragStartResult {
     DragStartResult::failed("Native file drag is not supported on this platform")
 }
 
@@ -1347,7 +1400,10 @@ pub(crate) async fn start_x11_forwarding<R: Runtime>(
         channels.as_mut().and_then(|c| c.x11_rx.take())
     };
     let Some(rx) = rx else {
-        tracing::debug!(session_id, "x11 channel receiver unavailable on this connection");
+        tracing::debug!(
+            session_id,
+            "x11 channel receiver unavailable on this connection"
+        );
         return;
     };
     let app = app.clone();
@@ -1503,7 +1559,10 @@ fn system_known_hosts_trust(hostname: &str, port: u16, fingerprint: &str) -> boo
 
 #[async_trait::async_trait]
 impl netcatty_ssh::SshCallbacks for CompanionCallbacks {
-    async fn verify_host_key(&self, info: netcatty_ssh::HostKeyInfo) -> netcatty_ssh::HostKeyDecision {
+    async fn verify_host_key(
+        &self,
+        info: netcatty_ssh::HostKeyInfo,
+    ) -> netcatty_ssh::HostKeyDecision {
         let trusted = tokio::task::spawn_blocking(move || {
             system_known_hosts_trust(&info.hostname, info.port, &info.fingerprint)
         })
@@ -1589,7 +1648,9 @@ pub(crate) async fn ssh_session_cwd<R: Runtime>(
     options: netcatty_sysmgr::cwd::CwdProbeOptions,
 ) -> Result<String, String> {
     use super::system::exec::{bounded_exec, BoundedError};
-    if state.system.is_single_channel(session_id) || super::system::single_channel_banner(connection) {
+    if state.system.is_single_channel(session_id)
+        || super::system::single_channel_banner(connection)
+    {
         return Err(super::system::SINGLE_CHANNEL_ERROR.to_string());
     }
     let t2 = state.app.try_state::<Transfers2State>();
@@ -1641,7 +1702,9 @@ pub(crate) async fn ssh_session_cwd<R: Runtime>(
     if let (Some(pid), Some(t2)) = (parsed.login_pid, t2.as_ref()) {
         t2.shell_pids.insert(session_id.to_string(), pid);
     }
-    parsed.cwd.ok_or_else(|| "Could not determine cwd".to_string())
+    parsed
+        .cwd
+        .ok_or_else(|| "Could not determine cwd".to_string())
 }
 
 #[cfg(test)]
@@ -1712,7 +1775,10 @@ mod tests {
             let l = link.to_string_lossy().into_owned();
             assert_eq!(prepare_drag(&p(vec![json!(l.clone())])).unwrap(), vec![l]);
             std::fs::remove_file(&file).unwrap();
-            assert!(prepare_drag(&p(vec![json!(link.to_string_lossy())])).is_err(), "broken link");
+            assert!(
+                prepare_drag(&p(vec![json!(link.to_string_lossy())])).is_err(),
+                "broken link"
+            );
         }
         let _ = std::fs::remove_dir_all(dir);
     }
@@ -1748,7 +1814,11 @@ mod tests {
         }))
         .unwrap();
         let c = companion_options(&with_key);
-        assert_eq!(c.use_ssh_agent, Some(false), "an explicit key suppresses the agent");
+        assert_eq!(
+            c.use_ssh_agent,
+            Some(false),
+            "an explicit key suppresses the agent"
+        );
         assert_eq!(c.username, "root");
         assert_eq!(c.port, Some(22));
     }

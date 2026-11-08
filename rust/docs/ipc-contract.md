@@ -46,7 +46,7 @@ renderer does not change.
 | `session_ack_flow` | `sessionId, bytes` | `void` | Accepted for compatibility; no-op. |
 | `session_close` | `sessionId` | `void` | Emits `netcatty:exit` with `reason: "closed"` (exactly one `netcatty:exit` is ever emitted per session). Cancels pending prompts of the session. Idempotent. The shared SSH connection is disconnected only when no other session or SFTP browser uses it. |
 | `session_exec` | `payload: ExecCommandOptions` | `ExecResult { stdout, stderr, code }` | Uses the connection of `payload.sessionId` when alive, else dials a private connection (closed afterwards) with prompts only when `enableKeyboardInteractive` is true (otherwise unattended: no prompts, unknown host keys accepted for that one-shot connection). `timeout` ms. |
-| `session_pwd` | `sessionId` | `{ success, cwd?, error? }` | Local sessions: PTY cwd discovery. SSH sessions: **known gap** — the interactive shell's cwd cannot be read from a sibling exec channel, so the login `$HOME` is returned (the Electron bridge's `allowHomeFallback` behaviour); `success: false` when even that fails. |
+| `session_pwd` | `sessionId, allowHomeFallback?, allowLoginShellFallback?, timeoutMs?` | `{ success, cwd?, error? }` | Local sessions: PTY cwd discovery. SSH sessions: Electron's interactive-shell probe on a sibling exec channel with the `$HOME` fallback, see [`ipc-transfers.md`](ipc-transfers.md). |
 | `session_remote_info` | `sessionId` | `{ success, serverBanner?, software?, error? }` | `software` = text after `SSH-2.0-` (first token). |
 | `local_get_default_shell` | — | `string` | |
 | `local_discover_shells` | — | `DiscoveredShell[]` | |
@@ -106,8 +106,9 @@ development layout), then on the session's `PATH`. `ssh` comes from `PATH`
 Not ported: ZMODEM / YMODEM (`onZmodemEvent`, `cancelZmodem`,
 `startZmodemDragDropUpload`, `onZmodemOverwriteRequest`,
 `respondZmodemOverwrite`, `sendSerialYmodem`, `receiveSerialYmodem` stay
-undefined), the Mosh / ET host-stats companion SSH connection, session
-logging for these sessions, and FIDO2 agent preparation for the external ssh.
+undefined) and FIDO2 agent preparation for the external ssh. Session logs
+and the Mosh / ET host-stats companion connection: see
+[`ipc-transfers.md`](ipc-transfers.md).
 
 ## Remote desktop (VNC / RDP)
 
@@ -652,6 +653,7 @@ AI core (provider proxy, chat streaming, privacy, user skills, sessions backup):
 Host browser (in-app browser panel / window, `hostbrowser_*` commands): see [ipc-hostbrowser.md](ipc-hostbrowser.md).
 Managed SDK agents, agent discovery and Codex login: see [ipc-agents.md](ipc-agents.md).
 AI control plane (Catty exec, capabilities, MCP host, approvals, tool-output store, External MCP): see [`ipc-mcp.md`](ipc-mcp.md).
+Transfer queue controls, compressed folder upload, native file drag, X11 forwarding, Mosh / ET stats companion, SSH cwd: see [`ipc-transfers.md`](ipc-transfers.md).
 
 ## Mapping `NetcattyBridge` → commands (adapter cheat-sheet)
 

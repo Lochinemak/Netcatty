@@ -41,7 +41,9 @@ impl CwdProbeOptions {
     ) -> Self {
         let allow_home_fallback = allow_home_fallback != Some(false);
         let timeout_ms = match timeout_ms {
-            Some(ms) if ms.is_finite() => ms.clamp(MIN_TIMEOUT_MS as f64, DEFAULT_TIMEOUT_MS as f64) as u64,
+            Some(ms) if ms.is_finite() => {
+                ms.clamp(MIN_TIMEOUT_MS as f64, DEFAULT_TIMEOUT_MS as f64) as u64
+            }
             _ => DEFAULT_TIMEOUT_MS,
         };
         Self {
@@ -72,7 +74,11 @@ pub fn probe_script(target_login_pid: Option<&str>, options: &CwdProbeOptions) -
         .replace("@@TARGET_LOGIN@@", sanitize_pid(target_login_pid))
         .replace(
             "@@ALLOW_HOME@@",
-            if options.allow_home_fallback { "1" } else { "0" },
+            if options.allow_home_fallback {
+                "1"
+            } else {
+                "0"
+            },
         )
         .replace(
             "@@ALLOW_LOGIN@@",
@@ -91,7 +97,10 @@ pub fn probe_command(target_login_pid: Option<&str>, options: &CwdProbeOptions) 
     let script = probe_script(target_login_pid, options);
     let inner = format!(
         "export NC_SSHD_PPID=$PPID; {}",
-        with_remote_watchdog(&format!("sh -c {}", quote_shell_arg(&script)), options.timeout_ms)
+        with_remote_watchdog(
+            &format!("sh -c {}", quote_shell_arg(&script)),
+            options.timeout_ms
+        )
     );
     format!("exec sh -c {}", quote_shell_arg(&inner))
 }
@@ -141,7 +150,11 @@ pub fn decode_lsof_file_name(value: &str) -> Option<String> {
             continue;
         }
         let mut len = 0;
-        while len < 3 && raw.get(i + 1 + len).is_some_and(|b| (b'0'..=b'7').contains(b)) {
+        while len < 3
+            && raw
+                .get(i + 1 + len)
+                .is_some_and(|b| (b'0'..=b'7').contains(b))
+        {
             len += 1;
         }
         if len == 0 {
@@ -260,7 +273,10 @@ mod tests {
             decode_lsof_file_name("/tmp/line1\\nline2\\\\tail").as_deref(),
             Some("/tmp/line1\nline2\\tail")
         );
-        assert_eq!(decode_lsof_file_name("/tmp/oct\\101").as_deref(), Some("/tmp/octA"));
+        assert_eq!(
+            decode_lsof_file_name("/tmp/oct\\101").as_deref(),
+            Some("/tmp/octA")
+        );
         assert_eq!(decode_lsof_file_name("/tmp/bad\\xQZ"), None);
         assert_eq!(decode_lsof_file_name("/tmp/control-^G-name"), None);
         assert_eq!(decode_lsof_file_name("/tmp/trailing\\"), None);
@@ -272,7 +288,10 @@ mod tests {
         let out = parse_probe_output("/srv/app\n", "NETCATTY_LOGIN_PID=4242\n");
         assert_eq!(out.cwd.as_deref(), Some("/srv/app"));
         assert_eq!(out.login_pid.as_deref(), Some("4242"));
-        let out = parse_probe_output("NETCATTY_LSOF_CWD=/Users/a\\x20b\n", "noise\nNETCATTY_LOGIN_PID=7\n");
+        let out = parse_probe_output(
+            "NETCATTY_LSOF_CWD=/Users/a\\x20b\n",
+            "noise\nNETCATTY_LOGIN_PID=7\n",
+        );
         assert_eq!(out.cwd.as_deref(), Some("/Users/a b"));
         assert_eq!(out.login_pid.as_deref(), Some("7"));
         let out = parse_probe_output("relative\n", "");

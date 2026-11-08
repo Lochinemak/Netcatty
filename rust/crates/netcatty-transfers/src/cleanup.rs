@@ -28,7 +28,11 @@ pub fn expected_replace_stage(target_path: &str, transfer_id: &str) -> String {
 }
 
 /// May `staged_target_path` be removed recursively for this task?
-pub fn replace_stage_is_owned(staged_target_path: &str, target_path: &str, transfer_id: &str) -> bool {
+pub fn replace_stage_is_owned(
+    staged_target_path: &str,
+    target_path: &str,
+    transfer_id: &str,
+) -> bool {
     !target_path.is_empty()
         && !transfer_id.is_empty()
         && staged_target_path == expected_replace_stage(target_path, transfer_id)
@@ -55,10 +59,18 @@ mod tests {
             expected_replace_stage("/srv/site", "task:1/x"),
             "/srv/site.netcatty-task_1_x.part"
         );
-        assert!(replace_stage_is_owned("/srv/site.netcatty-t1.part", "/srv/site", "t1"));
+        assert!(replace_stage_is_owned(
+            "/srv/site.netcatty-t1.part",
+            "/srv/site",
+            "t1"
+        ));
         assert!(!replace_stage_is_owned("/srv/site", "/srv/site", "t1"));
         assert!(!replace_stage_is_owned("/", "/srv/site", "t1"));
-        assert!(!replace_stage_is_owned("/srv/site.netcatty-t2.part", "/srv/site", "t1"));
+        assert!(!replace_stage_is_owned(
+            "/srv/site.netcatty-t2.part",
+            "/srv/site",
+            "t1"
+        ));
         assert!(!replace_stage_is_owned("x.netcatty-t1.part", "", "t1"));
     }
 

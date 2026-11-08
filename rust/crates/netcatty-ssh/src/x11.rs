@@ -44,7 +44,10 @@ impl X11Platform {
 pub enum DisplayTarget {
     /// Unix domain socket path.
     Path(String),
-    Tcp { host: String, port: u16 },
+    Tcp {
+        host: String,
+        port: u16,
+    },
 }
 
 impl std::fmt::Display for DisplayTarget {
@@ -148,7 +151,11 @@ pub fn platform_hint(platform: X11Platform) -> &'static str {
 }
 
 /// Terminal lines written when the local X server cannot be reached.
-pub fn connect_failure_message(error: &str, target: &DisplayTarget, platform: X11Platform) -> String {
+pub fn connect_failure_message(
+    error: &str,
+    target: &DisplayTarget,
+    platform: X11Platform,
+) -> String {
     format!(
         "\r\n[X11] Could not connect to the local X11 server: {error}\r\n[X11] Display target: {target}\r\n[X11] {}\r\n",
         platform_hint(platform)
@@ -188,7 +195,11 @@ pub struct SetupRewrite {
 
 /// Electron `rewriteX11AuthSetupPacket`: replace the fake cookie of a
 /// complete MIT-MAGIC-COOKIE-1 connection-setup packet with `real`.
-pub fn rewrite_auth_setup_packet(buffer: &[u8], fake: Option<&[u8]>, real: Option<&[u8]>) -> SetupRewrite {
+pub fn rewrite_auth_setup_packet(
+    buffer: &[u8],
+    fake: Option<&[u8]>,
+    real: Option<&[u8]>,
+) -> SetupRewrite {
     let unchanged = |complete: bool| SetupRewrite {
         buffer: buffer.to_vec(),
         complete,
@@ -242,7 +253,11 @@ pub fn rewrite_auth_setup_packet(buffer: &[u8], fake: Option<&[u8]>, real: Optio
 /// Display number of `display` (`:0`, `host/unix:10`, `/tmp/.X11-unix/X1`).
 pub fn display_number(display: &str) -> Option<u32> {
     let value = display.trim();
-    let value = if value.is_empty() || value == ":" { ":0" } else { value };
+    let value = if value.is_empty() || value == ":" {
+        ":0"
+    } else {
+        value
+    };
     let digits_after = |s: &str| -> Option<u32> {
         let d: String = s.chars().take_while(|c| c.is_ascii_digit()).collect();
         if d.is_empty() {
@@ -282,13 +297,20 @@ pub fn parse_xauth_cookie(output: &str, display: &str) -> Option<Vec<u8>> {
     let wanted = display_number(display);
     for entry in output.lines() {
         let mut fields = entry.split_whitespace();
-        let Some(target) = fields.next() else { continue };
+        let Some(target) = fields.next() else {
+            continue;
+        };
         let rest: Vec<&str> = fields.collect();
         let Some(pos) = rest.iter().position(|f| *f == MIT_MAGIC_COOKIE_PROTOCOL) else {
             continue;
         };
-        let Some(cookie) = rest.get(pos + 1) else { continue };
-        if cookie.is_empty() || !cookie.bytes().all(|b| b.is_ascii_hexdigit()) || cookie.len() % 2 != 0 {
+        let Some(cookie) = rest.get(pos + 1) else {
+            continue;
+        };
+        if cookie.is_empty()
+            || !cookie.bytes().all(|b| b.is_ascii_hexdigit())
+            || cookie.len() % 2 != 0
+        {
             continue;
         }
         if wanted.is_some() && display_number(target) != wanted {
@@ -483,7 +505,11 @@ mod tests {
         let mut p = vec![0u8; 12 + pad4(protocol.len()) + pad4(cookie.len())];
         p[0] = if little { b'l' } else { b'B' };
         let w = |p: &mut Vec<u8>, at: usize, v: u16| {
-            let b = if little { v.to_le_bytes() } else { v.to_be_bytes() };
+            let b = if little {
+                v.to_le_bytes()
+            } else {
+                v.to_be_bytes()
+            };
             p[at..at + 2].copy_from_slice(&b);
         };
         w(&mut p, 2, 11);
@@ -499,11 +525,20 @@ mod tests {
     fn display_specs_resolve_like_electron() {
         use DisplayTarget::*;
         let linux = X11Platform::Other;
-        assert_eq!(resolve_display_spec(Some(":2"), None, linux), Path("/tmp/.X11-unix/X2".into()));
-        assert_eq!(resolve_display_spec(Some(":"), None, X11Platform::MacOs), Path("/tmp/.X11-unix/X0".into()));
+        assert_eq!(
+            resolve_display_spec(Some(":2"), None, linux),
+            Path("/tmp/.X11-unix/X2".into())
+        );
+        assert_eq!(
+            resolve_display_spec(Some(":"), None, X11Platform::MacOs),
+            Path("/tmp/.X11-unix/X0".into())
+        );
         assert_eq!(
             resolve_display_spec(Some("localhost:1"), None, X11Platform::Windows),
-            Tcp { host: "localhost".into(), port: 6001 }
+            Tcp {
+                host: "localhost".into(),
+                port: 6001
+            }
         );
         assert_eq!(
             resolve_display_spec(
@@ -513,22 +548,46 @@ mod tests {
             ),
             Path("/private/tmp/com.apple.launchd.test/org.xquartz:0".into())
         );
-        assert_eq!(resolve_display_spec(Some("unix:1"), None, linux), Path("/tmp/.X11-unix/X1".into()));
+        assert_eq!(
+            resolve_display_spec(Some("unix:1"), None, linux),
+            Path("/tmp/.X11-unix/X1".into())
+        );
         assert_eq!(
             resolve_display_spec(Some("10.0.0.5:0.0"), None, linux),
-            Tcp { host: "10.0.0.5".into(), port: 6000 }
+            Tcp {
+                host: "10.0.0.5".into(),
+                port: 6000
+            }
         );
-        assert_eq!(resolve_display_spec(Some(":0.1"), None, linux), Path("/tmp/.X11-unix/X0".into()));
-        assert_eq!(resolve_display_spec(None, Some(":3"), linux), Path("/tmp/.X11-unix/X3".into()));
+        assert_eq!(
+            resolve_display_spec(Some(":0.1"), None, linux),
+            Path("/tmp/.X11-unix/X0".into())
+        );
+        assert_eq!(
+            resolve_display_spec(None, Some(":3"), linux),
+            Path("/tmp/.X11-unix/X3".into())
+        );
         assert_eq!(
             resolve_display_spec(None, None, X11Platform::Windows),
-            Tcp { host: "localhost".into(), port: 6000 }
+            Tcp {
+                host: "localhost".into(),
+                port: 6000
+            }
         );
         assert_eq!(
             resolve_display_spec(Some("x410"), None, X11Platform::Windows),
-            Tcp { host: "x410".into(), port: 6000 }
+            Tcp {
+                host: "x410".into(),
+                port: 6000
+            }
         );
-        assert_eq!(resolve_display_spec(Some("h:6010"), None, linux), Tcp { host: "h".into(), port: 6010 });
+        assert_eq!(
+            resolve_display_spec(Some("h:6010"), None, linux),
+            Tcp {
+                host: "h".into(),
+                port: 6010
+            }
+        );
     }
 
     #[test]
@@ -570,14 +629,23 @@ mod tests {
             "host/unix:10  MIT-MAGIC-COOKIE-1  {c10}\nhost/unix:0  MIT-MAGIC-COOKIE-1  {c0}\nhost/unix:1  MIT-MAGIC-COOKIE-1  {c1}\n"
         );
         assert_eq!(parse_xauth_cookie(&out, ":0"), hex_decode(c0).ok());
-        assert_eq!(parse_xauth_cookie(&out, "/tmp/.X11-unix/X1"), hex_decode(c1).ok());
-        assert_eq!(parse_xauth_cookie(&out, "localhost:10.0"), hex_decode(c10).ok());
+        assert_eq!(
+            parse_xauth_cookie(&out, "/tmp/.X11-unix/X1"),
+            hex_decode(c1).ok()
+        );
+        assert_eq!(
+            parse_xauth_cookie(&out, "localhost:10.0"),
+            hex_decode(c10).ok()
+        );
         assert_eq!(parse_xauth_cookie("", ":0"), None);
     }
 
     #[test]
     fn failure_message_names_target_and_hint() {
-        let target = DisplayTarget::Tcp { host: "localhost".into(), port: 6000 };
+        let target = DisplayTarget::Tcp {
+            host: "localhost".into(),
+            port: 6000,
+        };
         let msg = connect_failure_message("ECONNREFUSED", &target, X11Platform::Windows);
         assert!(msg.contains("Could not connect to the local X11 server: ECONNREFUSED"));
         assert!(msg.contains("localhost:6000"));
@@ -621,7 +689,12 @@ mod tests {
     async fn without_a_local_cookie_bytes_pass_through() {
         let (remote_app, remote_proxy) = tokio::io::duplex(1024);
         let (local_proxy, mut local_server) = tokio::io::duplex(1024);
-        let task = tokio::spawn(proxy_x11_stream(remote_proxy, local_proxy, Some(vec![1; 16]), None));
+        let task = tokio::spawn(proxy_x11_stream(
+            remote_proxy,
+            local_proxy,
+            Some(vec![1; 16]),
+            None,
+        ));
         let (_r, mut w) = tokio::io::split(remote_app);
         w.write_all(b"remote").await.unwrap();
         let mut got = [0u8; 6];

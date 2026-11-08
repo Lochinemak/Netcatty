@@ -30,7 +30,10 @@ pub fn resource_keys(
     target_sftp_id: Option<&str>,
 ) -> Vec<String> {
     let key = |host: Option<&str>, sftp: Option<&str>| -> Option<String> {
-        match (host.filter(|h| !h.is_empty()), sftp.filter(|s| !s.is_empty())) {
+        match (
+            host.filter(|h| !h.is_empty()),
+            sftp.filter(|s| !s.is_empty()),
+        ) {
             (Some(host), _) => Some(format!("host:{host}")),
             (None, Some(sftp)) => Some(format!("session:{sftp}")),
             (None, None) => None,
@@ -56,7 +59,10 @@ pub fn resource_keys(
 
 /// Normalize a requested limit: integers in `1..=16`, otherwise `None`.
 pub fn normalize_limit(value: f64) -> Option<usize> {
-    if value.is_finite() && value.fract() == 0.0 && (MIN_LIMIT as f64..=MAX_LIMIT as f64).contains(&value) {
+    if value.is_finite()
+        && value.fract() == 0.0
+        && (MIN_LIMIT as f64..=MAX_LIMIT as f64).contains(&value)
+    {
         Some(value as usize)
     } else {
         None
@@ -309,8 +315,14 @@ mod tests {
             resource_keys(Some("h1"), Some("s1"), None, Some("s2")),
             vec!["host:h1", "session:s2"]
         );
-        assert_eq!(resource_keys(None, None, Some("h"), Some("s")), vec!["host:h"]);
-        assert_eq!(resource_keys(Some("h"), None, Some("h"), None), vec!["host:h"]);
+        assert_eq!(
+            resource_keys(None, None, Some("h"), Some("s")),
+            vec!["host:h"]
+        );
+        assert_eq!(
+            resource_keys(Some("h"), None, Some("h"), None),
+            vec!["host:h"]
+        );
         assert_eq!(resource_keys(Some(""), None, None, None), vec!["local"]);
     }
 

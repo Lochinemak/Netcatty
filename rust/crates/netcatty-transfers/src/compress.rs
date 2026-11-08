@@ -163,19 +163,35 @@ pub fn build_atomic_remote_extraction_command(
 
 /// Electron `buildRemoteArchivePath`: a hidden archive next to the target,
 /// unique per compression id.
-pub fn build_remote_archive_path(target_path: &str, folder_name: &str, compression_id: &str) -> String {
-    let base: String = posix_basename(if folder_name.is_empty() { "folder" } else { folder_name })
-        .chars()
-        .map(|c| {
-            if c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-') {
-                c
-            } else {
-                '_'
-            }
-        })
-        .collect();
-    let base = if base.is_empty() { "folder".to_string() } else { base };
-    let id = if compression_id.is_empty() { "compression" } else { compression_id };
+pub fn build_remote_archive_path(
+    target_path: &str,
+    folder_name: &str,
+    compression_id: &str,
+) -> String {
+    let base: String = posix_basename(if folder_name.is_empty() {
+        "folder"
+    } else {
+        folder_name
+    })
+    .chars()
+    .map(|c| {
+        if c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-') {
+            c
+        } else {
+            '_'
+        }
+    })
+    .collect();
+    let base = if base.is_empty() {
+        "folder".to_string()
+    } else {
+        base
+    };
+    let id = if compression_id.is_empty() {
+        "compression"
+    } else {
+        compression_id
+    };
     posix_join(
         target_path,
         &format!(".{base}.netcatty-{}.tar.gz", sha256_prefix(id)),
@@ -193,7 +209,11 @@ pub fn compression_target_key(
         return Err("SFTP connection identity unavailable for compressed upload".to_string());
     }
     let name = normalized_folder_name(folder_name)?;
-    let target = if target_path.is_empty() { "." } else { target_path };
+    let target = if target_path.is_empty() {
+        "."
+    } else {
+        target_path
+    };
     let normalized = posix_normalize(&posix_join(&target.replace('\\', "/"), &name));
     Ok(format!("{connection_identity}\0{normalized}"))
 }
@@ -233,7 +253,10 @@ pub struct LocalTarInvocation {
     pub args: Vec<String>,
 }
 
-pub fn local_tar_invocation(folder_path: &Path, output_path: &Path) -> Result<LocalTarInvocation, String> {
+pub fn local_tar_invocation(
+    folder_path: &Path,
+    output_path: &Path,
+) -> Result<LocalTarInvocation, String> {
     let folder_name = folder_path
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
@@ -353,8 +376,12 @@ mod tests {
 
     #[test]
     fn replacement_uses_stable_stage_and_backup_across_operations() {
-        let first = build_atomic_remote_extraction_command("/target/.one.tar.gz", "/target", "folder").unwrap();
-        let second = build_atomic_remote_extraction_command("/target/.two.tar.gz", "/target", "folder").unwrap();
+        let first =
+            build_atomic_remote_extraction_command("/target/.one.tar.gz", "/target", "folder")
+                .unwrap();
+        let second =
+            build_atomic_remote_extraction_command("/target/.two.tar.gz", "/target", "folder")
+                .unwrap();
         let value = |cmd: &str, name: &str| {
             cmd.lines()
                 .find(|l| l.starts_with(&format!("{name}=")))
@@ -363,13 +390,16 @@ mod tests {
         assert_eq!(value(&first, "backup"), value(&second, "backup"));
         assert_eq!(value(&first, "stage"), value(&second, "stage"));
         assert_ne!(value(&first, "archive"), value(&second, "archive"));
-        assert!(value(&first, "stage").unwrap().contains("/target/.netcatty-compress-"));
+        assert!(value(&first, "stage")
+            .unwrap()
+            .contains("/target/.netcatty-compress-"));
     }
 
     #[test]
     fn quoting_keeps_hostile_names_inert() {
         let cmd =
-            build_atomic_remote_extraction_command("/t/x'; rm -rf ~; '.tgz", "/t/it's", "f$(id)").unwrap();
+            build_atomic_remote_extraction_command("/t/x'; rm -rf ~; '.tgz", "/t/it's", "f$(id)")
+                .unwrap();
         assert!(cmd.contains("archive='/t/x'\\''; rm -rf ~; '\\''.tgz'"));
         assert!(cmd.contains("final='/t/it'\\''s/f$(id)'"));
     }
@@ -389,7 +419,10 @@ mod tests {
         let a = compression_target_key("ep", "/srv/", "folder").unwrap();
         let b = compression_target_key("ep", "/srv/x/..", "folder").unwrap();
         assert_eq!(a, b);
-        assert_ne!(a, compression_target_key("other", "/srv", "folder").unwrap());
+        assert_ne!(
+            a,
+            compression_target_key("other", "/srv", "folder").unwrap()
+        );
         assert!(compression_target_key("", "/srv", "folder").is_err());
     }
 
@@ -415,8 +448,11 @@ mod tests {
     #[test]
     fn an_archive_inside_the_source_is_excluded() {
         let folder = Path::new("/p/folder");
-        let inv = local_tar_invocation(folder, Path::new("/p/folder/tmp/1_1_folder.tar.gz")).unwrap();
-        assert!(inv.args.contains(&"--exclude=folder/tmp/1_1_folder.tar.gz".to_string()));
+        let inv =
+            local_tar_invocation(folder, Path::new("/p/folder/tmp/1_1_folder.tar.gz")).unwrap();
+        assert!(inv
+            .args
+            .contains(&"--exclude=folder/tmp/1_1_folder.tar.gz".to_string()));
     }
 
     #[test]
@@ -461,9 +497,12 @@ mod tests {
         }
 
         fn no_artifacts(target: &Path) -> bool {
-            !std::fs::read_dir(target)
-                .unwrap()
-                .any(|e| e.unwrap().file_name().to_string_lossy().contains(".netcatty-compress-"))
+            !std::fs::read_dir(target).unwrap().any(|e| {
+                e.unwrap()
+                    .file_name()
+                    .to_string_lossy()
+                    .contains(".netcatty-compress-")
+            })
         }
 
         #[test]
@@ -492,9 +531,19 @@ mod tests {
                 "folder",
             )
             .unwrap();
-            assert!(Command::new("/bin/sh").args(["-c", &cmd]).status().unwrap().success());
-            assert_eq!(std::fs::read_to_string(final_dir.join("old.txt")).unwrap(), "old");
-            assert_eq!(std::fs::read_to_string(final_dir.join("new.txt")).unwrap(), "new");
+            assert!(Command::new("/bin/sh")
+                .args(["-c", &cmd])
+                .status()
+                .unwrap()
+                .success());
+            assert_eq!(
+                std::fs::read_to_string(final_dir.join("old.txt")).unwrap(),
+                "old"
+            );
+            assert_eq!(
+                std::fs::read_to_string(final_dir.join("new.txt")).unwrap(),
+                "new"
+            );
             assert!(!archive.exists());
             assert!(no_artifacts(&target));
             let _ = std::fs::remove_dir_all(root);
@@ -521,7 +570,10 @@ mod tests {
                 .status()
                 .unwrap();
             assert!(!status.success());
-            assert_eq!(std::fs::read_to_string(final_dir.join("old.txt")).unwrap(), "old");
+            assert_eq!(
+                std::fs::read_to_string(final_dir.join("old.txt")).unwrap(),
+                "old"
+            );
             assert!(no_artifacts(&target));
             let _ = std::fs::remove_dir_all(root);
         }

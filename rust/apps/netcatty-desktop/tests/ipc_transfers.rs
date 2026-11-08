@@ -85,7 +85,11 @@ fn collect(app: &App<MockRuntime>, event: &str) -> Arc<Mutex<Vec<Value>>> {
     seen
 }
 
-fn wait_for(seen: &Arc<Mutex<Vec<Value>>>, timeout: Duration, pred: impl Fn(&[Value]) -> bool) -> bool {
+fn wait_for(
+    seen: &Arc<Mutex<Vec<Value>>>,
+    timeout: Duration,
+    pred: impl Fn(&[Value]) -> bool,
+) -> bool {
     let start = Instant::now();
     loop {
         if pred(&seen.lock().unwrap()) {
@@ -108,17 +112,29 @@ fn has(events: &[Value], kind: &str, id: &str) -> bool {
 fn concurrency_limit_accepts_integers_in_range() {
     let h = build_app();
     assert_eq!(
-        ok(&h.webview, "transfer_set_concurrency", json!({ "limit": 3 })),
+        ok(
+            &h.webview,
+            "transfer_set_concurrency",
+            json!({ "limit": 3 })
+        ),
         json!({ "success": true, "limit": 3 })
     );
     for bad in [json!(0), json!(17), json!(2.5), json!("4"), Value::Null] {
         assert_eq!(
-            ok(&h.webview, "transfer_set_concurrency", json!({ "limit": bad })),
+            ok(
+                &h.webview,
+                "transfer_set_concurrency",
+                json!({ "limit": bad })
+            ),
             json!({ "success": true, "limit": 3 })
         );
     }
     assert_eq!(
-        ok(&h.webview, "transfer_prioritize", json!({ "transferId": "missing" })),
+        ok(
+            &h.webview,
+            "transfer_prioritize",
+            json!({ "transferId": "missing" })
+        ),
         json!({ "success": false })
     );
 }
@@ -145,7 +161,11 @@ fn local_transfer_is_queued_then_started() {
     );
     assert_eq!(result["totalBytes"], 4096);
     assert_eq!(std::fs::read(&target).unwrap().len(), 4096);
-    assert!(wait_for(&events, Duration::from_secs(5), |e| has(e, "completed", "t-local")));
+    assert!(wait_for(&events, Duration::from_secs(5), |e| has(
+        e,
+        "completed",
+        "t-local"
+    )));
     let seen = events.lock().unwrap();
     let kinds: Vec<&str> = seen
         .iter()
@@ -166,7 +186,11 @@ fn local_transfer_is_queued_then_started() {
 fn queued_transfers_can_be_prioritized_paused_and_cancelled() {
     let h = build_app();
     let events = collect(&h.app, "netcatty:sftp:global-transfer");
-    ok(&h.webview, "transfer_set_concurrency", json!({ "limit": 1 }));
+    ok(
+        &h.webview,
+        "transfer_set_concurrency",
+        json!({ "limit": 1 }),
+    );
     let dir = tempfile::tempdir().unwrap();
     let fifo = dir.path().join("hold.fifo");
     assert!(std::process::Command::new("mkfifo")
@@ -190,11 +214,15 @@ fn queued_transfers_can_be_prioritized_paused_and_cancelled() {
         if let (Some(p), Some(e)) = (payload.as_object_mut(), extra.as_object()) {
             p.extend(e.clone());
         }
-        std::thread::spawn(move || invoke(&webview, "transfer_start", json!({ "payload": payload })))
+        std::thread::spawn(move || {
+            invoke(&webview, "transfer_start", json!({ "payload": payload }))
+        })
     };
 
     let holder = start("hold", &fifo, json!({}));
-    assert!(wait_for(&events, Duration::from_secs(5), |e| has(e, "started", "hold")));
+    assert!(wait_for(&events, Duration::from_secs(5), |e| has(
+        e, "started", "hold"
+    )));
     let cancelled = start("q-cancel", &plain, json!({}));
     let paused = start("q-pause", &plain, json!({ "uploadCheckpointBytes": 9 }));
     assert!(wait_for(&events, Duration::from_secs(5), |e| {
@@ -203,21 +231,33 @@ fn queued_transfers_can_be_prioritized_paused_and_cancelled() {
     assert!(!has(&events.lock().unwrap(), "started", "q-cancel"));
 
     assert_eq!(
-        ok(&h.webview, "transfer_prioritize", json!({ "transferId": "q-pause" })),
+        ok(
+            &h.webview,
+            "transfer_prioritize",
+            json!({ "transferId": "q-pause" })
+        ),
         json!({ "success": true })
     );
     assert_eq!(
-        ok(&h.webview, "transfer_pause", json!({ "transferId": "q-pause" })),
+        ok(
+            &h.webview,
+            "transfer_pause",
+            json!({ "transferId": "q-pause" })
+        ),
         json!({ "success": true })
     );
     let paused = paused.join().unwrap().unwrap();
     assert_eq!(paused["cancelled"], true);
     assert_eq!(paused["warning"], "paused");
-    assert!(wait_for(&events, Duration::from_secs(5), |e| e
-        .iter()
-        .any(|ev| ev["type"] == "paused" && ev["transferId"] == "q-pause" && ev["checkpointBytes"] == 9)));
+    assert!(wait_for(&events, Duration::from_secs(5), |e| e.iter().any(
+        |ev| ev["type"] == "paused" && ev["transferId"] == "q-pause" && ev["checkpointBytes"] == 9
+    )));
 
-    ok(&h.webview, "transfer_cancel", json!({ "transferId": "q-cancel" }));
+    ok(
+        &h.webview,
+        "transfer_cancel",
+        json!({ "transferId": "q-cancel" }),
+    );
     let cancelled = cancelled.join().unwrap().unwrap();
     assert_eq!(cancelled["cancelled"], true);
     assert!(has(&events.lock().unwrap(), "cancelled", "q-cancel"));
@@ -274,7 +314,11 @@ fn cleanup_removes_only_this_tasks_artifacts() {
     assert!(!stage.exists());
     assert!(foreign.exists());
     assert_eq!(
-        ok(&h.webview, "transfer_cleanup", json!({ "payload": { "transferId": "" } })),
+        ok(
+            &h.webview,
+            "transfer_cleanup",
+            json!({ "payload": { "transferId": "" } })
+        ),
         json!({ "success": false, "error": "transferId is required" })
     );
 }
@@ -282,19 +326,35 @@ fn cleanup_removes_only_this_tasks_artifacts() {
 #[test]
 fn compressed_upload_control_paths() {
     let h = build_app();
-    let support = ok(&h.webview, "compress_check_support", json!({ "sftpId": "nope" }));
+    let support = ok(
+        &h.webview,
+        "compress_check_support",
+        json!({ "sftpId": "nope" }),
+    );
     assert_eq!(support["supported"], false);
     assert!(support["error"].as_str().unwrap().contains("not found"));
     assert_eq!(
-        ok(&h.webview, "compress_cancel", json!({ "compressionId": "c1" })),
+        ok(
+            &h.webview,
+            "compress_cancel",
+            json!({ "compressionId": "c1" })
+        ),
         json!({ "success": true, "inactive": true })
     );
     assert_eq!(
-        ok(&h.webview, "compress_pause", json!({ "compressionId": "c1" })),
+        ok(
+            &h.webview,
+            "compress_pause",
+            json!({ "compressionId": "c1" })
+        ),
         json!({ "success": false, "reason": "Compression is not active" })
     );
     assert_eq!(
-        ok(&h.webview, "compress_resume", json!({ "compressionId": "c1" })),
+        ok(
+            &h.webview,
+            "compress_resume",
+            json!({ "compressionId": "c1" })
+        ),
         json!({ "success": false, "reason": "Compression is not active" })
     );
 
@@ -315,12 +375,17 @@ fn compressed_upload_control_paths() {
     assert_eq!(result["compressionId"], "c2");
     assert!(result["error"].as_str().unwrap().contains("not found"));
     let seen = events.lock().unwrap();
-    let started = seen.iter().find(|e| e["type"] == "started").expect("started");
+    let started = seen
+        .iter()
+        .find(|e| e["type"] == "started")
+        .expect("started");
     assert_eq!(started["controlKind"], "compressed-upload");
     assert_eq!(started["fileName"], "folder (compressed)");
     assert_eq!(started["targetPath"], "/srv/folder");
     assert_eq!(started["lifecycleState"], "transferring");
-    assert!(seen.iter().any(|e| e["type"] == "failed" && e["transferId"] == "c2"));
+    assert!(seen
+        .iter()
+        .any(|e| e["type"] == "failed" && e["transferId"] == "c2"));
     assert_eq!(seen.iter().filter(|e| e["type"] == "failed").count(), 1);
 }
 
@@ -333,7 +398,10 @@ fn drag_requests_are_validated_before_any_native_call() {
         json!({ "payload": { "requestId": "r1", "paths": ["relative/path"] } }),
     );
     assert_eq!(result["started"], false);
-    assert_eq!(result["error"], "Drag paths must be absolute filesystem paths");
+    assert_eq!(
+        result["error"],
+        "Drag paths must be absolute filesystem paths"
+    );
     let result = ok(
         &h.webview,
         "local_drag_start",
@@ -347,7 +415,12 @@ fn drag_requests_are_validated_before_any_native_call() {
         json!({ "payload": { "requestId": "r2", "paths": [missing.to_string_lossy()] } }),
     );
     assert_eq!(result["started"], false);
-    assert!(invoke(&h.webview, "local_drag_cancel", json!({ "requestId": "r2" })).is_ok());
+    assert!(invoke(
+        &h.webview,
+        "local_drag_cancel",
+        json!({ "requestId": "r2" })
+    )
+    .is_ok());
 }
 
 /// Telnet sessions (like serial / Mosh / ET) feed the automatic session log
@@ -446,7 +519,10 @@ fn e2e_cwd_probe_and_compressed_upload() {
         .contains("CWD-42")));
     let pwd = ok(&h.webview, "session_pwd", json!({ "sessionId": "e2e-ssh" }));
     assert_eq!(pwd["success"], true, "{pwd}");
-    assert_eq!(pwd["cwd"].as_str().map(std::path::PathBuf::from), Some(work_path.clone()));
+    assert_eq!(
+        pwd["cwd"].as_str().map(std::path::PathBuf::from),
+        Some(work_path.clone())
+    );
 
     // Compressed upload of a local folder into `<work>/remote`.
     let mut sftp = base.clone();
@@ -455,7 +531,11 @@ fn e2e_cwd_probe_and_compressed_upload() {
         .as_str()
         .unwrap()
         .to_string();
-    let support = ok(&h.webview, "compress_check_support", json!({ "sftpId": sftp_id }));
+    let support = ok(
+        &h.webview,
+        "compress_check_support",
+        json!({ "sftpId": sftp_id }),
+    );
     assert_eq!(support["supported"], true, "{support}");
     let folder = work_path.join("local").join("my folder");
     std::fs::create_dir_all(folder.join("sub")).unwrap();
@@ -479,8 +559,15 @@ fn e2e_cwd_probe_and_compressed_upload() {
     assert_eq!(result["success"], true, "{result}");
     let out = remote.join("my folder");
     assert_eq!(std::fs::read_to_string(out.join("a.txt")).unwrap(), "alpha");
-    assert_eq!(std::fs::read_to_string(out.join("sub/b.txt")).unwrap(), "beta");
-    assert_eq!(std::fs::read_to_string(out.join("old.txt")).unwrap(), "old", "merge semantics");
+    assert_eq!(
+        std::fs::read_to_string(out.join("sub/b.txt")).unwrap(),
+        "beta"
+    );
+    assert_eq!(
+        std::fs::read_to_string(out.join("old.txt")).unwrap(),
+        "old",
+        "merge semantics"
+    );
     let leftovers: Vec<String> = std::fs::read_dir(&remote)
         .unwrap()
         .flatten()
@@ -489,7 +576,10 @@ fn e2e_cwd_probe_and_compressed_upload() {
         .collect();
     assert!(leftovers.is_empty(), "{leftovers:?}");
     let seen = transfers.lock().unwrap();
-    let mine: Vec<&Value> = seen.iter().filter(|e| e["transferId"] == "e2e-c1").collect();
+    let mine: Vec<&Value> = seen
+        .iter()
+        .filter(|e| e["transferId"] == "e2e-c1")
+        .collect();
     assert_eq!(mine.first().unwrap()["type"], "started");
     assert_eq!(mine.last().unwrap()["type"], "completed");
     assert!(mine.iter().any(|e| e["phase"] == "uploading"));
@@ -500,7 +590,11 @@ fn e2e_cwd_probe_and_compressed_upload() {
     );
     drop(seen);
     ok(&h.webview, "sftp_close", json!({ "sftpId": sftp_id }));
-    ok(&h.webview, "session_close", json!({ "sessionId": "e2e-ssh" }));
+    ok(
+        &h.webview,
+        "session_close",
+        json!({ "sessionId": "e2e-ssh" }),
+    );
 }
 
 #[test]

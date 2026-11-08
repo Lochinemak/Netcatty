@@ -68,7 +68,11 @@ fn win_device_path(p: &[u8]) -> bool {
 }
 
 /// Validate a drag request; returns the de-duplicated paths.
-pub fn validate_drag_request(request_id: &str, paths: &[String], flavor: PathFlavor) -> Result<Vec<String>, String> {
+pub fn validate_drag_request(
+    request_id: &str,
+    paths: &[String],
+    flavor: PathFlavor,
+) -> Result<Vec<String>, String> {
     if request_id.is_empty()
         || request_id.len() > MAX_REQUEST_ID_LEN
         || paths.is_empty()
@@ -108,7 +112,9 @@ mod tests {
     #[test]
     fn malformed_requests_are_rejected() {
         assert!(validate_drag_request("", &["/a".into()], PathFlavor::Posix).is_err());
-        assert!(validate_drag_request(&"x".repeat(129), &["/a".into()], PathFlavor::Posix).is_err());
+        assert!(
+            validate_drag_request(&"x".repeat(129), &["/a".into()], PathFlavor::Posix).is_err()
+        );
         assert!(v(&[], PathFlavor::Posix).is_err());
         assert!(v(&["relative"], PathFlavor::Posix).is_err());
         assert!(v(&["/bad\0file"], PathFlavor::Posix).is_err());
@@ -117,8 +123,20 @@ mod tests {
     #[test]
     fn windows_drives_and_shares_keep_their_spelling() {
         assert_eq!(
-            v(&["C:/a b/file ", "C:\\a b\\file ", "\\\\server\\share\\folder"], PathFlavor::Windows).unwrap(),
-            vec!["C:/a b/file ", "C:\\a b\\file ", "\\\\server\\share\\folder"]
+            v(
+                &[
+                    "C:/a b/file ",
+                    "C:\\a b\\file ",
+                    "\\\\server\\share\\folder"
+                ],
+                PathFlavor::Windows
+            )
+            .unwrap(),
+            vec![
+                "C:/a b/file ",
+                "C:\\a b\\file ",
+                "\\\\server\\share\\folder"
+            ]
         );
         assert!(v(&["C:relative"], PathFlavor::Windows).is_err());
         assert!(v(&["/drive-relative"], PathFlavor::Windows).is_err());
@@ -137,7 +155,11 @@ mod tests {
         let mut with_dup = posix.to_vec();
         with_dup.push(posix[0]);
         assert_eq!(v(&with_dup, PathFlavor::Posix).unwrap(), posix.to_vec());
-        let win = ["C:\\local\\link\\..\\file", "C:/local/./file", "\\\\server\\share\\link\\..\\file"];
+        let win = [
+            "C:\\local\\link\\..\\file",
+            "C:/local/./file",
+            "\\\\server\\share\\link\\..\\file",
+        ];
         let mut with_dup = win.to_vec();
         with_dup.push(win[0]);
         assert_eq!(v(&with_dup, PathFlavor::Windows).unwrap(), win.to_vec());

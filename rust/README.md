@@ -27,7 +27,8 @@ rust/
 │   ├── netcatty-sysmgr        system manager + server stats: remote command builders and parsers (processes, tmux, docker/podman/nerdctl, kubectl, GPUs, ports, systemd, stats)
 │   ├── netcatty-telnet        telnet framing / option negotiation, login-prompt auto-login (pure)
 │   ├── netcatty-serial        serial ports (serialport, no libudev), port listing, Windows named pipes
-│   └── netcatty-mosh          Mosh handshake sniffer + ssh/mosh-client command lines, ET invocation, askpass (pure)
+│   ├── netcatty-mosh          Mosh handshake sniffer + ssh/mosh-client command lines, ET invocation, askpass (pure)
+│   └── netcatty-transfers     transfer admission queue, compressed-upload scripts, artifact cleanup and file-drag rules
 └── apps/
     └── netcatty-desktop       Tauri 2 app: commands, session registry, prompt broker, events
 ```
