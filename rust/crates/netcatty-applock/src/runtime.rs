@@ -6,7 +6,7 @@
 
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RuntimeState {
     pub initialized: bool,
@@ -16,20 +16,6 @@ pub struct RuntimeState {
     pub last_locked_at: Option<i64>,
     pub last_unlocked_at: Option<i64>,
     pub last_activity_at: Option<i64>,
-}
-
-impl Default for RuntimeState {
-    fn default() -> Self {
-        Self {
-            initialized: false,
-            locked: false,
-            reason: None,
-            version: 0,
-            last_locked_at: None,
-            last_unlocked_at: None,
-            last_activity_at: None,
-        }
-    }
 }
 
 fn normalize_reason(reason: Option<&str>) -> Option<String> {
