@@ -29,6 +29,7 @@ import { pluginClipboard, pluginDialog, pluginOpener } from './plugins';
 import { cancelStagedUpload, stageUploadFile } from './uploadStaging';
 import { createAiBridge } from './bridge/ai';
 import { createScriptsBridge } from './bridge/scripts';
+import { createHostBrowserBridge } from './bridge/hostBrowser';
 
 // ---------------------------------------------------------------------------
 // Contract constants (see `netcatty_core::ipc::events`)
@@ -1438,6 +1439,8 @@ export function createTauriBridge(options: CreateTauriBridgeOptions = {}): Netca
     ...createUpdateBridge({ hub }),
     // AI core (provider proxy, chat streaming, privacy, skills, sessions backup).
     ...createAiBridge({ hub }),
+    // In-app host browser (rust/docs/ipc-hostbrowser.md).
+    ...createHostBrowserBridge({ hub }),
   };
 
   return bridge as NetcattyBridge;
