@@ -652,6 +652,7 @@ AI core (provider proxy, chat streaming, privacy, user skills, sessions backup):
 Host browser (in-app browser panel / window, `hostbrowser_*` commands): see [ipc-hostbrowser.md](ipc-hostbrowser.md).
 Managed SDK agents, agent discovery and Codex login: see [ipc-agents.md](ipc-agents.md).
 AI control plane (Catty exec, capabilities, MCP host, approvals, tool-output store, External MCP): see [`ipc-mcp.md`](ipc-mcp.md).
+Security (app lock, FIDO2 security keys, TOTP QR screen scan, SSH debug log): see [ipc-security.md](ipc-security.md).
 
 ## Mapping `NetcattyBridge` → commands (adapter cheat-sheet)
 

@@ -1,10 +1,10 @@
 //! Security module (see `rust/docs/ipc-security.md`):
 //!
-//! * [`applock`]: App lock (`netcatty:appLock:*`), logic in `netcatty-applock`.
-//! * [`fido`]: FIDO2 security keys: prompt responses, sk key generation,
+//! * [`applock`] — App lock (`netcatty:appLock:*`), logic in `netcatty-applock`.
+//! * [`fido`] — FIDO2 security keys: prompt responses, sk key generation,
 //!   session / Mosh / ET agent preparation; logic in `netcatty-fido`.
-//! * [`totp_scan`]: `scanTotpQrFromScreen`.
-//! * [`ssh_debug`]: SSH diagnostic log (`getSshDebugLogInfo`,
+//! * [`totp_scan`] — `scanTotpQrFromScreen`.
+//! * [`ssh_debug`] — SSH diagnostic log (`getSshDebugLogInfo`,
 //!   `openSshDebugLogDir`) and its `tracing` layer.
 
 pub mod applock;
