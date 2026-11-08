@@ -146,6 +146,8 @@ jobs:
           node scripts/patch-xterm-image-tile-stride.cjs
           node scripts/patch-xterm-image-iip-type.cjs
           node scripts/patch-xterm-webgl-atlas.cjs
+          # Terminal autocomplete specs, bundled as <resource_dir>/figspecs.
+          node rust/scripts/stage-figspecs.cjs
 
       - name: Fetch bundled mosh-client and et
         # Same MoshCatty / et releases the Electron build bundles. Best
@@ -229,6 +231,7 @@ jobs:
               const dlls = path.posix.join("resources", "et", dir, `et-${dir}-dlls`);
               if (exe && fs.existsSync(dlls)) resources[`../../../${dlls}/`] = `et/et-${dir}-dlls/`;
             }
+            if (fs.existsSync("resources/figspecs")) resources["../../../resources/figspecs/"] = "figspecs/";
             if (Object.keys(resources).length > 0) conf.bundle.resources = resources;
             fs.writeFileSync(process.argv[1], JSON.stringify(conf, null, 2));
             console.log(JSON.stringify(conf));

@@ -38,6 +38,7 @@ pub mod store;
 pub mod sync;
 pub mod system;
 pub mod telnet;
+pub mod terminal;
 pub mod temp;
 pub mod tempdir;
 pub mod totp;
@@ -46,6 +47,7 @@ pub mod tray;
 pub mod update;
 pub mod window;
 pub mod windows;
+pub mod zmodem;
 
 use netcatty_core::CoreError;
 
@@ -511,6 +513,19 @@ pub fn handler<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + 
         security::totp_scan::totp_scan_screen,
         security::ssh_debug::ssh_debug_log_info,
         security::ssh_debug::ssh_debug_log_open_dir,
+        // ZMODEM (rz / sz) + serial YMODEM (`rust/docs/ipc-zmodem.md`).
+        zmodem::zmodem_cancel,
+        zmodem::zmodem_overwrite_response,
+        zmodem::zmodem_drag_drop_upload,
+        zmodem::serial_ymodem_send,
+        zmodem::serial_ymodem_receive,
+        // Terminal plumbing + autocomplete (`rust/docs/ipc-terminal.md`).
+        terminal::terminal_cancel_pending_writes,
+        terminal::terminal_windows_pty_info,
+        terminal::figspec_list,
+        terminal::figspec_load,
+        terminal::autocomplete_local_listdir,
+        terminal::autocomplete_remote_listdir,
     ]
 }
 

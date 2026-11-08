@@ -124,6 +124,10 @@ pub async fn session_start_ssh<R: tauri::Runtime>(
     } else {
         connect::acquire(&state, &payload, &session_id, false).await?
     };
+    // A deliberate fresh X11 dial is not a reuse fallback.
+    if !x11 {
+        super::terminal::notify_reuse_fallback(&state.app, &session_id, &payload, acquired.reused);
+    }
     let connection = acquired.connection;
     let x11_cookie = x11.then(netcatty_ssh::shell::random_x11_cookie);
     if let Some(cookie) = &x11_cookie {
@@ -352,8 +356,29 @@ pub async fn session_write<R: tauri::Runtime>(
             payload.log_rewrite.as_ref(),
         );
     }
-    match plan_write(&payload)? {
-        WritePlan::Binary(bytes) => {
+    let plan = plan_write(&payload)?;
+    // Paste receipts / paced-write cancellation (`terminal.rs`).
+    let chunk_count = match &plan {
+        WritePlan::Paced { chunks, .. } => chunks.len(),
+        _ => 1,
+    };
+    let receipt = super::terminal::begin_write(&state.app, &payload, chunk_count);
+    // ZMODEM / YMODEM in progress: input is swallowed, Ctrl+C cancels it.
+    let probe: &[u8] = if payload.binary { b"" } else { payload.data.as_bytes() };
+    if super::zmodem::intercept_input(&state.app, &payload.session_id, probe) {
+        if let Some(r) = &receipt {
+            r.finish(&state.app, None, false);
+        }
+        return Ok(());
+    }
+    let single = |result: CmdResult<()>| {
+        if let Some(r) = &receipt {
+            r.finish(&state.app, Some(0), result.is_err());
+        }
+        result
+    };
+    match plan {
+        WritePlan::Binary(bytes) => single(
             state
                 .sessions
                 .write_input(
@@ -361,14 +386,14 @@ pub async fn session_write<R: tauri::Runtime>(
                     SessionInput::Bytes(bytes::Bytes::from(bytes)),
                     &meta,
                 )
-                .await
-        }
-        WritePlan::Text(text) => {
+                .await,
+        ),
+        WritePlan::Text(text) => single(
             state
                 .sessions
                 .write_input(&payload.session_id, SessionInput::Text(text), &meta)
-                .await
-        }
+                .await,
+        ),
         WritePlan::Paced { chunks, delay_ms } => {
             if !state.sessions.contains(&payload.session_id) {
                 return Err(CoreError::not_found(format!(
@@ -378,17 +403,27 @@ pub async fn session_write<R: tauri::Runtime>(
             }
             let registry = state.sessions.clone();
             let session_id = payload.session_id.clone();
+            let app = state.app.clone();
             tokio::spawn(async move {
                 for (index, chunk) in chunks.iter().enumerate() {
                     if index > 0 {
                         tokio::time::sleep(Duration::from_millis(delay_ms)).await;
+                    }
+                    if receipt.as_ref().is_some_and(|r| !r.is_active()) {
+                        break;
                     }
                     if registry
                         .write_input(&session_id, SessionInput::Text(chunk.clone()), &meta)
                         .await
                         .is_err()
                     {
+                        if let Some(r) = &receipt {
+                            r.finish(&app, None, false);
+                        }
                         break;
+                    }
+                    if let Some(r) = &receipt {
+                        r.finish(&app, Some(index), false);
                     }
                 }
             });
@@ -414,6 +449,10 @@ pub async fn session_interrupt<R: tauri::Runtime>(
     state: Ctx<'_, R>,
     session_id: String,
 ) -> CmdResult<()> {
+    // During a ZMODEM / YMODEM transfer Ctrl+C cancels the transfer.
+    if super::zmodem::intercept_input(&state.app, &session_id, b"\x03") {
+        return Ok(());
+    }
     state
         .sessions
         .write(&session_id, bytes::Bytes::from_static(b"\x03"))

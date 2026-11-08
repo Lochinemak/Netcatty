@@ -638,6 +638,7 @@ impl<R: Runtime> Shared<R> {
         // Session-log hook: finalize the session's automatic log (idempotent;
         // runs before the entry is removed).
         crate::commands::sessionlog::session_ended(&self.app, session_id);
+        crate::commands::zmodem::session_ended(&self.app, session_id);
         self.taps.session_closed(session_id);
         self.flags.remove(session_id);
         self.connections.remove(session_id);
@@ -737,6 +738,12 @@ async fn pump<R: Runtime>(
             _ = flags.wake.notified() => {
                 // Resumed: flush what was buffered while paused.
                 deliver(&shared.app, &session_id, &flags, &mut pending, "", false);
+                // ZMODEM hook: a withheld partial header that timed out.
+                let flushed = crate::commands::zmodem::poll_flush(&shared.app, &session_id);
+                if !flushed.is_empty() {
+                    let text = decoder.decode(&flushed, false);
+                    deliver(&shared.app, &session_id, &flags, &mut pending, &text, false);
+                }
                 continue;
             }
         };
@@ -803,6 +810,8 @@ async fn pump<R: Runtime>(
                     decoder = StreamDecoder::new(Some(&label));
                     charset = crate::decoder::resolve_charset(Some(&label));
                 }
+                // ZMODEM / YMODEM hook: transfer bytes never reach the display.
+                crate::commands::zmodem::filter_output(&shared.app, &session_id, &mut raw);
                 let text = decoder.decode(&raw, false);
                 source.observe(&text, charset);
                 deliver(&shared.app, &session_id, &flags, &mut pending, &text, false);

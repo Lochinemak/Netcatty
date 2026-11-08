@@ -103,12 +103,10 @@ resources (`<resource_dir>/mosh/`, `<resource_dir>/et/`; in debug builds also
 development layout), then on the session's `PATH`. `ssh` comes from `PATH`
 (Windows: also `%SystemRoot%\System32\OpenSSH\ssh.exe`).
 
-Not ported: ZMODEM / YMODEM (`onZmodemEvent`, `cancelZmodem`,
-`startZmodemDragDropUpload`, `onZmodemOverwriteRequest`,
-`respondZmodemOverwrite`, `sendSerialYmodem`, `receiveSerialYmodem` stay
-undefined) and FIDO2 agent preparation for the external ssh. Session logs
-and the Mosh / ET host-stats companion connection: see
-[`ipc-transfers.md`](ipc-transfers.md).
+ZMODEM and serial YMODEM: see [`ipc-zmodem.md`](ipc-zmodem.md). Session
+logs and the Mosh / ET host-stats companion connection: see
+[`ipc-transfers.md`](ipc-transfers.md). FIDO2 agent preparation for the
+external ssh: see [`ipc-security.md`](ipc-security.md).
 
 ## Remote desktop (VNC / RDP)
 
@@ -656,6 +654,8 @@ AI control plane (Catty exec, capabilities, MCP host, approvals, tool-output sto
 Transfer queue controls, compressed folder upload, native file drag, X11 forwarding, Mosh / ET stats companion, SSH cwd: see [`ipc-transfers.md`](ipc-transfers.md).
 Multi-window (detached editor, terminal popups, session windows, attach hand-over, per-window output routing, quit guard, opacity / blur, macOS menu): see [ipc-windows.md](ipc-windows.md).
 Security (app lock, FIDO2 security keys, TOTP QR screen scan, SSH debug log): see [ipc-security.md](ipc-security.md).
+ZMODEM (`rz` / `sz`) and serial YMODEM transfers (`zmodem_*`, `serial_ymodem_*`, `netcatty:zmodem:*`): see [`ipc-zmodem.md`](ipc-zmodem.md).
+Terminal plumbing and autocomplete (paste receipts, reuse fallback, Windows PTY info, fig specs, directory listings): see [`ipc-terminal.md`](ipc-terminal.md).
 
 ## Mapping `NetcattyBridge` → commands (adapter cheat-sheet)
 
@@ -718,7 +718,7 @@ Security (app lock, FIDO2 security keys, TOTP QR screen scan, SSH debug log): se
 | `prepareSessionLog`, `revealSessionLog` | `session_log_prepare`, `session_log_reveal` (`payload: { sessionId }` only) |
 
 Bridge methods that have no Rust counterpart in this version (AI, plugins,
-MCP, ZMODEM/YMODEM, FIDO, plugin sync providers) are left
+MCP, FIDO, plugin sync providers) are left
 `undefined` on the adapter; the renderer already treats them as optional.
 `onTrayPanelCloseRequest` stays undefined too: the Electron main process
 never sends that event.

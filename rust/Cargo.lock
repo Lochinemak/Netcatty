@@ -4545,6 +4545,7 @@ dependencies = [
  "netcatty-sysmgr",
  "netcatty-telnet",
  "netcatty-transfers",
+ "netcatty-zmodem",
  "objc2",
  "parking_lot 0.13.0",
  "percent-encoding",
@@ -4939,6 +4940,14 @@ dependencies = [
  "hex",
  "parking_lot 0.13.0",
  "sha2 0.11.1",
+ "tokio",
+]
+
+[[package]]
+name = "netcatty-zmodem"
+version = "0.1.0"
+dependencies = [
+ "thiserror 2.0.21",
  "tokio",
 ]
 
