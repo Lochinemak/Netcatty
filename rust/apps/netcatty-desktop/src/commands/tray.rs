@@ -344,6 +344,8 @@ pub fn main_window_shown<R: Runtime>(app: &AppHandle<R>) {
 /// App run-loop events (wired in `lib.rs::run`): clicking the Dock icon
 /// re-shows a main window hidden to the tray (Electron `activate`).
 pub fn on_run_event<R: Runtime>(app: &AppHandle<R>, event: RunEvent) {
+    // Dock reopen with the main window gone recreates it (`integration.rs`).
+    super::integration::on_run_event(app, &event);
     #[cfg(target_os = "macos")]
     if let RunEvent::Reopen {
         has_visible_windows: false,
@@ -419,7 +421,7 @@ pub(crate) fn toggle_main_window<R: Runtime>(app: &AppHandle<R>) {
 
 /// macOS: template image (the system tints it); elsewhere the coloured icon.
 /// Same artwork as the Electron build (`public/`).
-fn tray_image() -> Option<Image<'static>> {
+pub(crate) fn default_tray_image() -> Option<Image<'static>> {
     #[cfg(target_os = "macos")]
     let bytes: &[u8] = include_bytes!("../../../../../public/tray-iconTemplate@2x.png");
     #[cfg(not(target_os = "macos"))]
@@ -448,7 +450,8 @@ fn ensure_tray<R: Runtime>(app: &AppHandle<R>) {
         .show_menu_on_left_click(false)
         .on_tray_icon_event(|tray, event| handle_tray_event(tray.app_handle(), event))
         .on_menu_event(|app, event| handle_menu_action(app, event.id().as_ref()));
-    if let Some(image) = tray_image() {
+    // App icon variant artwork on Windows (`integration.rs`), else the default.
+    if let Some(image) = super::integration::tray_icon_override(app).or_else(default_tray_image) {
         builder = builder.icon(image);
     }
     #[cfg(target_os = "macos")]
@@ -1494,6 +1497,6 @@ mod tests {
 
     #[test]
     fn tray_icon_artwork_decodes() {
-        assert!(tray_image().is_some());
+        assert!(default_tray_image().is_some());
     }
 }

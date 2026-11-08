@@ -87,6 +87,8 @@ pub fn configure_with<R: tauri::Runtime>(
             commands::autostart::setup(app);
             commands::notification::setup(app);
             commands::update::setup(app);
+            // Deep links, launch intents, Explorer verbs, Dock menu.
+            commands::integration::setup(app);
             tracing::info!("netcatty-desktop started");
             Ok(())
         })
@@ -107,7 +109,10 @@ pub fn run() {
         &netcatty_store::AppPaths::resolve(),
         &context.package_info().version.to_string(),
     ));
-    configure(tauri::Builder::default())
+    // Single instance first: a second launch forwards its argv and exits.
+    let builder = tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(commands::integration::on_second_instance));
+    configure(builder)
         .build(context)
         .expect("error while building Netcatty")
         .run(commands::tray::on_run_event);

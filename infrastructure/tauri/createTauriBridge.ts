@@ -32,6 +32,7 @@ import { createScriptsBridge } from './bridge/scripts';
 import { createHostBrowserBridge } from './bridge/hostBrowser';
 import { createAgentsBridge } from './bridge/agents';
 import { createMcpBridge } from './bridge/mcp';
+import { createIntegrationBridge } from './bridge/integration';
 import { McpMarkerFilter } from './bridge/mcpMarkerFilter';
 
 // ---------------------------------------------------------------------------
@@ -1455,6 +1456,8 @@ export function createTauriBridge(options: CreateTauriBridgeOptions = {}): Netca
     ...createHostBrowserBridge({ hub }),
     ...createAgentsBridge({ hub }),
     ...createMcpBridge({ hub }),
+    // Deep links, launch intents, Explorer verbs, app icon (rust/docs/ipc-integration.md).
+    ...createIntegrationBridge({ hub }),
   };
 
   return bridge as NetcattyBridge;

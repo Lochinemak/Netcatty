@@ -25,7 +25,11 @@ impl AppPaths {
     /// Resolve the directories. Nothing is created here; `KvStore` and
     /// `BackupStore` create what they need lazily.
     pub fn resolve() -> Self {
-        Self::resolve_with(std::env::var_os(PORTABLE_DATA_DIR_ENV).map(PathBuf::from))
+        Self::resolve_with(
+            std::env::var_os(PORTABLE_DATA_DIR_ENV)
+                .map(PathBuf::from)
+                .or_else(portable_data_dir_beside_executable),
+        )
     }
 
     /// Resolve with an explicit portable override (tests / embedding).
@@ -68,9 +72,60 @@ impl AppPaths {
     }
 }
 
+/// Windows ZIP / portable builds (Electron: `electron/portableData.cjs`): a
+/// `data` directory beside the executable (or beside the portable launcher,
+/// `PORTABLE_EXECUTABLE_DIR`) holds all app data. Release builds on Windows
+/// only, like Electron's `app.isPackaged` gate.
+fn portable_data_dir_beside_executable() -> Option<PathBuf> {
+    if !cfg!(windows) || cfg!(debug_assertions) {
+        return None;
+    }
+    let launcher = std::env::var("PORTABLE_EXECUTABLE_DIR").ok();
+    let exe = std::env::current_exe().ok();
+    portable_data_dir(launcher.as_deref(), exe.as_deref())
+}
+
+/// `<launcher dir or exe dir>/data` when it is an existing directory.
+pub fn portable_data_dir(
+    portable_launcher_dir: Option<&str>,
+    executable: Option<&std::path::Path>,
+) -> Option<PathBuf> {
+    let base = match portable_launcher_dir.map(str::trim).filter(|d| !d.is_empty()) {
+        Some(dir) => PathBuf::from(dir),
+        None => executable?.parent()?.to_path_buf(),
+    };
+    let data = base.join("data");
+    data.is_dir().then_some(data)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn portable_data_beside_the_executable_or_launcher() {
+        let root = std::env::temp_dir().join(format!("netcatty-portable-{}", std::process::id()));
+        let exe_dir = root.join("app");
+        let launcher_dir = root.join("usb-drive");
+        std::fs::create_dir_all(exe_dir.join("data")).unwrap();
+        std::fs::create_dir_all(&launcher_dir).unwrap();
+        let exe = exe_dir.join("Netcatty.exe");
+        assert_eq!(portable_data_dir(None, Some(&exe)), Some(exe_dir.join("data")));
+        // A launcher directory without `data` disables portable mode even if
+        // the unpacked runtime has one.
+        assert_eq!(portable_data_dir(Some(launcher_dir.to_str().unwrap()), Some(&exe)), None);
+        std::fs::create_dir_all(launcher_dir.join("data")).unwrap();
+        assert_eq!(
+            portable_data_dir(Some(launcher_dir.to_str().unwrap()), Some(&exe)),
+            Some(launcher_dir.join("data"))
+        );
+        // A `data` file is not a data directory.
+        let file_dir = root.join("file");
+        std::fs::create_dir_all(&file_dir).unwrap();
+        std::fs::write(file_dir.join("data"), "x").unwrap();
+        assert_eq!(portable_data_dir(None, Some(&file_dir.join("Netcatty.exe"))), None);
+        let _ = std::fs::remove_dir_all(&root);
+    }
 
     #[test]
     fn portable_override_wins() {

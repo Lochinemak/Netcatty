@@ -36,6 +36,11 @@
     }
   },
   "plugins": {
+    "deep-link": {
+      "desktop": {
+        "schemes": ["ssh", "telnet", "jms"]
+      }
+    },
     "updater": {
       "endpoints": [
         "https://github.com/Lochinemak/Netcatty/releases/latest/download/latest.json"
