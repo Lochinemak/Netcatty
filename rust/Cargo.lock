@@ -4007,6 +4007,7 @@ dependencies = [
  "encoding_rs",
  "futures",
  "hmac 0.13.0",
+ "netcatty-agents",
  "netcatty-core",
  "netcatty-forward",
  "netcatty-localfs",

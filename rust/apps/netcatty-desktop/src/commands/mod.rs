@@ -8,6 +8,7 @@
 //! * Binary responses use `tauri::ipc::Response` so the renderer receives an
 //!   `ArrayBuffer`; binary requests use `tauri::ipc::Request` raw bodies.
 
+pub mod agents;
 pub mod app;
 pub mod autostart;
 pub mod clipboard;
@@ -318,6 +319,31 @@ pub fn handler<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + 
         monitor::monitor_snapshot,
         monitor::monitor_stop_all,
         monitor::monitor_retry,
+        // Managed SDK agents, discovery, Codex login / App Server (commands/agents.rs).
+        agents::ai_agents_discover,
+        agents::ai_resolve_cli,
+        agents::ai_shell_env_prewarm,
+        agents::ai_codex_get_integration,
+        agents::ai_codex_start_login,
+        agents::ai_codex_get_login_session,
+        agents::ai_codex_cancel_login,
+        agents::ai_codex_logout,
+        agents::ai_sdk_agent_stream,
+        agents::ai_sdk_agent_steer,
+        agents::ai_sdk_agent_list_models,
+        agents::ai_sdk_agent_cancel,
+        agents::ai_sdk_agent_cleanup,
+        agents::ai_sdk_agent_elicitation_response,
+        agents::ai_sdk_agent_mcp_status,
+        agents::ai_sdk_agent_account_info,
+        agents::ai_sdk_agent_plugin_install,
+        agents::ai_sdk_agent_plugin_enable,
+        agents::ai_sdk_agent_plugin_disable,
+        agents::ai_sdk_agent_marketplace_install,
+        agents::ai_sdk_agent_marketplace_remove,
+        agents::codex_app_server_status,
+        agents::codex_app_server_respond,
+        agents::codex_app_server_cancel_timeout,
     ]
 }
 

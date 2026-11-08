@@ -280,7 +280,11 @@ impl Connection {
         crate::process::signal_process_tree(self.pid, false);
         let child = self.child.clone();
         let pid = self.pid;
-        tokio::spawn(async move {
+        let Ok(handle) = tokio::runtime::Handle::try_current() else {
+            crate::process::signal_process_tree(pid, true);
+            return;
+        };
+        handle.spawn(async move {
             let mut guard = child.lock().await;
             if let Some(c) = guard.as_mut() {
                 if tokio::time::timeout(CLOSE_KILL_GRACE, c.wait()).await.is_err() {
