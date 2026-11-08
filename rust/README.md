@@ -29,7 +29,17 @@ rust/
 │   ├── netcatty-serial        serial ports (serialport, no libudev), port listing, Windows named pipes
 │   ├── netcatty-mosh          Mosh handshake sniffer + ssh/mosh-client command lines, ET invocation, askpass (pure)
 │   ├── netcatty-transfers     transfer admission queue, compressed-upload scripts, artifact cleanup and file-drag rules
-│   └── netcatty-zmodem        ZMODEM (rz/sz) sessions + terminal sentry, serial YMODEM
+│   ├── netcatty-zmodem        ZMODEM (rz/sz) sessions + terminal sentry, serial YMODEM
+│   ├── netcatty-ai            AI provider proxy, chat streaming (SSE), privacy redaction, user skills, sessions backup
+│   ├── netcatty-ptyexec       Catty exec: commands run inside live terminal sessions with prompt tracking
+│   ├── netcatty-capabilities  capability catalog, policy, grants and dispatch shared by MCP and the tool CLI
+│   ├── netcatty-mcp           MCP control host (NDJSON TCP), stdio MCP helper, tool CLI, External MCP (HTTP)
+│   ├── netcatty-agents        managed agents: Claude Code, Codex, Grok, OpenCode, MiMo, Copilot, Cursor, CodeBuddy
+│   ├── netcatty-scripts       script automation on QuickJS (rquickjs): runtime, run manager, recording codegen
+│   ├── netcatty-hostbrowser   in-app browser: bookmarks, downloads, site icons, URL / PDF policy
+│   ├── netcatty-integration   deep links, PuTTY / SecureCRT command lines, Explorer verbs, Dock menu, app icons
+│   ├── netcatty-applock       app lock settings (Electron-compatible PBKDF2 format) and runtime state machine
+│   └── netcatty-fido          FIDO2 security keys through OpenSSH's agent + askpass helper mode
 └── apps/
     └── netcatty-desktop       Tauri 2 app: commands, session registry, prompt broker, events
 ```
@@ -175,25 +185,27 @@ Implemented in Rust:
   port of its terminal-to-text / HTML sanitizer (`netcatty-sessionlog`)
 * Tauri shell: dialogs, clipboard, opener, event fan-out
 
+Also ported, each with its own contract document under `docs/`: AI core
+(`ipc-ai.md`), the AI control plane with MCP and the tool CLI
+(`ipc-mcp.md`), managed agents (`ipc-agents.md`), script automation
+(`ipc-scripts.md`), the in-app host browser (`ipc-hostbrowser.md`),
+multi-window (`ipc-windows.md`), ZMODEM / YMODEM (`ipc-zmodem.md`), terminal
+plumbing and autocomplete (`ipc-terminal.md`), app lock / FIDO2 / TOTP QR
+scan / SSH debug log (`ipc-security.md`), deep links and OS integration
+(`ipc-integration.md`), and transfer controls, X11, Mosh / ET stats and SSH
+cwd (`ipc-transfers.md`). Each document lists its own per-platform gaps.
+
 Not yet ported (the renderer treats these bridge methods as optional and
 hides the features when they are absent):
 
-* AI bridge (chat streaming, SDK agents, MCP server), plugin runtime, external
-  MCP controller
-* The Mosh / ET host-stats companion SSH connection
-* FIDO2 security keys and Windows Hello / app lock
-* Plugin-provided sync providers (they need the plugin runtime)
-* Deep links, Explorer context menu, the macOS Dock menu (saved hosts),
-  per-variant tray icons (`appIconManager`), the before-quit dirty-editor
-  guard (the install-time one is ported)
-* Compressed folder upload
-* X11 forwarding is requested on the channel but no local X11 proxy is
-  started yet
+* Plugin runtime, including plugin-provided sync providers, terminal
+  providers and delegated plugin AI requests (in progress)
 * Remote desktop gaps: Kerberos-only RDP accounts, RDP clipboard / audio /
   drive redirection, dynamic RDP resize (the desktop keeps the size requested
   at connect time and is scaled to the pane), VNC Tight/JPEG encoding and
   Apple Remote Desktop authentication, local → remote clipboard, connecting
   through an SSH jump host or proxy
+* Cursor API-key mode for managed agents (needs the Node-only `@cursor/sdk`)
 
 The `electron/` directory is untouched; `npm run dev` still runs the Electron
 build so both backends can be compared while the port matures.
