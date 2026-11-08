@@ -382,8 +382,8 @@ test('plugin-backed methods go through invoke("plugin:…") when no plugin globa
   assert.deepEqual(lastInvoke(fake, 'plugin:clipboard-manager|write_text').args, { text: 'copied', label: undefined });
   await bridge.openExternal!('https://example.com');
   assert.deepEqual(lastInvoke(fake, 'plugin:opener|open_url').args, { url: 'https://example.com', with: undefined });
-  // No Rust counterpart: stays undefined rather than faking success.
-  assert.equal(bridge.cancelZmodem, undefined);
+  // ZMODEM is ported (bridge/zmodem.ts).
+  assert.equal(typeof bridge.cancelZmodem, 'function');
   // Auto-update is ported (bridge/update.ts).
   assert.equal(typeof bridge.checkForUpdate, 'function');
 });

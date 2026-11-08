@@ -32,6 +32,8 @@ import { createScriptsBridge } from './bridge/scripts';
 import { createHostBrowserBridge } from './bridge/hostBrowser';
 import { createAgentsBridge } from './bridge/agents';
 import { createMcpBridge } from './bridge/mcp';
+import { createZmodemBridge } from './bridge/zmodem';
+import { createTerminalBridge } from './bridge/terminal';
 import { McpMarkerFilter } from './bridge/mcpMarkerFilter';
 
 // ---------------------------------------------------------------------------
@@ -616,10 +618,11 @@ export function createTauriBridge(options: CreateTauriBridgeOptions = {}): Netca
       fireAndForget('session_resize', invoke<void>('session_resize', { payload: { sessionId, cols, rows } }));
     },
     interruptSession: (sessionId, _trace, interruptOptions) => {
-      // `cancelPendingWritesOnly` asks Electron to drop queued paste chunks
-      // without sending ^C; the Rust backend has no write queue to cancel, so
-      // that variant is a deliberate no-op.
-      if (interruptOptions?.cancelPendingWritesOnly === true) return;
+      // `cancelPendingWritesOnly` drops queued paste lines without sending ^C.
+      if (interruptOptions?.cancelPendingWritesOnly === true) {
+        fireAndForget('terminal_cancel_pending_writes', invoke<void>('terminal_cancel_pending_writes', { sessionId }));
+        return;
+      }
       fireAndForget('session_interrupt', invoke<void>('session_interrupt', { sessionId }));
     },
     setSessionFlowPaused: (sessionId, paused) => {
@@ -1455,6 +1458,9 @@ export function createTauriBridge(options: CreateTauriBridgeOptions = {}): Netca
     ...createHostBrowserBridge({ hub }),
     ...createAgentsBridge({ hub }),
     ...createMcpBridge({ hub }),
+    // ZMODEM / YMODEM and terminal plumbing + autocomplete (`bridge/zmodem.ts`, `bridge/terminal.ts`).
+    ...createZmodemBridge({ hub }),
+    ...createTerminalBridge({ hub }),
   };
 
   return bridge as NetcattyBridge;
