@@ -655,6 +655,7 @@ Managed SDK agents, agent discovery and Codex login: see [ipc-agents.md](ipc-age
 AI control plane (Catty exec, capabilities, MCP host, approvals, tool-output store, External MCP): see [`ipc-mcp.md`](ipc-mcp.md).
 Transfer queue controls, compressed folder upload, native file drag, X11 forwarding, Mosh / ET stats companion, SSH cwd: see [`ipc-transfers.md`](ipc-transfers.md).
 Multi-window (detached editor, terminal popups, session windows, attach hand-over, per-window output routing, quit guard, opacity / blur, macOS menu): see [ipc-windows.md](ipc-windows.md).
+Security (app lock, FIDO2 security keys, TOTP QR screen scan, SSH debug log): see [ipc-security.md](ipc-security.md).
 
 ## Mapping `NetcattyBridge` → commands (adapter cheat-sheet)
 

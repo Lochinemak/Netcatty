@@ -597,7 +597,7 @@ fn install_dock_menu<R: Runtime>(app: AppHandle<R>) {
     let installed = netcatty_integration::macos::install_dock_menu(
         move || {
             let data = super::tray::tray_get_menu_data(provider_app.clone());
-            build_dock_menu(&data.hosts, false)
+            build_dock_menu(&data.hosts, super::security::is_app_locked(&provider_app))
         },
         move |action| match action {
             DockAction::OpenMain => focus_or_recreate_main(&app),

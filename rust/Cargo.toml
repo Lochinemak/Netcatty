@@ -25,6 +25,8 @@ members = [
   "crates/netcatty-mcp",
   "crates/netcatty-transfers",
   "crates/netcatty-integration",
+  "crates/netcatty-applock",
+  "crates/netcatty-fido",
   "apps/netcatty-desktop",
 ]
 
@@ -60,6 +62,8 @@ netcatty-capabilities = { path = "crates/netcatty-capabilities" }
 netcatty-mcp = { path = "crates/netcatty-mcp" }
 netcatty-transfers = { path = "crates/netcatty-transfers" }
 netcatty-integration = { path = "crates/netcatty-integration" }
+netcatty-applock = { path = "crates/netcatty-applock" }
+netcatty-fido = { path = "crates/netcatty-fido" }
 
 # async runtime
 tokio = { version = "1.54", features = ["full"] }

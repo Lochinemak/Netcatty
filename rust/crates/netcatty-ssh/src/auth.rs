@@ -238,6 +238,24 @@ async fn try_public_key(
     let candidates = collect_key_candidates(hop);
     let has_explicit_keys = !candidates.is_empty();
     for cand in candidates {
+        if is_security_key(&cand.text) {
+            // FIDO2 sk-* handles are signed by the hardware through an agent.
+            tried_any = true;
+            match try_security_key(handle, user, state, &cand).await? {
+                SecurityKeyOutcome::Success => {
+                    return Ok(Some(AuthOutcome::PublicKey {
+                        source: cand.source.clone(),
+                    }))
+                }
+                SecurityKeyOutcome::Skipped(reason) => {
+                    failures.push(format!("{}: {reason}", cand.label));
+                    if !state.server_allows(Method::PublicKey) {
+                        break;
+                    }
+                }
+            }
+            continue;
+        }
         let Some(loaded) = load_candidate(&cand, hop, state.callbacks).await? else {
             failures.push(format!("{}: skipped (no passphrase)", cand.label));
             continue;
@@ -495,6 +513,161 @@ pub fn expand_tilde(path: &str) -> String {
         }
     }
     path.to_string()
+}
+
+// ---------------------------------------------------------------------------
+// FIDO2 security keys (sk-ssh-ed25519 / sk-ecdsa-sha2-nistp256)
+// ---------------------------------------------------------------------------
+
+/// Is `text` an OpenSSH security-key private key handle?
+pub fn is_security_key(text: &str) -> bool {
+    use russh::keys::ssh_key::{Algorithm, PrivateKey};
+    let text = normalize_key_text(text);
+    if !text.contains("BEGIN OPENSSH PRIVATE KEY") {
+        return false;
+    }
+    PrivateKey::from_openssh(text.trim())
+        .map(|k| matches!(k.algorithm(), Algorithm::SkEd25519 | Algorithm::SkEcdsaSha2NistP256))
+        .unwrap_or(false)
+}
+
+enum SecurityKeyOutcome {
+    Success,
+    /// Not usable / rejected / password fallback chosen: try other methods.
+    Skipped(String),
+}
+
+fn cancelled_error() -> SshError {
+    SshError::Cancelled("Security key authentication cancelled.".into())
+}
+
+fn identity_blob(identity: &AgentIdentity) -> Option<String> {
+    use base64::Engine;
+    let bytes = match identity {
+        AgentIdentity::PublicKey { key, .. } => key.to_bytes().ok()?,
+        AgentIdentity::Certificate { certificate, .. } => certificate.to_bytes().ok()?,
+    };
+    Some(base64::engine::general_purpose::STANDARD.encode(bytes))
+}
+
+fn is_sk_identity(identity: &AgentIdentity) -> bool {
+    use russh::keys::ssh_key::Algorithm;
+    let algorithm = match identity {
+        AgentIdentity::PublicKey { key, .. } => key.algorithm(),
+        AgentIdentity::Certificate { certificate, .. } => certificate.algorithm(),
+    };
+    matches!(algorithm, Algorithm::SkEd25519 | Algorithm::SkEcdsaSha2NistP256)
+}
+
+/// Sign with a hardware key through the agent prepared by the callbacks,
+/// with the Electron recovery loop (retry / password fallback / cancel).
+async fn try_security_key(
+    handle: &mut Handle<ClientHandler>,
+    user: &str,
+    state: &mut AuthState<'_>,
+    cand: &KeyCandidate,
+) -> SshResult<SecurityKeyOutcome> {
+    let callbacks = state.callbacks.clone();
+    let request = crate::SecurityKeyRequest {
+        private_key: cand.text.clone(),
+        certificate: cand.certificate.clone().filter(|c| !c.trim().is_empty()),
+        label: cand.label.clone(),
+        path: match &cand.source {
+            KeySourceKind::File(path) => Some(path.clone()),
+            _ => None,
+        },
+    };
+    let prepared = match callbacks.prepare_security_key(request).await {
+        Ok(Some(prepared)) => prepared,
+        Ok(None) => {
+            return Ok(SecurityKeyOutcome::Skipped(
+                "security keys need an interactive session".into(),
+            ))
+        }
+        Err(e) => return Err(SshError::Key(e)),
+    };
+    let mut agent = connect_agent(Some(&prepared.socket)).await?;
+    let identities = agent
+        .request_identities()
+        .await
+        .map_err(|e| SshError::Key(format!("agent: {e}")))?;
+    let mut selected: Vec<AgentIdentity> = identities
+        .iter()
+        .filter(|i| identity_blob(i).is_some_and(|b| prepared.public_blobs.contains(&b)))
+        .cloned()
+        .collect();
+    if selected.is_empty() {
+        selected = identities.into_iter().filter(is_sk_identity).collect();
+    }
+    // Certificates first: the bare key is the fallback.
+    selected.sort_by_key(|i| !matches!(i, AgentIdentity::Certificate { .. }));
+    if selected.is_empty() {
+        return Ok(SecurityKeyOutcome::Skipped(
+            "the security key is not loaded in the agent".into(),
+        ));
+    }
+    let allow_password_fallback = state
+        .hop
+        .password
+        .as_deref()
+        .is_some_and(|p| !p.is_empty());
+    state
+        .progress(format!("Trying security key {}", cand.label))
+        .await;
+
+    for identity in selected {
+        loop {
+            callbacks.security_key_sign_begin(cand.label.clone()).await;
+            let result = match &identity {
+                AgentIdentity::PublicKey { key, .. } => {
+                    handle
+                        .authenticate_publickey_with(user, key.clone(), None, &mut agent)
+                        .await
+                }
+                AgentIdentity::Certificate { certificate, .. } => {
+                    handle
+                        .authenticate_certificate_with(user, certificate.clone(), None, &mut agent)
+                        .await
+                }
+            };
+            let pin_cancelled = callbacks.security_key_sign_end().await;
+            match result {
+                Ok(r) if r.success() => return Ok(SecurityKeyOutcome::Success),
+                Ok(r) => {
+                    state.note_result(&r);
+                    tracing::debug!("security key identity rejected by server");
+                    break;
+                }
+                Err(e) => {
+                    tracing::debug!("security key signature failed: {e}");
+                    if pin_cancelled {
+                        return Err(cancelled_error());
+                    }
+                    match callbacks
+                        .security_key_recovery(cand.label.clone(), allow_password_fallback)
+                        .await
+                    {
+                        crate::SecurityKeyRecovery::Retry => {
+                            // A failed agent request may leave the stream
+                            // mid-reply: reconnect before retrying.
+                            agent = connect_agent(Some(&prepared.socket)).await?;
+                            continue;
+                        }
+                        crate::SecurityKeyRecovery::PasswordFallback => {
+                            return Ok(SecurityKeyOutcome::Skipped(
+                                "security key skipped (password fallback)".into(),
+                            ))
+                        }
+                        crate::SecurityKeyRecovery::Cancel => return Err(cancelled_error()),
+                    }
+                }
+            }
+        }
+        if !state.server_allows(Method::PublicKey) {
+            break;
+        }
+    }
+    Ok(SecurityKeyOutcome::Skipped("rejected by server".into()))
 }
 
 async fn try_agent(
@@ -1077,5 +1250,46 @@ mod tests {
             load_private_key("not a key", None, "k", &cb).await,
             Err(SshError::Key(_))
         ));
+    }
+
+    #[test]
+    fn security_key_detection() {
+        use russh::keys::ssh_key::private::{KeypairData, SkEd25519};
+        use russh::keys::ssh_key::public::{Ed25519PublicKey, SkEd25519 as PublicSkEd25519};
+        use russh::keys::ssh_key::LineEnding;
+        let public = PublicSkEd25519::new(Ed25519PublicKey([9u8; 32]), "ssh:");
+        let pair = SkEd25519::new(public, 0x01, vec![1u8, 2, 3]).unwrap();
+        let sk = PrivateKey::new(KeypairData::SkEd25519(pair), "")
+            .unwrap()
+            .to_openssh(LineEnding::LF)
+            .unwrap()
+            .to_string();
+        assert!(is_security_key(&sk));
+        assert!(is_security_key(&sk.replace('\n', "\r\n")));
+        let mut rng = russh::keys::key::safe_rng();
+        let soft = PrivateKey::random(&mut rng, russh::keys::Algorithm::Ed25519)
+            .unwrap()
+            .to_openssh(LineEnding::LF)
+            .unwrap()
+            .to_string();
+        assert!(!is_security_key(&soft));
+        assert!(!is_security_key("sk-ssh-ed25519@openssh.com AAAA"));
+    }
+
+    #[tokio::test]
+    async fn unattended_callbacks_skip_security_keys() {
+        let cb: Arc<dyn SshCallbacks> = Arc::new(UnattendedCallbacks);
+        let request = crate::SecurityKeyRequest {
+            private_key: String::new(),
+            certificate: None,
+            label: "k".into(),
+            path: None,
+        };
+        assert!(cb.prepare_security_key(request).await.unwrap().is_none());
+        assert!(!cb.security_key_sign_end().await);
+        assert_eq!(
+            cb.security_key_recovery("k".into(), true).await,
+            crate::SecurityKeyRecovery::Cancel
+        );
     }
 }

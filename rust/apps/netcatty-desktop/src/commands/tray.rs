@@ -346,6 +346,10 @@ pub fn main_window_shown<R: Runtime>(app: &AppHandle<R>) {
 pub fn on_run_event<R: Runtime>(app: &AppHandle<R>, event: RunEvent) {
     // Dock reopen with the main window gone recreates it (`integration.rs`).
     super::integration::on_run_event(app, &event);
+    // Stop the Netcatty-owned FIDO ssh-agent with the app.
+    if matches!(event, RunEvent::Exit) {
+        super::security::shutdown(app);
+    }
     #[cfg(target_os = "macos")]
     if let RunEvent::Reopen {
         has_visible_windows: false,
@@ -365,6 +369,8 @@ pub fn on_run_event<R: Runtime>(app: &AppHandle<R>, event: RunEvent) {
 /// Unminimize, show and focus the main window; cancels a pending hide.
 pub(crate) fn bring_main_to_foreground<R: Runtime>(app: &AppHandle<R>) -> bool {
     main_window_shown(app);
+    // App lock: a background lock can auto-prompt Touch ID / Windows Hello.
+    super::security::notify_reopen(app);
     let Some(main) = app.get_webview_window(MAIN_LABEL) else {
         return false;
     };
@@ -379,6 +385,8 @@ pub(crate) fn bring_main_to_foreground<R: Runtime>(app: &AppHandle<R>) -> bool {
 /// Hide the main window to the tray, leaving macOS native fullscreen first.
 pub(crate) fn hide_main_window<R: Runtime>(app: &AppHandle<R>, main: &WebviewWindow<R>) {
     super::windows::notify_window_will_hide(app, MAIN_LABEL);
+    // App lock: hide-to-tray / hotkey hide locks with reason `background`.
+    super::security::lock_for_background(app);
     let generation = with_prefs(app, |p| {
         p.hide_generation += 1;
         p.hide_generation
@@ -757,9 +765,12 @@ fn build_tray_panel<R: Runtime>(app: &AppHandle<R>) -> CmdResult<WebviewWindow<R
     // private-API feature, so the panel stays a plain rectangle there.
     #[cfg(not(target_os = "macos"))]
     let builder = builder.transparent(true);
-    builder
+    let panel = builder
         .build()
-        .map_err(|err| CoreError::internal(err.to_string()))
+        .map_err(|err| CoreError::internal(err.to_string()))?;
+    // Pick up the current window opacity / background blur (commands/windows).
+    super::windows::apply_window_chrome(&panel);
+    Ok(panel)
 }
 
 fn toggle_tray_panel<R: Runtime>(app: &AppHandle<R>, event_bounds: Option<Bounds>) {

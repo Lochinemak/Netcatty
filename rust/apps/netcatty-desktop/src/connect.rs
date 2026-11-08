@@ -128,7 +128,13 @@ pub async fn dial<R: Runtime>(
     let mut options = ConnectOptions::from(payload);
     options.target.hostname = options.target.hostname.trim().to_string();
     options.session_id = Some(session_id.to_string());
-    match netcatty_ssh::connect(options, callbacks).await {
+    // SSH debug log (Settings → System; commands/security/ssh_debug.rs).
+    let debug_log = crate::commands::security::ssh_debug::begin(payload, session_id);
+    let result = netcatty_ssh::connect(options, callbacks).await;
+    if let Some(guard) = debug_log {
+        guard.finish(result.as_ref().err().map(|e| e.to_string()).as_deref());
+    }
+    match result {
         Ok(conn) => Ok(conn),
         Err(err) => {
             if let SshError::AuthFailed(message) = &err {

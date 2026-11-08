@@ -43,6 +43,11 @@ netcatty-capabilities = { workspace = true }
 netcatty-mcp = { workspace = true }
 netcatty-transfers = { workspace = true }
 netcatty-integration = { workspace = true }
+# Security module: app lock, FIDO2 security keys, TOTP QR scan (commands/security/)
+netcatty-applock = { workspace = true }
+netcatty-fido = { workspace = true }
+rqrr = "0.11"
+regex = { workspace = true }
 tauri = { version = "2.12", features = ["tray-icon", "image-png"] }
 tauri-plugin-shell = "2.6"
 tauri-plugin-dialog = "2.8"
@@ -97,8 +102,13 @@ libc = "0.2"
 # Window opacity / vibrancy on the NSWindow (commands/windows).
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
+# TOTP QR screen scan (commands/security/totp_scan.rs). Not on Linux: xcap
+# needs PipeWire / XCB development libraries there.
+[target.'cfg(any(target_os = "macos", windows))'.dependencies]
+xcap = { version = "0.9", default-features = false }
 
 [dev-dependencies]
+qrcode = { version = "0.14", default-features = false }
 tauri = { version = "2.12", features = ["test", "tray-icon", "image-png"] }
 tempfile = "3"
 serialport = { version = "4.7", default-features = false }

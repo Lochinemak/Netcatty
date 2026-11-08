@@ -89,6 +89,8 @@ pub fn configure_with<R: tauri::Runtime>(
             commands::autostart::setup(app);
             commands::notification::setup(app);
             commands::update::setup(app);
+            // App lock (locks on startup when enabled), FIDO2, SSH debug log.
+            commands::security::setup(app);
             // Deep links, launch intents, Explorer verbs, Dock menu.
             commands::integration::setup(app);
             tracing::info!("netcatty-desktop started");
@@ -125,11 +127,19 @@ pub fn run() {
 }
 
 fn init_tracing() {
-    use tracing_subscriber::EnvFilter;
+    use tracing_subscriber::layer::SubscriberExt;
+    use tracing_subscriber::util::SubscriberInitExt;
+    use tracing_subscriber::{EnvFilter, Layer};
     let filter = EnvFilter::try_from_env("NETCATTY_LOG")
         .unwrap_or_else(|_| EnvFilter::new("info,russh=warn,tauri=warn"));
-    let _ = tracing_subscriber::fmt()
-        .with_env_filter(filter)
-        .with_target(false)
+    // Console output keeps its own filter; the SSH debug log layer
+    // (Settings → System) has a per-layer filter of its own.
+    let _ = tracing_subscriber::registry()
+        .with(
+            tracing_subscriber::fmt::layer()
+                .with_target(false)
+                .with_filter(filter),
+        )
+        .with(commands::security::ssh_debug::layer())
         .try_init();
 }

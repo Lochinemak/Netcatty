@@ -109,6 +109,40 @@ impl SshCallbacks for PromptingCallbacks {
     async fn progress(&self, message: String) {
         self.inner.progress(message).await
     }
+
+    // Security-key preparation (`ssh-add`) and hardware signatures wait on
+    // the user (PIN, touch): they pause the auth deadline like a prompt.
+    async fn prepare_security_key(
+        &self,
+        request: crate::SecurityKeyRequest,
+    ) -> Result<Option<crate::SecurityKeyAgent>, String> {
+        self.state.enter();
+        let _g = Guard(&self.state);
+        self.inner.prepare_security_key(request).await
+    }
+
+    async fn security_key_sign_begin(&self, key_label: String) {
+        self.state.enter();
+        self.inner.security_key_sign_begin(key_label).await
+    }
+
+    async fn security_key_sign_end(&self) -> bool {
+        let cancelled = self.inner.security_key_sign_end().await;
+        self.state.exit();
+        cancelled
+    }
+
+    async fn security_key_recovery(
+        &self,
+        key_label: String,
+        allow_password_fallback: bool,
+    ) -> crate::SecurityKeyRecovery {
+        self.state.enter();
+        let _g = Guard(&self.state);
+        self.inner
+            .security_key_recovery(key_label, allow_password_fallback)
+            .await
+    }
 }
 
 /// Run `fut` with a deadline of `limit` that is suspended while a prompt is
