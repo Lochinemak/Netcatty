@@ -338,14 +338,18 @@ pub fn read_local_auth_cookie(display: &str, platform: X11Platform) -> Option<Ve
         "" | ":" => ":0".to_string(),
         other => other.to_string(),
     };
-    let mut child = std::process::Command::new(xauth_command(platform))
-        .arg("list")
+    let mut cmd = std::process::Command::new(xauth_command(platform));
+    cmd.arg("list")
         .env("DISPLAY", &display)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::null())
-        .spawn()
-        .ok()?;
+        .stderr(std::process::Stdio::null());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+    }
+    let mut child = cmd.spawn().ok()?;
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
     loop {
         match child.try_wait() {

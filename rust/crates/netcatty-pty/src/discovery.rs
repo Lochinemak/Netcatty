@@ -290,7 +290,12 @@ mod windows {
         if !Path::new(&wsl).is_file() {
             return Vec::new();
         }
-        let output = match std::process::Command::new(&wsl).args(["-l", "-q"]).output() {
+        use std::os::windows::process::CommandExt;
+        let output = match std::process::Command::new(&wsl)
+            .args(["-l", "-q"])
+            .creation_flags(0x0800_0000) // CREATE_NO_WINDOW
+            .output()
+        {
             Ok(out) if out.status.success() => out,
             _ => return Vec::new(),
         };

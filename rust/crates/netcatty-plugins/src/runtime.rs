@@ -239,6 +239,8 @@ impl RuntimeLauncher for NodeSidecarLauncher {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .kill_on_drop(true);
+        #[cfg(windows)]
+        command.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
         for key in ["LANG", "LC_ALL", "PATH", "TMPDIR", "TEMP", "TMP", "SYSTEMROOT"] {
             if let Some(value) = std::env::var_os(key) {
                 command.env(key, value);
