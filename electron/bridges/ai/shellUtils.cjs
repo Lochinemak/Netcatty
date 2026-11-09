@@ -20,7 +20,9 @@ const MAX_PROMPT_TRACK_TAIL = 4096;
 
 function execFileAsync(command, args, options) {
   return new Promise((resolve, reject) => {
-    execFile(command, args, options, (error, stdout, stderr) => {
+    // Default windowsHide so console helpers (where.exe, *.cmd shims) launched
+    // from the GUI main process never flash a cmd window on Windows.
+    execFile(command, args, { windowsHide: true, ...options }, (error, stdout, stderr) => {
       if (error) {
         error.stdout = stdout;
         error.stderr = stderr;
@@ -873,6 +875,7 @@ function resolveCliFromPath(command, shellEnv) {
         timeout: 3000,
         stdio: ["pipe", "pipe", "pipe"],
         env: shellEnv,
+        windowsHide: true,
       }).trim();
       for (const candidate of resolved.split(/\r?\n/)) {
         const normalized = normalizeCliPathForPlatform(candidate);
@@ -898,6 +901,7 @@ async function resolveCliFromPathAsync(command, shellEnv) {
         encoding: "utf8",
         timeout: 3000,
         env: shellEnv,
+        windowsHide: true,
       });
       const resolved = String(stdout || "").trim();
       for (const candidate of resolved.split(/\r?\n/)) {

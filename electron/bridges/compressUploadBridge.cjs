@@ -409,7 +409,7 @@ function resolveLocalTarCommand() {
  */
 async function checkTarAvailable(signal) {
   return new Promise((resolve) => {
-    const tar = spawn(resolveLocalTarCommand(), ['--version'], { stdio: 'ignore' });
+    const tar = spawn(resolveLocalTarCommand(), ['--version'], { stdio: 'ignore', windowsHide: true });
     let settled = false;
     let childClosed = false;
     let forceKillTimer = null;
@@ -524,7 +524,8 @@ async function compressFolder(folderPath, outputPath, compressionId, sendProgres
     tarArgs.push(folderName);
     const tar = spawn(resolveLocalTarCommand(), tarArgs, {
       cwd: parentDir,
-      stdio: ['ignore', outputFd, 'pipe']
+      stdio: ['ignore', outputFd, 'pipe'],
+      windowsHide: true,
     });
     // tar holds its own handle; close ours so the archive can be removed later.
     fs.closeSync(outputFd);

@@ -221,6 +221,7 @@ function readLocalX11AuthCookie(options = {}) {
         },
         stdio: ["ignore", "pipe", "ignore"],
         timeout: 2000,
+        windowsHide: true,
       });
     return parseXauthCookie(output, normalizedDisplay);
   } catch {

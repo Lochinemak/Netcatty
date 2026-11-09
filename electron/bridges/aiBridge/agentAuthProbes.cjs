@@ -67,7 +67,7 @@ function probeClaudeAuth({ env, platform, runSecurity, fileExists, homeDir } = {
 function defaultRunGhAuthStatus() {
   try {
     const out = execFileSync("gh", ["auth", "status"], {
-      encoding: "utf8", timeout: 5000, stdio: ["pipe", "pipe", "pipe"],
+      encoding: "utf8", timeout: 5000, stdio: ["pipe", "pipe", "pipe"], windowsHide: true,
     });
     return { exitCode: 0, stdout: out, stderr: "" };
   } catch (err) {
@@ -148,6 +148,7 @@ function defaultResolveCursorCliBinary(name, env) {
       timeout: 4000,
       env: env || process.env,
       stdio: ["pipe", "pipe", "pipe"],
+      windowsHide: true,
     });
     const first = String(out || "").split(/\r?\n/).map((l) => l.trim()).find(Boolean);
     return first || null;
