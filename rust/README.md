@@ -38,6 +38,7 @@ rust/
 │   ├── netcatty-scripts       script automation on QuickJS (rquickjs): runtime, run manager, recording codegen
 │   ├── netcatty-hostbrowser   in-app browser: bookmarks, downloads, site icons, URL / PDF policy
 │   ├── netcatty-integration   deep links, PuTTY / SecureCRT command lines, Explorer verbs, Dock menu, app icons
+│   ├── netcatty-plugins       plugin host: .ncpkg store, SQLite, permissions, JSON-RPC router, runtimes, Providers
 │   ├── netcatty-applock       app lock settings (Electron-compatible PBKDF2 format) and runtime state machine
 │   └── netcatty-fido          FIDO2 security keys through OpenSSH's agent + askpass helper mode
 └── apps/
@@ -192,14 +193,20 @@ Also ported, each with its own contract document under `docs/`: AI core
 multi-window (`ipc-windows.md`), ZMODEM / YMODEM (`ipc-zmodem.md`), terminal
 plumbing and autocomplete (`ipc-terminal.md`), app lock / FIDO2 / TOTP QR
 scan / SSH debug log (`ipc-security.md`), deep links and OS integration
-(`ipc-integration.md`), and transfer controls, X11, Mosh / ET stats and SSH
+(`ipc-integration.md`), the plugin host (`ipc-plugins.md`), and transfer controls, X11, Mosh / ET stats and SSH
 cwd (`ipc-transfers.md`). Each document lists its own per-platform gaps.
 
 Not yet ported (the renderer treats these bridge methods as optional and
 hides the features when they are absent):
 
-* Plugin runtime, including plugin-provided sync providers, terminal
-  providers and delegated plugin AI requests (in progress)
+* Plugin runtime gaps (`docs/ipc-plugins.md`): the plugin catalog and market
+  sources (the methods exist but return an empty catalog / `UNSUPPORTED`),
+  the plugin AI / agent host adapters and `agent-model_` / `plugin-model_`
+  requests in `netcatty-ai`, byte streams, terminal input / output
+  interceptors, companion executables, 64 px icon rasterizing, runtime
+  CPU / memory sampling, and bundling the `plugin-runtime/` resources into
+  release builds (development runs use the source checkout). Node-entry
+  plugins need `node` on `PATH` or `NETCATTY_PLUGIN_NODE`.
 * Remote desktop gaps: Kerberos-only RDP accounts, RDP clipboard / audio /
   drive redirection, dynamic RDP resize (the desktop keeps the size requested
   at connect time and is scaled to the pane), VNC Tight/JPEG encoding and
