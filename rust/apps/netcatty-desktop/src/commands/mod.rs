@@ -8,19 +8,28 @@
 //! * Binary responses use `tauri::ipc::Response` so the renderer receives an
 //!   `ArrayBuffer`; binary requests use `tauri::ipc::Request` raw bodies.
 
+pub mod ai;
+pub mod agents;
 pub mod app;
 pub mod autostart;
+pub mod catty;
 pub mod clipboard;
 pub mod diagnostics;
 pub mod filewatch;
 pub mod forward;
+pub mod hostbrowser;
 pub mod hotkey;
+pub mod integration;
 pub mod localfs;
+pub mod mcp;
 pub mod monitor;
 pub mod mosh;
 pub mod notification;
 pub mod openwith;
+pub mod plugins;
 pub mod rdesktop;
+pub mod scripts;
+pub mod security;
 pub mod serial;
 pub mod session;
 pub mod sessionlog;
@@ -30,11 +39,16 @@ pub mod store;
 pub mod sync;
 pub mod system;
 pub mod telnet;
+pub mod terminal;
 pub mod temp;
 pub mod tempdir;
 pub mod totp;
+pub mod transfers2;
 pub mod tray;
+pub mod update;
 pub mod window;
+pub mod windows;
+pub mod zmodem;
 
 use netcatty_core::CoreError;
 
@@ -77,6 +91,38 @@ pub(crate) fn raw_body<'a>(request: &'a tauri::ipc::Request<'_>) -> CmdResult<&'
 pub fn handler<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Send + Sync + 'static
 {
     tauri::generate_handler![
+        // AI control plane: Catty exec, capabilities, MCP host, External MCP.
+        catty::ai_exec,
+        catty::ai_catty_cancel_exec,
+        mcp::ai_capability,
+        mcp::ai_vault_agent_respond,
+        mcp::ai_mcp_update_sessions,
+        mcp::ai_mcp_update_live_sessions,
+        mcp::ai_mcp_merge_sessions,
+        mcp::ai_mcp_update_attachments,
+        mcp::ai_mcp_set_command_blocklist,
+        mcp::ai_mcp_set_command_timeout,
+        mcp::ai_mcp_set_max_iterations,
+        mcp::ai_mcp_set_permission_mode,
+        mcp::ai_mcp_set_tool_integration_mode,
+        mcp::ai_mcp_sync_permission_grants,
+        mcp::ai_mcp_approval_respond,
+        mcp::ai_mcp_approval_cancel_timeout,
+        mcp::mcp_set_approval_alert_mode,
+        mcp::tool_output_persistence_status,
+        mcp::tool_output_write,
+        mcp::tool_output_restore,
+        mcp::tool_output_read,
+        mcp::tool_output_delete,
+        mcp::tool_output_delete_chat,
+        mcp::tool_output_delete_terminal_session,
+        mcp::tool_output_delete_terminal,
+        mcp::external_mcp_get_status,
+        mcp::external_mcp_set_enabled,
+        mcp::external_mcp_set_config,
+        mcp::external_mcp_get_universal_setup_prompt,
+        mcp::external_mcp_client_status,
+        mcp::external_mcp_client_add,
         app::app_get_version,
         app::app_renderer_log,
         temp::temp_upload_begin,
@@ -104,6 +150,32 @@ pub fn handler<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + 
         window::app_set_background_color,
         window::app_set_language,
         window::app_broadcast_settings_changed,
+        // Editor / terminal popup / session windows, attach hand-over,
+        // opacity / blur (commands/windows, rust/docs/ipc-windows.md).
+        windows::windows_open_editor,
+        windows::windows_editor_ready,
+        windows::windows_focus_editor,
+        windows::windows_close_editor_tabs,
+        windows::windows_save_editor_tab,
+        windows::windows_dock_editor_tab,
+        windows::windows_report_editor_dirty,
+        windows::windows_report_editor_tabs_closed,
+        windows::windows_remap_editor_session,
+        windows::windows_report,
+        windows::windows_open_terminal_popup,
+        windows::windows_terminal_popup_config,
+        windows::windows_mark_attach_close_prepared,
+        windows::windows_open_session,
+        windows::windows_take_open_session,
+        windows::windows_track_session,
+        windows::windows_output_routes,
+        windows::windows_rebind_output,
+        windows::windows_restore_output,
+        windows::windows_request_snapshot,
+        windows::windows_apply_snapshot,
+        windows::windows_set_opacity,
+        windows::windows_set_background_blur,
+        windows::windows_set_terminal_keyboard_focus,
         // Crash logs / diagnostics.
         diagnostics::crash_logs_list,
         diagnostics::crash_logs_read,
@@ -209,6 +281,18 @@ pub fn handler<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + 
         sftp::transfer_start,
         sftp::transfer_cancel,
         sftp::transfer_pause,
+        // Transfer queue controls, compressed folder upload, native file drag
+        // (commands/transfers2.rs, rust/docs/ipc-transfers.md).
+        transfers2::transfer_prioritize,
+        transfers2::transfer_set_concurrency,
+        transfers2::transfer_cleanup,
+        transfers2::compress_check_support,
+        transfers2::compress_start,
+        transfers2::compress_cancel,
+        transfers2::compress_pause,
+        transfers2::compress_resume,
+        transfers2::local_drag_start,
+        transfers2::local_drag_cancel,
         forward::portforward_start,
         forward::portforward_stop,
         forward::portforward_stop_by_rule,
@@ -318,6 +402,137 @@ pub fn handler<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + 
         monitor::monitor_snapshot,
         monitor::monitor_stop_all,
         monitor::monitor_retry,
+        // Auto-update (commands/update.rs).
+        // Plugin host runtime (commands/plugins.rs, logic in netcatty-plugins).
+        plugins::plugin_call,
+        plugins::plugin_runtime_attach,
+        plugins::plugin_runtime_messages,
+        plugins::plugin_runtime_exited,
+        plugins::plugin_runtime_reset,
+        update::update_check,
+        update::update_download,
+        update::update_install,
+        update::update_get_status,
+        update::update_get_auto_update,
+        update::update_set_auto_update,
+        update::app_report_dirty_editors,
+        // AI core: provider proxy, chat streaming, privacy, user skills,
+        // sessions backup (commands/ai.rs, logic in netcatty-ai).
+        ai::ai_sync_providers,
+        ai::ai_sync_web_search,
+        ai::ai_allowlist_add_host,
+        ai::ai_fetch,
+        ai::ai_chat_stream,
+        ai::ai_chat_cancel,
+        ai::ai_set_chat_session_cancelled,
+        ai::ai_privacy_status,
+        ai::ai_privacy_transform,
+        ai::ai_privacy_clear,
+        ai::ai_privacy_initialize,
+        ai::ai_user_skills_status,
+        ai::ai_user_skills_open,
+        ai::ai_user_skills_build_context,
+        ai::ai_skills_cli_invocation,
+        ai::ai_sessions_backup_write,
+        ai::ai_sessions_backup_read_latest,
+        ai::ai_sessions_backup_export,
+        ai::ai_sessions_backup_import,
+        // Script automation (commands/scripts.rs, rust/docs/ipc-scripts.md).
+        scripts::script_run,
+        scripts::script_stop,
+        scripts::script_pause,
+        scripts::script_resume,
+        scripts::script_get_runs,
+        scripts::script_dialog_response,
+        scripts::script_screen_snapshot_response,
+        scripts::script_recording_start,
+        scripts::script_recording_stop,
+        scripts::script_recording_append_step,
+        // In-app host browser (commands/hostbrowser.rs).
+        hostbrowser::hostbrowser_open,
+        hostbrowser::hostbrowser_focus,
+        hostbrowser::hostbrowser_request_panel,
+        hostbrowser::hostbrowser_panel_layout,
+        hostbrowser::hostbrowser_panel_url,
+        hostbrowser::hostbrowser_panel_close,
+        hostbrowser::hostbrowser_snapshot,
+        hostbrowser::hostbrowser_command,
+        hostbrowser::hostbrowser_bookmarks_list,
+        hostbrowser::hostbrowser_bookmarks_upsert,
+        hostbrowser::hostbrowser_bookmarks_remove,
+        hostbrowser::hostbrowser_bookmarks_get_all,
+        hostbrowser::hostbrowser_bookmarks_apply,
+        hostbrowser::hostbrowser_downloads_list,
+        hostbrowser::hostbrowser_downloads_theme,
+        hostbrowser::hostbrowser_downloads_command,
+        // OS shell integration: deep links, launch intents, Explorer verbs,
+        // app icon variants (commands/integration.rs, rust/docs/ipc-integration.md).
+        integration::integration_renderer_attach,
+        integration::integration_get_ssh_deep_link_enabled,
+        integration::integration_set_ssh_deep_link_enabled,
+        integration::integration_get_jms_deep_link_enabled,
+        integration::integration_set_jms_deep_link_enabled,
+        integration::integration_get_explorer_context_menu_enabled,
+        integration::integration_set_explorer_context_menu_enabled,
+        integration::integration_set_app_icon_variant,
+        // Managed SDK agents, discovery, Codex login / App Server (commands/agents.rs).
+        agents::ai_agents_discover,
+        agents::ai_resolve_cli,
+        agents::ai_shell_env_prewarm,
+        agents::ai_codex_get_integration,
+        agents::ai_codex_start_login,
+        agents::ai_codex_get_login_session,
+        agents::ai_codex_cancel_login,
+        agents::ai_codex_logout,
+        agents::ai_sdk_agent_stream,
+        agents::ai_sdk_agent_steer,
+        agents::ai_sdk_agent_list_models,
+        agents::ai_sdk_agent_cancel,
+        agents::ai_sdk_agent_cleanup,
+        agents::ai_sdk_agent_elicitation_response,
+        agents::ai_sdk_agent_mcp_status,
+        agents::ai_sdk_agent_account_info,
+        agents::ai_sdk_agent_plugin_install,
+        agents::ai_sdk_agent_plugin_enable,
+        agents::ai_sdk_agent_plugin_disable,
+        agents::ai_sdk_agent_marketplace_install,
+        agents::ai_sdk_agent_marketplace_remove,
+        agents::codex_app_server_status,
+        agents::codex_app_server_respond,
+        agents::codex_app_server_cancel_timeout,
+        // Security: app lock, FIDO2 prompts / sk keygen, TOTP QR screen scan,
+        // SSH debug log (commands/security/, rust/docs/ipc-security.md).
+        security::applock::app_lock_get_runtime_state,
+        security::applock::app_lock_get_settings,
+        security::applock::app_lock_set_timeout_minutes,
+        security::applock::app_lock_request_enable,
+        security::applock::app_lock_request_disable,
+        security::applock::app_lock_request_reset,
+        security::applock::app_lock_request_password_change,
+        security::applock::app_lock_set_locked,
+        security::applock::app_lock_request_unlock,
+        security::applock::app_lock_get_system_unlock_status,
+        security::applock::app_lock_set_system_unlock_enabled,
+        security::applock::app_lock_request_system_unlock,
+        security::applock::app_lock_report_activity,
+        security::fido::fido_prompt_respond,
+        security::fido::fido_generate_key_pair,
+        security::totp_scan::totp_scan_screen,
+        security::ssh_debug::ssh_debug_log_info,
+        security::ssh_debug::ssh_debug_log_open_dir,
+        // ZMODEM (rz / sz) + serial YMODEM (`rust/docs/ipc-zmodem.md`).
+        zmodem::zmodem_cancel,
+        zmodem::zmodem_overwrite_response,
+        zmodem::zmodem_drag_drop_upload,
+        zmodem::serial_ymodem_send,
+        zmodem::serial_ymodem_receive,
+        // Terminal plumbing + autocomplete (`rust/docs/ipc-terminal.md`).
+        terminal::terminal_cancel_pending_writes,
+        terminal::terminal_windows_pty_info,
+        terminal::figspec_list,
+        terminal::figspec_load,
+        terminal::autocomplete_local_listdir,
+        terminal::autocomplete_remote_listdir,
     ]
 }
 

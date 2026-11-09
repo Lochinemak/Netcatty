@@ -27,7 +27,20 @@ rust/
 │   ├── netcatty-sysmgr        system manager + server stats: remote command builders and parsers (processes, tmux, docker/podman/nerdctl, kubectl, GPUs, ports, systemd, stats)
 │   ├── netcatty-telnet        telnet framing / option negotiation, login-prompt auto-login (pure)
 │   ├── netcatty-serial        serial ports (serialport, no libudev), port listing, Windows named pipes
-│   └── netcatty-mosh          Mosh handshake sniffer + ssh/mosh-client command lines, ET invocation, askpass (pure)
+│   ├── netcatty-mosh          Mosh handshake sniffer + ssh/mosh-client command lines, ET invocation, askpass (pure)
+│   ├── netcatty-transfers     transfer admission queue, compressed-upload scripts, artifact cleanup and file-drag rules
+│   ├── netcatty-zmodem        ZMODEM (rz/sz) sessions + terminal sentry, serial YMODEM
+│   ├── netcatty-ai            AI provider proxy, chat streaming (SSE), privacy redaction, user skills, sessions backup
+│   ├── netcatty-ptyexec       Catty exec: commands run inside live terminal sessions with prompt tracking
+│   ├── netcatty-capabilities  capability catalog, policy, grants and dispatch shared by MCP and the tool CLI
+│   ├── netcatty-mcp           MCP control host (NDJSON TCP), stdio MCP helper, tool CLI, External MCP (HTTP)
+│   ├── netcatty-agents        managed agents: Claude Code, Codex, Grok, OpenCode, MiMo, Copilot, Cursor, CodeBuddy
+│   ├── netcatty-scripts       script automation on QuickJS (rquickjs): runtime, run manager, recording codegen
+│   ├── netcatty-hostbrowser   in-app browser: bookmarks, downloads, site icons, URL / PDF policy
+│   ├── netcatty-integration   deep links, PuTTY / SecureCRT command lines, Explorer verbs, Dock menu, app icons
+│   ├── netcatty-plugins       plugin host: .ncpkg store, SQLite, permissions, JSON-RPC router, runtimes, Providers
+│   ├── netcatty-applock       app lock settings (Electron-compatible PBKDF2 format) and runtime state machine
+│   └── netcatty-fido          FIDO2 security keys through OpenSSH's agent + askpass helper mode
 └── apps/
     └── netcatty-desktop       Tauri 2 app: commands, session registry, prompt broker, events
 ```
@@ -128,6 +141,12 @@ Implemented in Rust:
     optional domain; keyboard (scancodes, Unicode fallback), mouse and wheel.
     The server certificate is not validated (RDP hosts are normally
     self-signed), matching mstsc's "connect anyway".
+  * A connect attempt is bounded (15 s TCP, 45 s handshake) and every outcome,
+    including a crash of the protocol engine, ends in one `closed` channel
+    message, so a pane never stays on "connecting". The RDP TLS upgrade
+    installs the `aws-lc-rs` rustls provider itself: the application links
+    `reqwest` as well, and rustls panics when feature unification leaves it
+    with two providers and no process-level default.
 * JSON document store, AES-256-GCM credential encryption keyed from the OS
   keychain, vault backups
 * Cloud sync transports (`netcatty-sync`): GitHub Gist device flow, Google
@@ -147,6 +166,11 @@ Implemented in Rust:
 * Tray icon (native menu on Linux), tray panel window, close-to-tray,
   global "Quake mode" hotkey, launch at login hidden to the tray
   (`--hidden`), native notifications with click-to-focus
+* Auto-update (`tauri-plugin-updater`, `docs/ipc-update.md`): signed bundles
+  from GitHub Releases with Electron's prompt flow (check → download with
+  progress → install on request), persisted auto-download preference,
+  startup check, dirty-editor guard before install, and a "download
+  manually" fallback for unsigned / dev builds and unknown Linux packages
 * System manager (`netcatty-sysmgr`): capability probe, processes and
   signals, tmux (sessions / windows / panes / clients / actions), Docker /
   Podman / nerdctl containers and images, kubectl contexts / namespaces /
@@ -162,28 +186,71 @@ Implemented in Rust:
   port of its terminal-to-text / HTML sanitizer (`netcatty-sessionlog`)
 * Tauri shell: dialogs, clipboard, opener, event fan-out
 
+Also ported, each with its own contract document under `docs/`: AI core
+(`ipc-ai.md`), the AI control plane with MCP and the tool CLI
+(`ipc-mcp.md`), managed agents (`ipc-agents.md`), script automation
+(`ipc-scripts.md`), the in-app host browser (`ipc-hostbrowser.md`),
+multi-window (`ipc-windows.md`), ZMODEM / YMODEM (`ipc-zmodem.md`), terminal
+plumbing and autocomplete (`ipc-terminal.md`), app lock / FIDO2 / TOTP QR
+scan / SSH debug log (`ipc-security.md`), deep links and OS integration
+(`ipc-integration.md`), the plugin host (`ipc-plugins.md`), and transfer controls, X11, Mosh / ET stats and SSH
+cwd (`ipc-transfers.md`). Each document lists its own per-platform gaps.
+
 Not yet ported (the renderer treats these bridge methods as optional and
 hides the features when they are absent):
 
-* AI bridge (chat streaming, SDK agents, MCP server), plugin runtime, external
-  MCP controller
-* ZMODEM/YMODEM file transfer (terminal sessions and serial), the Mosh / ET
-  host-stats companion SSH connection
-* FIDO2 security keys and Windows Hello / app lock
-* Plugin-provided sync providers (they need the plugin runtime)
-* Auto-update, deep links, Explorer context menu, the macOS Dock menu
-  (saved hosts), per-variant tray icons (`appIconManager`)
-* Compressed folder upload
-* X11 forwarding is requested on the channel but no local X11 proxy is
-  started yet
+* Plugin runtime gaps (`docs/ipc-plugins.md`): the plugin catalog and market
+  sources (the methods exist but return an empty catalog / `UNSUPPORTED`),
+  the plugin AI / agent host adapters and `agent-model_` / `plugin-model_`
+  requests in `netcatty-ai`, byte streams, terminal input / output
+  interceptors, companion executables, 64 px icon rasterizing, runtime
+  CPU / memory sampling, and bundling the `plugin-runtime/` resources into
+  release builds (development runs use the source checkout). Node-entry
+  plugins need `node` on `PATH` or `NETCATTY_PLUGIN_NODE`.
 * Remote desktop gaps: Kerberos-only RDP accounts, RDP clipboard / audio /
   drive redirection, dynamic RDP resize (the desktop keeps the size requested
   at connect time and is scaled to the pane), VNC Tight/JPEG encoding and
   Apple Remote Desktop authentication, local → remote clipboard, connecting
   through an SSH jump host or proxy
+* Cursor API-key mode for managed agents (needs the Node-only `@cursor/sdk`)
 
 The `electron/` directory is untouched; `npm run dev` still runs the Electron
 build so both backends can be compared while the port matures.
+
+## Auto-update signing
+
+Release bundles are signed with a minisign key pair so the in-app updater
+(`tauri-plugin-updater`, see `docs/ipc-update.md`) can verify what it
+downloads. Generate the pair once, on a machine you trust:
+
+```bash
+cd rust/apps/netcatty-desktop
+npx --yes @tauri-apps/cli@^2 signer generate -w ~/.tauri/netcatty.key
+# or, with the Rust CLI installed: cargo tauri signer generate -w ~/.tauri/netcatty.key
+```
+
+* `~/.tauri/netcatty.key` is the **private key**. Never commit it. Store its
+  contents in the `TAURI_SIGNING_PRIVATE_KEY` repository secret and the
+  password you chose in `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`;
+  `.github/workflows/build-tauri.yml` exports both to the bundler. Keep a
+  backup: a lost key means existing installs can never verify a new release.
+* `~/.tauri/netcatty.key.pub` is the **public key**. Paste its contents into
+  `plugins.updater.pubkey` in `rust/apps/netcatty-desktop/tauri.conf.json`
+  (replacing `REPLACE_WITH_TAURI_UPDATER_PUBLIC_KEY`) and commit that. A
+  fork that signs with its own key can instead set the
+  `TAURI_UPDATER_PUBKEY` repository variable, which the workflow writes into
+  the CI config.
+
+With the key present the bundler writes `Netcatty.app.tar.gz` plus `.sig`
+on macOS and a `.sig` next to every installer; the release job turns them
+into `latest.json`, which the configured endpoint
+(`.../releases/latest/download/latest.json`) serves. Without the key the
+workflow still builds installers, but switches `createUpdaterArtifacts` off
+(the bundler refuses to sign without a key) and the app reports updates as
+"download manually". The same applies to `npm run tauri:build` on a
+developer machine: either export `TAURI_SIGNING_PRIVATE_KEY` or pass
+`--config '{"bundle":{"createUpdaterArtifacts":false}}'`. Debug builds never
+auto-update.
 
 ## Headless IPC tests
 

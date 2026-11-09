@@ -16,8 +16,9 @@ mod net;
 pub mod rdp;
 pub mod vnc;
 
-use netcatty_core::CoreResult;
+use netcatty_core::{CoreError, CoreResult};
 use std::fmt;
+use std::future::Future;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
@@ -177,32 +178,74 @@ impl RemoteDesktopHandle {
 /// failure are both reported through `sink`: a failed connect yields a single
 /// [`RemoteEvent::Closed`] carrying the error.
 pub fn spawn(options: ConnectOptions, sink: EventSink) -> RemoteDesktopHandle {
-    let (input, mut inputs) = mpsc::unbounded_channel();
+    spawn_engine(options, sink, |options, mut inputs, sink| async move {
+        match options.protocol {
+            RemoteProtocol::Vnc => vnc::run(&options, &mut inputs, &sink).await,
+            RemoteProtocol::Rdp => rdp::run(&options, &mut inputs, &sink).await,
+        }
+    })
+}
+
+/// [`spawn`] with the protocol engine supplied by the caller (tests inject a
+/// misbehaving one).
+///
+/// The engine runs in a task of its own: whatever happens to it (an error, a
+/// cancellation, a panic) the supervising task still emits exactly one
+/// [`RemoteEvent::Closed`]. A panic inside the engine used to take the whole
+/// session task with it, and the renderer stayed on "connecting" forever.
+fn spawn_engine<F, Fut>(options: ConnectOptions, sink: EventSink, engine: F) -> RemoteDesktopHandle
+where
+    F: FnOnce(ConnectOptions, mpsc::UnboundedReceiver<RemoteInput>, EventSink) -> Fut,
+    Fut: Future<Output = CoreResult<()>> + Send + 'static,
+{
+    let (input, inputs) = mpsc::unbounded_channel();
     let cancel = CancellationToken::new();
     let handle = RemoteDesktopHandle {
         input,
         cancel: cancel.clone(),
     };
+    let protocol = options.protocol;
+    let host = options.host.clone();
+    let mut worker = tokio::spawn(engine(options, inputs, sink.clone()));
 
     tokio::spawn(async move {
-        let run = async {
-            match options.protocol {
-                RemoteProtocol::Vnc => vnc::run(&options, &mut inputs, &sink).await,
-                RemoteProtocol::Rdp => rdp::run(&options, &mut inputs, &sink).await,
-            }
-        };
         let result: CoreResult<()> = tokio::select! {
-            _ = cancel.cancelled() => Ok(()),
-            result = run => result,
+            _ = cancel.cancelled() => {
+                // `Closed` means the connection is gone: wait for the abort
+                // to drop the engine (and its socket) first.
+                worker.abort();
+                let _ = (&mut worker).await;
+                Ok(())
+            }
+            joined = &mut worker => match joined {
+                Ok(result) => result,
+                Err(err) if err.is_panic() => Err(CoreError::internal(format!(
+                    "remote desktop session crashed: {}",
+                    panic_message(err.into_panic())
+                ))),
+                // Aborted: only `cancel` does that, and it is handled above.
+                Err(_) => Ok(()),
+            },
         };
         let error = result.err().map(|err| err.message);
         if let Some(error) = &error {
-            tracing::warn!(protocol = ?options.protocol, host = %options.host, %error, "remote desktop session failed");
+            tracing::warn!(protocol = ?protocol, host = %host, %error, "remote desktop session failed");
         }
         sink(RemoteEvent::Closed { error });
     });
 
     handle
+}
+
+/// The message of a panic payload, for the `Closed` event of a crashed engine.
+fn panic_message(payload: Box<dyn std::any::Any + Send>) -> String {
+    if let Some(message) = payload.downcast_ref::<&str>() {
+        (*message).to_owned()
+    } else if let Some(message) = payload.downcast_ref::<String>() {
+        message.clone()
+    } else {
+        "unknown panic".to_owned()
+    }
 }
 
 /// Clamp a requested desktop dimension into the supported range.
@@ -286,6 +329,71 @@ mod tests {
         }
         assert!(rx.recv().await.is_none(), "closed is the last event");
         assert!(!handle.send(RemoteInput::Refresh));
+    }
+
+    #[tokio::test]
+    async fn a_crashed_engine_still_reports_closed_with_the_error() {
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let sink: EventSink = Arc::new(move |event| {
+            let _ = tx.send(event);
+        });
+        let handle = spawn_engine(
+            ConnectOptions {
+                protocol: RemoteProtocol::Rdp,
+                host: "example.test".into(),
+                port: 3389,
+                username: None,
+                password: None,
+                domain: None,
+                width: 800,
+                height: 600,
+            },
+            sink,
+            |_options, _inputs, _sink| async { panic!("no crypto provider") },
+        );
+        match rx.recv().await.expect("a closed event") {
+            RemoteEvent::Closed { error: Some(error) } => {
+                assert!(error.contains("crashed"), "{error}");
+                assert!(error.contains("no crypto provider"), "{error}");
+            }
+            other => panic!("unexpected event {other:?}"),
+        }
+        assert!(rx.recv().await.is_none(), "closed is the last event");
+        assert!(!handle.send(RemoteInput::Refresh));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_server_that_never_answers_the_handshake_times_out() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        // Accept and stay silent: the X.224 negotiation never gets a reply.
+        tokio::spawn(async move {
+            let _held = listener.accept().await;
+            std::future::pending::<()>().await;
+        });
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let sink: EventSink = Arc::new(move |event| {
+            let _ = tx.send(event);
+        });
+        let _handle = spawn(
+            ConnectOptions {
+                protocol: RemoteProtocol::Rdp,
+                host: "127.0.0.1".into(),
+                port,
+                username: Some("user".into()),
+                password: Some("pass".into()),
+                domain: None,
+                width: 800,
+                height: 600,
+            },
+            sink,
+        );
+        match rx.recv().await.expect("a closed event") {
+            RemoteEvent::Closed { error: Some(error) } => {
+                assert!(error.contains("timed out"), "{error}");
+            }
+            other => panic!("unexpected event {other:?}"),
+        }
     }
 
     #[tokio::test]

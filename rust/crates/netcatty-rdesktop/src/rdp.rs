@@ -6,7 +6,7 @@
 //! drive redirection and dynamic resize (the desktop keeps the size requested
 //! at connect time; the renderer scales it).
 
-use crate::net::connect_tcp;
+use crate::net::{connect_tcp, with_handshake_timeout};
 use crate::{clamp_desktop_size, ConnectOptions, EventSink, RemoteEvent, RemoteInput};
 use ironrdp_connector::connection_activation::ConnectionActivationState;
 use ironrdp_connector::sspi::generator::NetworkRequest;
@@ -41,8 +41,25 @@ pub(crate) async fn run(
     inputs: &mut UnboundedReceiver<RemoteInput>,
     sink: &EventSink,
 ) -> CoreResult<()> {
-    let (connection, framed) = connect(options).await?;
+    let (connection, framed) = with_handshake_timeout("RDP", connect(options)).await?;
     session(connection, framed, inputs, sink).await
+}
+
+/// Make sure rustls has a process-level crypto provider before the TLS
+/// upgrade builds its `ClientConfig`.
+///
+/// rustls only picks a provider on its own when exactly one of its `ring` /
+/// `aws-lc-rs` features is enabled. The application links other crates that
+/// use rustls too (cloud sync through `reqwest`), and feature unification can
+/// end up with both; `ClientConfig::builder()` then panics, which used to kill
+/// the session task before it could report anything. Installing a provider
+/// explicitly is independent of what the rest of the dependency tree enables.
+pub(crate) fn ensure_crypto_provider() {
+    use rustls::crypto::{aws_lc_rs, CryptoProvider};
+    if CryptoProvider::get_default().is_none() {
+        // Err only when another thread installed one first; either is fine.
+        let _ = aws_lc_rs::default_provider().install_default();
+    }
 }
 
 /// CredSSP may ask for a network round trip (Kerberos KDC, CRL fetch). Only
@@ -145,6 +162,7 @@ async fn connect(options: &ConnectOptions) -> CoreResult<(ConnectionResult, TlsF
     // RDP servers almost always present a self-signed certificate, so the
     // chain is not validated (the same default as mstsc's "connect anyway").
     let tcp = framed.into_inner_no_leftover();
+    ensure_crypto_provider();
     let (tls, certificate) = ironrdp_tls::upgrade(tcp, &options.host)
         .await
         .map_err(|err| CoreError::network(format!("RDP TLS handshake failed: {err}")))?;
@@ -631,6 +649,22 @@ mod tests {
                 rotation_units: -960,
             })
         ));
+    }
+
+    #[test]
+    fn the_tls_client_config_can_be_built() {
+        // Regression test for the RDP session that never left "connecting":
+        // with two rustls crypto providers enabled by feature unification,
+        // building the TLS config panicked inside the session task.
+        ensure_crypto_provider();
+        ensure_crypto_provider();
+        assert!(rustls::crypto::CryptoProvider::get_default().is_some());
+        let config = ironrdp_tls::rustls_client_config(
+            ironrdp_tls::CertificateValidation::default(),
+            "desk.example.test",
+            None,
+        );
+        assert!(config.is_ok(), "{:?}", config.err());
     }
 
     #[test]

@@ -33,6 +33,7 @@ pub mod options;
 pub mod prompting;
 pub mod proxy;
 pub mod shell;
+pub mod x11;
 
 pub use auth::{totp_code, totp_code_at, AuthOutcome, KeySourceKind};
 pub use connection::{build_client_config, connect, SshConnection};
@@ -74,6 +75,68 @@ pub trait SshCallbacks: Send + Sync + 'static {
     /// Informational progress (jump chain hops, auth method attempts).
     /// Default implementation ignores it.
     async fn progress(&self, _message: String) {}
+
+    /// Prepare a FIDO2 security-key (`sk-*`) key for signing: load its
+    /// handle into an agent that can reach the hardware and return that
+    /// agent's socket. `Ok(None)` means security keys are not supported by
+    /// this caller (unattended connections); the key is skipped.
+    async fn prepare_security_key(
+        &self,
+        _request: SecurityKeyRequest,
+    ) -> Result<Option<SecurityKeyAgent>, String> {
+        Ok(None)
+    }
+
+    /// A hardware signature for `key_label` starts (signatures are
+    /// serialised and PIN / touch prompts attributed to it).
+    async fn security_key_sign_begin(&self, _key_label: String) {}
+
+    /// The signature started by [`Self::security_key_sign_begin`] ended.
+    /// Returns `true` when the user cancelled the PIN prompt (no recovery
+    /// dialog then).
+    async fn security_key_sign_end(&self) -> bool {
+        false
+    }
+
+    /// The hardware signature failed: retry, fall back to the password, or
+    /// cancel the connection.
+    async fn security_key_recovery(
+        &self,
+        _key_label: String,
+        _allow_password_fallback: bool,
+    ) -> SecurityKeyRecovery {
+        SecurityKeyRecovery::Cancel
+    }
+}
+
+/// Key handle to prepare (see [`SshCallbacks::prepare_security_key`]).
+#[derive(Debug, Clone)]
+pub struct SecurityKeyRequest {
+    /// OpenSSH private key handle text (vault key or identity file).
+    pub private_key: String,
+    /// OpenSSH certificate for the key, if any.
+    pub certificate: Option<String>,
+    /// Human label (vault key label or file path).
+    pub label: String,
+    /// Identity file the handle came from (`None` for vault keys).
+    pub path: Option<String>,
+}
+
+/// Agent prepared for a security key.
+#[derive(Debug, Clone)]
+pub struct SecurityKeyAgent {
+    /// Agent socket (Unix socket path or Windows named pipe).
+    pub socket: String,
+    /// Base64 wire blobs of the identities to offer (key and certificate).
+    pub public_blobs: Vec<String>,
+}
+
+/// Answer to [`SshCallbacks::security_key_recovery`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SecurityKeyRecovery {
+    Retry,
+    PasswordFallback,
+    Cancel,
 }
 
 /// A callbacks implementation that trusts every host key, answers nothing,

@@ -302,6 +302,14 @@ impl TunnelRegistry {
             .map(|e| (e.status, e.error.clone()))
     }
 
+    /// Address the local listener of an active local / dynamic tunnel bound
+    /// (resolves `localPort: 0` to the port the OS picked).
+    pub fn local_addr(&self, tunnel_id: &str) -> Option<std::net::SocketAddr> {
+        self.inner
+            .get(tunnel_id)
+            .and_then(|e| e.tunnel.as_ref().and_then(|t| t.local_addr()))
+    }
+
     pub fn find_by_rule(&self, rule_id: &str) -> Option<PortForwardTunnelInfo> {
         let mut matches: Vec<PortForwardTunnelInfo> = self
             .inner

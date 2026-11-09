@@ -10,6 +10,12 @@ license.workspace = true
 name = "netcatty_desktop_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
+[features]
+default = ["hostbrowser-proxy"]
+# Host browser pages through the SSH SOCKS forward on macOS (WebKit proxy
+# configurations, macOS 14+; `build.rs` weak-links the Network framework).
+hostbrowser-proxy = ["tauri/macos-proxy"]
+
 [build-dependencies]
 tauri-build = { version = "2.7", features = [] }
 
@@ -28,6 +34,22 @@ netcatty-serial = { workspace = true }
 netcatty-mosh = { workspace = true }
 netcatty-sysmgr = { workspace = true }
 netcatty-sessionlog = { workspace = true }
+netcatty-ai = { workspace = true }
+netcatty-scripts = { workspace = true }
+netcatty-hostbrowser = { workspace = true }
+netcatty-agents = { workspace = true }
+netcatty-ptyexec = { workspace = true }
+netcatty-capabilities = { workspace = true }
+netcatty-mcp = { workspace = true }
+netcatty-transfers = { workspace = true }
+netcatty-integration = { workspace = true }
+# Security module: app lock, FIDO2 security keys, TOTP QR scan (commands/security/)
+netcatty-applock = { workspace = true }
+netcatty-fido = { workspace = true }
+rqrr = "0.11"
+regex = { workspace = true }
+netcatty-zmodem = { workspace = true }
+netcatty-plugins = { workspace = true }
 tauri = { version = "2.12", features = ["tray-icon", "image-png"] }
 tauri-plugin-shell = "2.6"
 tauri-plugin-dialog = "2.8"
@@ -37,6 +59,13 @@ tauri-plugin-clipboard-manager = "2.5"
 tauri-plugin-global-shortcut = "2.4"
 tauri-plugin-autostart = "2.7"
 tauri-plugin-notification = "2.8"
+# Auto-update (commands/update.rs): signed bundles from GitHub Releases, relaunch after install
+tauri-plugin-updater = "2.10"
+tauri-plugin-process = "2.3"
+# Deep links / launch intents / single instance (commands/integration.rs)
+tauri-plugin-deep-link = "2.4"
+tauri-plugin-single-instance = "2.4"
+zeroize = { workspace = true }
 tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -61,8 +90,27 @@ sha1 = "0.11"
 sha2 = { workspace = true }
 url = { workspace = true }
 chrono = { workspace = true }
+uuid = { workspace = true }
+# Host browser favicon fetches through the SOCKS route.
+reqwest = { workspace = true, features = ["socks"] }
+
+# Native drag of local files out of the app (commands/transfers2.rs).
+[target.'cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))'.dependencies]
+drag = "2.1"
+
+# Pause / resume of the local tar of compressed uploads (SIGSTOP / SIGCONT).
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+# Window opacity / vibrancy on the NSWindow (commands/windows).
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+# TOTP QR screen scan (commands/security/totp_scan.rs). Not on Linux: xcap
+# needs PipeWire / XCB development libraries there.
+[target.'cfg(any(target_os = "macos", windows))'.dependencies]
+xcap = { version = "0.9", default-features = false }
 
 [dev-dependencies]
+qrcode = { version = "0.14", default-features = false }
 tauri = { version = "2.12", features = ["test", "tray-icon", "image-png"] }
 tempfile = "3"
 serialport = { version = "4.7", default-features = false }

@@ -482,6 +482,8 @@ pub async fn mosh_start<R: Runtime>(
 ) -> CmdResult<StartSessionResult> {
     let session_id = session_id_or_new(payload.session_id.as_ref());
     ensure_free(&state, &session_id)?;
+    // Stats companion credentials (connects only after `netcatty:mosh:ready`).
+    super::transfers2::remember_companion(&state.app, &session_id, &payload, "mosh");
     if payload.hostname.trim().is_empty() {
         return Err(CoreError::invalid("hostname is required"));
     }
@@ -491,7 +493,9 @@ pub async fn mosh_start<R: Runtime>(
         .ok_or_else(|| CoreError::not_found(MOSH_CLIENT_NOT_FOUND))?;
     let ssh = binaries::resolve_ssh(path_for_lookup.as_deref())
         .ok_or_else(|| CoreError::not_found(SSH_NOT_FOUND))?;
-    let auth = external_auth(&payload)?;
+    let mut auth = external_auth(&payload)?;
+    // FIDO2 sk-* keys sign through the Netcatty-owned agent (security/fido.rs).
+    super::security::fido::prepare_external(&state.app, &mut auth, &session_id).await?;
     let cols = payload.cols.filter(|c| *c > 0).unwrap_or(80);
     let rows = payload.rows.filter(|r| *r > 0).unwrap_or(24);
     let lang = options_env
@@ -634,6 +638,7 @@ fn handshake_meta(requires_user_input: bool) -> Option<SessionDataMeta> {
     Some(SessionDataMeta {
         mosh_handshake: Some(true),
         mosh_handshake_requires_user_input: requires_user_input.then_some(true),
+        ..Default::default()
     })
 }
 
@@ -778,6 +783,8 @@ impl<R: Runtime> MoshDriver<R> {
         {
             return;
         }
+        // The handshake vetted the host: the stats companion may connect.
+        super::transfers2::companion_ready(&self.app, &self.session_id);
         crate::events::emit(
             &self.app,
             ev::MOSH_READY,
@@ -838,7 +845,9 @@ pub async fn et_start<R: Runtime>(
         effective_path(&options_env).as_deref(),
     )
     .ok_or_else(|| CoreError::not_found(ET_CLIENT_NOT_FOUND))?;
-    let auth = external_auth(&payload)?;
+    let mut auth = external_auth(&payload)?;
+    // FIDO2 sk-* keys sign through the Netcatty-owned agent (security/fido.rs).
+    super::security::fido::prepare_external(&state.app, &mut auth, &session_id).await?;
     let jumps: Vec<ExternalSshAuth> = payload
         .jump_hosts
         .as_ref()
@@ -1009,6 +1018,8 @@ pub async fn et_start<R: Runtime>(
             host,
         );
     }
+    // Stats companion credentials for host info (commands/transfers2.rs).
+    super::transfers2::remember_companion(&state.app, &session_id, &payload, "et");
     state.sessions.insert(SessionEntry {
         session_id: session_id.clone(),
         host_id: payload.host_id.clone(),

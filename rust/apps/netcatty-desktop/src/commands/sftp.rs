@@ -571,6 +571,12 @@ pub async fn run_transfer<R: tauri::Runtime>(
             payload.transfer_id
         )));
     }
+    // Global transfer queue (commands/transfers2.rs): wait for a slot; the
+    // slot is released when this function returns.
+    let _admission_slot = match super::transfers2::admit(state, &payload, emit_events).await? {
+        super::transfers2::AdmitOutcome::Run(slot) => slot,
+        super::transfers2::AdmitOutcome::Done(result) => return Ok(result),
+    };
     let endpoints = TransferEndpoints {
         source: endpoint(
             state,
@@ -653,6 +659,9 @@ pub async fn transfer_cancel<R: tauri::Runtime>(
     state: Ctx<'_, R>,
     transfer_id: String,
 ) -> CmdResult<()> {
+    if super::transfers2::cancel_queued(&state.app, &transfer_id) {
+        return Ok(());
+    }
     if let Some(handle) = state.transfers.get(&transfer_id) {
         handle.cancel();
     }
@@ -664,6 +673,9 @@ pub async fn transfer_pause<R: tauri::Runtime>(
     state: Ctx<'_, R>,
     transfer_id: String,
 ) -> CmdResult<SuccessResult> {
+    if super::transfers2::pause_queued(&state.app, &transfer_id) {
+        return Ok(SuccessResult::ok());
+    }
     Ok(match state.transfers.get(&transfer_id) {
         Some(handle) => {
             handle.pause();

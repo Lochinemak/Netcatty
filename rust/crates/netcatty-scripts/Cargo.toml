@@ -1,0 +1,25 @@
+[package]
+name = "netcatty-scripts"
+description = "Script automation: QuickJS script runtime, session output buffer, dialogs, recording codegen (Electron: scriptRuntime.cjs, scriptBridge.cjs)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+netcatty-core = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+tokio-util = { workspace = true }
+async-trait = { workspace = true }
+futures = { workspace = true }
+parking_lot = { workspace = true }
+tracing = { workspace = true }
+thiserror = { workspace = true }
+chrono = { workspace = true }
+regress = "0.12"
+rquickjs = { version = "0.14", features = ["std"] }
+
+[dev-dependencies]
+tempfile = "3"

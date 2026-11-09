@@ -89,6 +89,7 @@ impl<R: Runtime> PromptBroker<R> {
             host_id,
             saved_password,
             totp_uri,
+            fido: Default::default(),
         })
     }
 
@@ -204,10 +205,37 @@ pub struct SessionCallbacks<R: Runtime> {
     pub host_id: Option<String>,
     pub saved_password: Option<String>,
     pub totp_uri: Option<String>,
+    /// FIDO2 security-key state of this connection (commands/security/fido.rs).
+    pub fido: crate::commands::security::fido::SessionFido,
 }
 
 #[async_trait::async_trait]
 impl<R: Runtime> SshCallbacks for SessionCallbacks<R> {
+    async fn prepare_security_key(
+        &self,
+        request: netcatty_ssh::SecurityKeyRequest,
+    ) -> Result<Option<netcatty_ssh::SecurityKeyAgent>, String> {
+        self.fido.prepare(&self.broker.app, request).await
+    }
+
+    async fn security_key_sign_begin(&self, key_label: String) {
+        self.fido.sign_begin(&self.broker.app, key_label).await
+    }
+
+    async fn security_key_sign_end(&self) -> bool {
+        self.fido.sign_end()
+    }
+
+    async fn security_key_recovery(
+        &self,
+        key_label: String,
+        allow_password_fallback: bool,
+    ) -> netcatty_ssh::SecurityKeyRecovery {
+        self.fido
+            .recovery(&self.broker.app, key_label, allow_password_fallback)
+            .await
+    }
+
     async fn verify_host_key(&self, info: HostKeyInfo) -> HostKeyDecision {
         let broker = &self.broker;
         let (request_id, rx) =

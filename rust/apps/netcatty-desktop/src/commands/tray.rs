@@ -215,7 +215,7 @@ pub struct EnabledResult {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EnabledStatus {
-    enabled: bool,
+    pub enabled: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -344,6 +344,12 @@ pub fn main_window_shown<R: Runtime>(app: &AppHandle<R>) {
 /// App run-loop events (wired in `lib.rs::run`): clicking the Dock icon
 /// re-shows a main window hidden to the tray (Electron `activate`).
 pub fn on_run_event<R: Runtime>(app: &AppHandle<R>, event: RunEvent) {
+    // Dock reopen with the main window gone recreates it (`integration.rs`).
+    super::integration::on_run_event(app, &event);
+    // Stop the Netcatty-owned FIDO ssh-agent with the app.
+    if matches!(event, RunEvent::Exit) {
+        super::security::shutdown(app);
+    }
     #[cfg(target_os = "macos")]
     if let RunEvent::Reopen {
         has_visible_windows: false,
@@ -363,16 +369,24 @@ pub fn on_run_event<R: Runtime>(app: &AppHandle<R>, event: RunEvent) {
 /// Unminimize, show and focus the main window; cancels a pending hide.
 pub(crate) fn bring_main_to_foreground<R: Runtime>(app: &AppHandle<R>) -> bool {
     main_window_shown(app);
+    // App lock: a background lock can auto-prompt Touch ID / Windows Hello.
+    super::security::notify_reopen(app);
     let Some(main) = app.get_webview_window(MAIN_LABEL) else {
         return false;
     };
     let _ = main.unminimize();
     let _ = main.show();
-    main.set_focus().is_ok()
+    let focused = main.set_focus().is_ok();
+    super::windows::notify_window_shown(app, MAIN_LABEL);
+    super::windows::notify_window_focus_requested(app, MAIN_LABEL);
+    focused
 }
 
 /// Hide the main window to the tray, leaving macOS native fullscreen first.
 pub(crate) fn hide_main_window<R: Runtime>(app: &AppHandle<R>, main: &WebviewWindow<R>) {
+    super::windows::notify_window_will_hide(app, MAIN_LABEL);
+    // App lock: hide-to-tray / hotkey hide locks with reason `background`.
+    super::security::lock_for_background(app);
     let generation = with_prefs(app, |p| {
         p.hide_generation += 1;
         p.hide_generation
@@ -419,7 +433,7 @@ pub(crate) fn toggle_main_window<R: Runtime>(app: &AppHandle<R>) {
 
 /// macOS: template image (the system tints it); elsewhere the coloured icon.
 /// Same artwork as the Electron build (`public/`).
-fn tray_image() -> Option<Image<'static>> {
+pub(crate) fn default_tray_image() -> Option<Image<'static>> {
     #[cfg(target_os = "macos")]
     let bytes: &[u8] = include_bytes!("../../../../../public/tray-iconTemplate@2x.png");
     #[cfg(not(target_os = "macos"))]
@@ -448,7 +462,8 @@ fn ensure_tray<R: Runtime>(app: &AppHandle<R>) {
         .show_menu_on_left_click(false)
         .on_tray_icon_event(|tray, event| handle_tray_event(tray.app_handle(), event))
         .on_menu_event(|app, event| handle_menu_action(app, event.id().as_ref()));
-    if let Some(image) = tray_image() {
+    // App icon variant artwork on Windows (`integration.rs`), else the default.
+    if let Some(image) = super::integration::tray_icon_override(app).or_else(default_tray_image) {
         builder = builder.icon(image);
     }
     #[cfg(target_os = "macos")]
@@ -750,9 +765,12 @@ fn build_tray_panel<R: Runtime>(app: &AppHandle<R>) -> CmdResult<WebviewWindow<R
     // private-API feature, so the panel stays a plain rectangle there.
     #[cfg(not(target_os = "macos"))]
     let builder = builder.transparent(true);
-    builder
+    let panel = builder
         .build()
-        .map_err(|err| CoreError::internal(err.to_string()))
+        .map_err(|err| CoreError::internal(err.to_string()))?;
+    // Pick up the current window opacity / background blur (commands/windows).
+    super::windows::apply_window_chrome(&panel);
+    Ok(panel)
 }
 
 fn toggle_tray_panel<R: Runtime>(app: &AppHandle<R>, event_bounds: Option<Bounds>) {
@@ -1494,6 +1512,6 @@ mod tests {
 
     #[test]
     fn tray_icon_artwork_decodes() {
-        assert!(tray_image().is_some());
+        assert!(default_tray_image().is_some());
     }
 }

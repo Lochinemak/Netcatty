@@ -465,6 +465,9 @@ pub struct SessionDataMeta {
     /// The bootstrap waits on input Netcatty cannot answer.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mosh_handshake_requires_user_input: Option<bool>,
+    /// A plugin connection Provider reported `connected` (zero-byte delivery).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plugin_connection_ready: Option<bool>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

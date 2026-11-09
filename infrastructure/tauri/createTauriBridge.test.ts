@@ -382,9 +382,10 @@ test('plugin-backed methods go through invoke("plugin:…") when no plugin globa
   assert.deepEqual(lastInvoke(fake, 'plugin:clipboard-manager|write_text').args, { text: 'copied', label: undefined });
   await bridge.openExternal!('https://example.com');
   assert.deepEqual(lastInvoke(fake, 'plugin:opener|open_url').args, { url: 'https://example.com', with: undefined });
-  // No Rust counterpart: stays undefined rather than faking success.
-  assert.equal(bridge.cancelZmodem, undefined);
-  assert.equal(bridge.checkForUpdate, undefined);
+  // ZMODEM is ported (bridge/zmodem.ts).
+  assert.equal(typeof bridge.cancelZmodem, 'function');
+  // Auto-update is ported (bridge/update.ts).
+  assert.equal(typeof bridge.checkForUpdate, 'function');
 });
 
 test('dialog, clipboard and opener plugins are wired through the global API', async () => {
@@ -1299,4 +1300,21 @@ test('session logs map to the session_log commands with Electron payloads', asyn
     success: false, error: 'No saved log is available for this session',
   });
   assert.deepEqual(lastInvoke(fake, 'session_log_reveal').args, { payload: { sessionId: 's2' } });
+});
+
+test('session output routed to another window is dropped and started sessions are tracked', async () => {
+  const { fake, bridge } = setup();
+  fake.respond('session_start_local', () => ({ sessionId: 'local-1' }));
+  assert.equal(await bridge.startLocalSession({}), 'local-1');
+  await flush();
+  assert.deepEqual(lastInvoke(fake, 'windows_track_session').args, { sessionId: 'local-1' });
+
+  const seen: string[] = [];
+  bridge.onSessionData('moved', (data) => seen.push(data), { replayBacklog: true });
+  fake.emit('netcatty:data', { sessionId: 'moved', data: 'a' });
+  fake.emit('netcatty:window:session-output-route', { sessionId: 'moved', label: 'terminal-popup-1', revision: 1 });
+  fake.emit('netcatty:data', { sessionId: 'moved', data: 'b' });
+  fake.emit('netcatty:window:session-output-route', { sessionId: 'moved', label: 'main', revision: 2 });
+  fake.emit('netcatty:data', { sessionId: 'moved', data: 'c' });
+  assert.deepEqual(seen, ['a', 'c']);
 });

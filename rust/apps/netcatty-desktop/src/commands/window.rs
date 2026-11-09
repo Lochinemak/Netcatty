@@ -64,6 +64,15 @@ fn window_state<R: Runtime>(app: &AppHandle<R>) -> tauri::State<'_, WindowState>
     app.state::<WindowState>()
 }
 
+/// Theme and background colour applied to windows created later
+/// (`windows::build_app_window`).
+pub(crate) fn window_appearance<R: Runtime>(app: &AppHandle<R>) -> (Option<Theme>, Option<Color>) {
+    match app.try_state::<WindowState>() {
+        Some(state) => (*state.theme.lock(), *state.background.lock()),
+        None => (None, None),
+    }
+}
+
 fn internal(err: impl std::fmt::Display) -> CoreError {
     CoreError::internal(err.to_string())
 }
@@ -80,6 +89,10 @@ fn internal(err: impl std::fmt::Display) -> CoreError {
 pub fn on_window_event<R: Runtime>(window: &tauri::Window<R>, event: &WindowEvent) {
     // Close-to-tray and the tray panel (`tray.rs`).
     if super::tray::on_window_event(window, event) {
+        return;
+    }
+    // Editor / popup / session windows, unsaved-editor close guard (`windows`).
+    if super::windows::on_window_event(window, event) {
         return;
     }
     let label = window.label().to_owned();
@@ -206,6 +219,7 @@ pub async fn window_open_settings<R: Runtime>(
     }
     let settings = build_settings_window(&app)?;
     center_on(&settings, Some(&window));
+    super::windows::apply_window_chrome(&settings);
     schedule_show_fallback(settings);
     Ok(true)
 }
@@ -225,6 +239,7 @@ pub fn window_renderer_ready<R: Runtime>(window: WebviewWindow<R>) {
     let may_show = super::tray::renderer_ready_may_show(&window);
     if may_show && !window.is_visible().unwrap_or(true) {
         show_and_focus(&window);
+        super::windows::notify_window_shown(window.app_handle(), window.label());
     }
 }
 
@@ -275,9 +290,12 @@ pub fn window_focus<R: Runtime>(window: WebviewWindow<R>) -> bool {
 pub fn window_set_title<R: Runtime>(window: WebviewWindow<R>, title: Option<String>) -> bool {
     let title = title.unwrap_or_default();
     let title = title.trim();
-    window
-        .set_title(if title.is_empty() { "Netcatty" } else { title })
-        .is_ok()
+    let title = if title.is_empty() { "Netcatty" } else { title };
+    // While the app is locked the title is remembered, not shown.
+    if super::security::defer_window_title(window.app_handle(), window.label(), title) {
+        return false;
+    }
+    window.set_title(title).is_ok()
 }
 
 /// Show and focus the main window (tray / secondary windows).
@@ -287,6 +305,8 @@ pub fn window_open_main<R: Runtime>(app: AppHandle<R>) -> bool {
         Some(main) => {
             show_and_focus(&main);
             super::tray::main_window_shown(&app);
+            super::windows::notify_window_shown(&app, MAIN_LABEL);
+            super::windows::notify_window_focus_requested(&app, MAIN_LABEL);
             true
         }
         None => false,
@@ -327,7 +347,10 @@ pub fn app_set_background_color<R: Runtime>(app: AppHandle<R>, color: Option<Str
     };
     *window_state(&app).background.lock() = Some(color);
     for window in app.webview_windows().values() {
-        let _ = window.set_background_color(Some(color));
+        // Blur keeps its transparent backing (Electron: `applyWindowBackgroundChromeToWindow`).
+        if !super::windows::keeps_transparent_background(window) {
+            let _ = window.set_background_color(Some(color));
+        }
     }
     true
 }
@@ -340,6 +363,7 @@ pub fn app_set_language<R: Runtime>(app: AppHandle<R>, language: Option<String>)
         .filter(|l| !l.is_empty())
         .unwrap_or_else(|| "en".to_owned());
     *window_state(&app).language.lock() = language.clone();
+    super::windows::on_language_changed(&app, &language);
     crate::events::emit(&app, EVENT_LANGUAGE_CHANGED, language);
     true
 }

@@ -1,0 +1,3450 @@
+{
+ "capabilities": [
+  {
+   "id": "session.environment",
+   "domain": "session",
+   "status": "implemented",
+   "description": "List scoped terminal sessions available to the agent.",
+   "policy": {
+    "write": false,
+    "sensitiveRead": false,
+    "longRunning": false,
+    "requiresChatSession": true,
+    "bypassesObserverBlock": false,
+    "bypassesApproval": true,
+    "bypassesChatCancel": true
+   },
+   "surfaces": {
+    "builtin": {
+     "rpcMethod": "netcatty/getContext",
+     "mcpTool": "get_environment"
+    },
+    "public": {
+     "rpcMethod": "public/getEnvironment",
+     "mcpTool": "get_environment"
+    },
+    "cli": {
+     "command": [
+      "env"
+     ]
+    }
+   }
+  },
+  {
+   "id": "meta.status",
+   "domain": "meta",
+   "status": "implemented",
+   "description": "Return bridge runtime status and policy configuration.",
+   "policy": {
+    "write": false,
+    "sensitiveRead": false,
+    "longRunning": false,
+    "requiresChatSession": false,
+    "bypassesObserverBlock": false,
+    "bypassesApproval": true,
+    "bypassesChatCancel": true
+   },
+   "surfaces": {
+    "builtin": {
+     "rpcMethod": "netcatty/getStatus"
+    },
+    "public": {
+     "rpcMethod": "public/getStatus"
+    },
+    "cli": {
+     "command": [
+      "status"
+     ]
+    }
+   }
+  },
+  {
+   "id": "attachment.list",
+   "domain": "attachment",
+   "status": "implemented",
+   "description": "List user-attached files in the current AI chat scope.",
+   "policy": {
+    "write": false,
+    "sensitiveRead": false,
+    "longRunning": false,
+    "requiresChatSession": true,
+    "bypassesObserverBlock": false,
+    "bypassesApproval": true,
+    "bypassesChatCancel": true
+   },
+   "surfaces": {
+    "builtin": {
+     "rpcMethod": "netcatty/listAttachments",
+     "mcpTool": "list_attachments"
+    },
+    "cli": {
+     "command": [
+      "attachment",
+      "list"
+     ]
+    }
+   }
+  },
+  {
+   "id": "attachment.read",
+   "domain": "attachment",
+   "status": "implemented",
+   "description": "Read a user-attached file from the current AI chat scope.",
+   "policy": {
+    "write": false,
+    "sensitiveRead": true,
+    "longRunning": false,
+    "requiresChatSession": true,
+    "bypassesObserverBlock": false,
+    "bypassesApproval": true,
+    "bypassesChatCancel": true
+   },
+   "surfaces": {
+    "builtin": {
+     "rpcMethod": "netcatty/readAttachment",
+     "mcpTool": "read_attachment"
+    },
+    "cli": {
+     "command": [
+      "attachment",
+      "read"
+     ]
+    }
+   }
+  },
+  {
+   "id": "session.cancel",
+   "domain": "session",
+   "status": "implemented",
+   "description": "Cancel in-flight operations for a chat session.",
+   "policy": {
+    "write": false,
+    "sensitiveRead": false,
+    "longRunning": false,
+    "requiresChatSession": true,
+    "bypassesObserverBlock": false,
+    "bypassesApproval": true,
+    "bypassesChatCancel": true
+   },
+   "surfaces": {
+    "builtin": {
+     "rpcMethod": "netcatty/setCancelled"
+    },
+    "cli": {
+     "command": [
+      "cancel"
+     ]
+    }
+   }
+  },
+  {
+   "id": "session.resume",
+   "domain": "session",
+   "status": "implemented",
+   "description": "Resume write operations for a cancelled chat session.",
+   "policy": {
+    "write": false,
+    "sensitiveRead": false,
+    "longRunning": false,
+    "requiresChatSession": true,
+    "bypassesObserverBlock": false,
+    "bypassesApproval": true,
+    "bypassesChatCancel": true
+   },
+   "surfaces": {
+    "builtin": {
+     "rpcMethod": "netcatty/setCancelled"
+    },
+    "cli": {
+     "command": [
+      "resume"
+     ]
+    }
+   }
+  },
+  {
+   "id": "session.get",
+   "domain": "session",
+   "status": "implemented",
+   "description": "Get metadata for a single scoped session.",
+   "policy": {
+    "write": false,
+    "sensitiveRead": false,
+    "longRunning": false,
+    "requiresChatSession": true,
+    "bypassesObserverBlock": false,
+    "bypassesApproval": true,
+    "bypassesChatCancel": true
+   },
+   "surfaces": {
+    "builtin": {
+     "rpcMethod": "netcatty/getContext"
+    },
+    "cli": {
+     "command": [
+      "session"
+     ]
+    }
+   }
+  },
+  {
+   "id": "session.reconnect",
+   "domain": "session",
+   "status": "implemented",
+   "description": "Request reconnect of a disconnected session in the current scope, preserving its tab and workspace. Does not restart connected sessions or replay commands. Returns acknowledgement, not shell readiness. Recovery is limited to three attempts with 2/5 second backoff in a 120 second incident; inspect authentication or exhausted recovery instead of retrying indefinitely.",
+   "policy": {
+    "write": true,
+    "sensitiveRead": false,
+    "longRunning": false,
+    "requiresChatSession": true,
+    "bypassesObserverBlock": false,
+    "bypassesApproval": false,
+    "bypassesChatCancel": false
+   },
+   "surfaces": {
+    "global": {
+     "rpcMethod": "session/reconnect"
+    },
+    "public": {
+     "rpcMethod": "public/session/reconnect",
+     "mcpTool": "session_reconnect"
+    },
+    "cli": {
+     "command": [
+      "session-reconnect"
+     ]
+    }
+   }
+  },
+  {
+   "id": "session.recover",
+   "domain": "session",
+   "status": "implemented",
+   "description": "Inspect and recover a scoped disconnected session in place. Automatically applies bounded reconnect/backoff for up to 20 seconds per call and reports ready only once the transport is restored (still-offline budgets return pending); shellReady is advisory (true/false/null) and, when unconfirmed, nextAction \"inspect_shell\" asks you to verify the prompt before typing. Stops for authentication, busy jobs, cancellation or unavailable state. Never creates tabs or executes/replays commands.",
+   "policy": {
+    "write": true,
+    "sensitiveRead": false,
+    "longRunning": false,
+    "requiresChatSession": true,
+    "bypassesObserverBlock": false,
+    "bypassesApproval": false,
+    "bypassesChatCancel": false
+   },
+   "surfaces": {
+    "global": {
+     "rpcMethod": "session/recover"
+    },
+    "public": {
+     "rpcMethod": "public/session/recover",
+     "mcpTool": "session_recover"
+    },
+    "cli": {
+     "command": [
+      "session-recover"
+     ]
+    }
+   }
+  },
+  {
+   "id": "session.close",
+   "domain": "session",
+   "status": "implemented",
+   "description": "Close a terminal session previously opened by host_open in the current AI scope.",
+   "policy": {
+    "write": true,
+    "sensitiveRead": false,
+    "longRunning": false,
+    "requiresChatSession": true,
+    "bypassesObserverBlock": true,
+    "bypassesApproval": true,
+    "bypassesChatCancel": true
+   },
+   "surfaces": {
+    "global": {
+     "rpcMethod": "session/close"
+    },
+    "public": {
+     "rpcMethod": "public/session/close",
+     "mcpTool": "session_close"
+    }
+   }
+  },
+  {
+   "id": "terminal.execute",
+   "domain": "terminal",
+   "status": "implemented",
+   "description": "Execute a short command in a terminal session and wait for completion.",
+   "policy": {
+    "write": true,
+    "sensitiveRead": false,
+    "longRunning": true,
+    "requiresChatSession": true,
+    "bypassesObserverBlock": false,
+    "bypassesApproval": false,
+    "bypassesChatCancel": false
+   },
+   "surfaces": {
+    "builtin": {
+     "rpcMethod": "netcatty/exec",
+     "mcpTool": "terminal_execute"
+    },
+    "public": {
+     "rpcMethod": "public/terminalExecute",
+     "mcpTool": "terminal_execute"
+    },
+    "cli": {
+     "command": [
+      "exec"
+     ]
+    }
+   }
+  },
+  {
+   "id": "terminal.start",
+   "domain": "terminal",
+   "status": "implemented",
+   "description": "Start a long-running command in a terminal session.",
+   "policy": {
+    "write": true,
+    "sensitiveRead": false,
+    "longRunning": true,
+    "requiresChatSession": true,
+    "bypassesObserverBlock": false,
+    "bypassesApproval": false,
+    "bypassesChatCancel": false
+   },
+   "surfaces": {
+    "builtin": {
+     "rpcMethod": "netcatty/jobStart",
+     "mcpTool": "terminal_start"
+    },
+    "public": {
+     "rpcMethod": "public/terminalStart",
+     "mcpTool": "terminal_start"
+    },
+    "cli": {
+     "command": [
+      "job-start"
+     ]
+    }
+   }
+  },
+  {
+   "id": "terminal.poll",
+   "domain": "terminal",
+   "status": "implemented",
+   "description": "Poll incremental output from a long-running terminal job.",
+   "policy": {
+    "write": false,
+    "sensitiveRead": false,
+    "longRunning": false,
+    "requiresChatSession": true,
+    "bypassesObserverBlock": false,
+    "bypassesApproval": true,
+    "bypassesChatCancel": true
+   },
+   "surfaces": {
+    "builtin": {
+     "rpcMethod": "netcatty/jobPoll",
+     "mcpTool": "terminal_poll"
+    },
+    "public": {
+     "rpcMethod": "public/terminalPoll",
+     "mcpTool": "terminal_poll"
+    },
+    "cli": {
+     "command": [
+      "job-poll"
+     ]
+    }
+   }
+  },
+  {
+   "id": "terminal.stop",
+   "domain": "terminal",
+   "status": "implemented",
+   "description": "Stop a long-running terminal job.",
+   "policy": {
+    "write": true,
+    "sensitiveRead": false,
+    "longRunning": false,
+    "requiresChatSession": true,
+    "bypassesObserverBlock": true,
+    "bypassesApproval": true,
+    "bypassesChatCancel": true
+   },
+   "surfaces": {
+    "builtin": {
+     "rpcMethod": "netcatty/jobStop",
+     "mcpTool": "terminal_stop"
+    },
+    "public": {
+     "rpcMethod": "public/terminalStop",
+     "mcpTool": "terminal_stop"
+    },
+    "cli": {
+     "command": [
+      "job-stop"
+     ]
+    }
+   }
+  },
+  {
+   "id": "sftp.list",
+   "domain": "sftp",
+   "status": "implemented",
+   "description": "List a remote directory over the session file backend (SFTP or SCP-mode).",
+   "policy": {
+    "write": false,
+    "sensitiveRead": true,
+    "longRunning": true,
+    "requiresChatSession": true,
+    "bypassesObserverBlock": false,
+    "bypassesApproval": true,
+    "bypassesChatCancel": true
+   },
+   "surfaces": {
+    "builtin": {
+     "rpcMethod": "netcatty/sftp/list"
+    },
+    "public": {
+     "rpcMethod": "public/sftp/list",
+     "mcpTool": "sftp_list",
+     "confirmInConfirmMode": true
+    },
+    "cli": {
+     "command": [
+      "sftp",
+      "list"
+     ]
+    }
+   }
+  },
+  {
+   "id": "sftp.read",
+   "domain": "sftp",
+   "status": "implemented",
+   "description": "Read a remote file over the session file backend (SFTP or SCP-mode).",
+   "policy": {
+    "write": false,
+    "sensitiveRead": true,
+    "longRunning": true,
+    "requiresChatSession": true,
+    "bypassesObserverBlock": false,
+    "bypassesApproval": true,
+    "bypassesChatCancel": true
+   },
+   "surfaces": {
+    "builtin": {
+     "rpcMethod": "netcatty/sftp/read"
+    },
+    "public": {
+     "rpcMethod": "public/sftp/readFile",
+     "mcpTool": "sftp_read_file",
+     "confirmInConfirmMode": true
+    },
+    "cli": {
+     "command": [
+      "sftp",
+      "read"
+     ]
+    }
+   }
+  },
+  {
+   "id": "sftp.write",
+   "domain": "sftp",
+   "status": "implemented",
+   "description": "Write a remote file over the session file backend (SFTP or SCP-mode).",
+   "policy": {
+    "write": true,
+    "sensitiveRead": false,
+    "longRunning": true,
+    "requiresChatSession": true,
+    "bypassesObserverBlock": false,
+    "bypassesApproval": false,
+    "bypassesChatCancel": false
+   },
+   "surfaces": {
+    "builtin": {
+     "rpcMethod": "netcatty/sftp/write"
+    },
+    "public": {
+     "rpcMethod": "public/sftp/writeFile",
+     "mcpTool": "sftp_write_file"
+    },
+    "cli": {
+     "command": [
+      "sftp",
+      "write"
+     ]
+    }
+   }
+  },
+  {
+   "id": "sftp.download",
+   "domain": "sftp",
+   "status": "implemented",
+   "description": "Download a remote file to a local path.",
+   "policy": {
+    "write": true,
+    "sensitiveRead": false,
+    "longRunning": true,
+    "requiresChatSession": true,
+    "bypassesObserverBlock": false,
+    "bypassesApproval": false,
+    "bypassesChatCancel": false
+   },
+   "surfaces": {
+    "builtin": {
+     "rpcMethod": "netcatty/sftp/download"
+    },
+    "public": {
+     "rpcMethod": "public/sftp/download",
+     "mcpTool": "sftp_download"
+    },
+    "cli": {
+     "command": [
+      "sftp",
+      "download"
+     ]
+    }
+   }
+  },
+  {
+   "id": "sftp.upload",
+   "domain": "sftp",
+   "status": "implemented",
+   "description": "Upload a local file to a remote path.",
+   "policy": {
+    "write": true,
+    "sensitiveRead": false,
+    "longRunning": true,
+    "requiresChatSession": true,
+    "bypassesObserverBlock": false,
+    "bypassesApproval": false,
+    "bypassesChatCancel": false
+   },
+   "surfaces": {
+    "builtin": {
+     "rpcMethod": "netcatty/sftp/upload"
+    },
+    "public": {
+     "rpcMethod": "public/sftp/upload",
+     "mcpTool": "sftp_upload"
+    },
+    "cli": {
+     "command": [
+      "sftp",
+      "upload"
+     ]
+    }
+   }
+  },
+  {
+   "id": "sftp.stat",
+   "domain": "sftp",
+   "status": "implemented",
+   "description": "Get remote file metadata over the session file backend (SFTP or SCP-mode).",
+   "policy": {
+    "write": false,
+    "sensitiveRead": true,
+    "longRunning": true,
+    "requiresChatSession": true,
+    "bypassesObserverBlock": false,
+    "bypassesApproval": true,
+    "bypassesChatCancel": true
+   },
+   "surfaces": {
+    "builtin": {
+     "rpcMethod": "netcatty/sftp/stat"
+    },
+    "public": {
+     "rpcMethod": "public/sftp/stat",
+     "mcpTool": "sftp_stat",
+     "confirmInConfirmMode": true
+    },
+    "cli": {
+     "command": [
+      "sftp",
+      "stat"
+     ]
+    }
+   }
+  },
+  {
+   "id": "sftp.home",
+   "domain": "sftp",
+   "status": "implemented",
+   "description": "Get the remote home directory for a session.",
+   "policy": {
+    "write": false,
+    "sensitiveRead": true,
+    "longRunning": true,
+    "requiresChatSession": true,
+    "bypassesObserverBlock": false,
+    "bypassesApproval": true,
+    "bypassesChatCancel": true
+   },
+   "surfaces": {
+    "builtin": {
+     "rpcMethod": "netcatty/sftp/home"
+    },
+    "public": {
+     "rpcMethod": "public/sftp/home",
+     "mcpTool": "sftp_home",
+     "confirmInConfirmMode": true
+    },
+    "cli": {
+     "command": [
+      "sftp",
+      "home"
+     ]
+    }
+   }
+  },
+  {
+   "id": "sftp.mkdir",
+   "domain": "sftp",
+   "status": "implemented",
+   "description": "Create a remote directory over the session file backend (SFTP or SCP-mode).",
+   "policy": {
+    "write": true,
+    "sensitiveRead": false,
+    "longRunning": true,
+    "requiresChatSession": true,
+    "bypassesObserverBlock": false,
+    "bypassesApproval": false,
+    "bypassesChatCancel": false
+   },
+   "surfaces": {
+    "builtin": {
+     "rpcMethod": "netcatty/sftp/mkdir"
+    },
+    "public": {
+     "rpcMethod": "public/sftp/mkdir",
+     "mcpTool": "sftp_mkdir"
+    },
+    "cli": {
+     "command": [
+      "sftp",
+      "mkdir"
+     ]
+    }
+   }
+  },
+  {
+   "id": "sftp.delete",
+   "domain": "sftp",
+   "status": "implemented",
+   "description": "Delete a remote file or directory over the session file backend (SFTP or SCP-mode).",
+   "policy": {
+    "write": true,
+    "sensitiveRead": false,
+    "longRunning": true,
+    "requiresChatSession": true,
+    "bypassesObserverBlock": false,
+    "bypassesApproval": false,
+    "bypassesChatCancel": false
+   },
+   "surfaces": {
+    "builtin": {
+     "rpcMethod": "netcatty/sftp/delete"
+    },
+    "public": {
+     "rpcMethod": "public/sftp/delete",
+     "mcpTool": "sftp_delete"
+    },
+    "cli": {
+     "command": [
+      "sftp",
+      "delete"
+     ]
+    }
+   }
+  },
+  {
+   "id": "sftp.rename",
+   "domain": "sftp",
+   "status": "implemented",
+   "description": "Rename a remote file or directory over the session file backend (SFTP or SCP-mode).",
+   "policy": {
+    "write": true,
+    "sensitiveRead": false,
+    "longRunning": true,
+    "requiresChatSession": true,
+    "bypassesObserverBlock": false,
+    "bypassesApproval": false,
+    "bypassesChatCancel": false
+   },
+   "surfaces": {
+    "builtin": {
+     "rpcMethod": "netcatty/sftp/rename"
+    },
+    "public": {
+     "rpcMethod": "public/sftp/rename",
+     "mcpTool": "sftp_rename"
+    },
+    "cli": {
+     "command": [
+      "sftp",
+      "rename"
+     ]
+    }
+   }
+  },
+  {
+   "id": "sftp.chmod",
+   "domain": "sftp",
+   "status": "implemented",
+   "description": "Change remote file permissions over the session file backend (SFTP or SCP-mode).",
+   "policy": {
+    "write": true,
+    "sensitiveRead": false,
+    "longRunning": true,
+    "requiresChatSession": true,
+    "bypassesObserverBlock": false,
+    "bypassesApproval": false,
+    "bypassesChatCancel": false
+   },
+   "surfaces": {
+    "builtin": {
+     "rpcMethod": "netcatty/sftp/chmod"
+    },
+    "public": {
+     "rpcMethod": "public/sftp/chmod",
+     "mcpTool": "sftp_chmod"
+    },
+    "cli": {
+     "command": [
+      "sftp",
+      "chmod"
+     ]
+    }
+   }
+  },
+  {
+   "id": "vault.host.get",
+   "domain": "vault",
+   "status": "implemented",
+   "description": "Get host metadata from the vault.",
+   "policy": {
+    "write": false,
+    "sensitiveRead": true,
+    "longRunning": false,
+    "requiresChatSession": false,
+    "bypassesObserverBlock": false,
+    "bypassesApproval": true,
+    "bypassesChatCancel": true
+   },
+   "surfaces": {
+    "cli": {
+     "command": [
+      "vault",
+      "host",
+      "get"
+     ]
+    },
+    "global": {
+     "rpcMethod": "vault/host/get"
+    },
+    "public": {
+     "rpcMethod": "public/vault/host/get",
+     "mcpTool": "host_get"
+    }
+   }
+  },
+  {
+   "id": "vault.host.list",
+   "domain": "vault",
+   "status": "implemented",
+   "description": "List saved hosts in the vault (metadata only — no passwords or keys).",
+   "policy": {
+    "write": false,
+    "sensitiveRead": true,
+    "longRunning": false,
+    "requiresChatSession": false,
+    "bypassesObserverBlock": false,
+    "bypassesApproval": true,
+    "bypassesChatCancel": true
+   },
+   "surfaces": {
+    "global": {
+     "rpcMethod": "vault/hosts/list"
+    },
+    "public": {
+     "rpcMethod": "public/vault/hosts/list",
+     "mcpTool": "vault_hosts_list"
+    }
+   }
+  },
+  {
+   "id": "vault.host.open",
+   "domain": "vault",
+   "status": "implemented",
+   "description": "Open a vault host by reusing its existing session when its connection settings still match (connected or connecting, including auto-reconnecting — same sessionId, no duplicate tab). Only opens a new terminal tab when no usable session for this host exists, or when newTab is true. Inactive disconnected and restored tabs are not reused. Returns the sessionId so you can run terminal/SFTP tools against it. Use vault_hosts_list first when you only know the label or hostname.",
+   "agentKinds": [
+    "global"
+   ],
+   "policy": {
+    "write": true,
+    "sensitiveRead": false,
+    "longRunning": false,
+    "requiresChatSession": false,
+    "bypassesObserverBlock": false,
+    "bypassesApproval": false,
+    "bypassesChatCancel": false
+   },
+   "surfaces": {
+    "cli": {
+     "command": [
+      "vault",
+      "host",
+      "open"
+     ]
+    },
+    "global": {
+     "rpcMethod": "vault/hosts/open"
+    },
+    "public": {
+     "rpcMethod": "public/vault/hosts/open",
+     "mcpTool": "host_open"
+    }
+   }
+  },
+  {
+   "id": "vault.hosts.create",
+   "domain": "vault",
+   "status": "implemented",
+   "description": "Create vault hosts from structured host objects. Use when the user wants to add/create a host (Vault → Hosts). NOT for Vault → Notes sidebar documentation.",
+   "policy": {
+    "write": true,
+    "sensitiveRead": false,
+    "longRunning": false,
+    "requiresChatSession": false,
+    "bypassesObserverBlock": false,
+    "bypassesApproval": false,
+    "bypassesChatCancel": false
+   },
+   "surfaces": {
+    "global": {
+     "rpcMethod": "vault/hosts/create"
+    },
+    "public": {
+     "rpcMethod": "public/vault/hosts/create",
+     "mcpTool": "vault_hosts_create"
+    }
+   }
+  },
+  {
+   "id": "vault.host.update",
+   "domain": "vault",
+   "status": "implemented",
+   "description": "Update selected fields on an existing vault host. Use vault_hosts_list first to resolve the hostId.",
+   "policy": {
+    "write": true,
+    "sensitiveRead": false,
+    "longRunning": false,
+    "requiresChatSession": false,
+    "bypassesObserverBlock": false,
+    "bypassesApproval": false,
+    "bypassesChatCancel": false
+   },
+   "surfaces": {
+    "global": {
+     "rpcMethod": "vault/hosts/update"
+    },
+    "public": {
+     "rpcMethod": "public/vault/hosts/update",
+     "mcpTool": "vault_hosts_update"
+    }
+   }
+  },
+  {
+   "id": "vault.host.delete",
+   "domain": "vault",
+   "status": "implemented",
+   "description": "Delete a saved vault host by id. Use vault_hosts_list first to resolve the hostId.",
+   "policy": {
+    "write": true,
+    "sensitiveRead": false,
+    "longRunning": false,
+    "requiresChatSession": false,
+    "bypassesObserverBlock": false,
+    "bypassesApproval": false,
+    "bypassesChatCancel": false
+   },
+   "surfaces": {
+    "global": {
+     "rpcMethod": "vault/hosts/delete"
+    },
+    "public": {
+     "rpcMethod": "public/vault/hosts/delete",
+     "mcpTool": "vault_hosts_delete"
+    }
+   }
+  },
+  {
+   "id": "vault.host.import",
+   "domain": "vault",
+   "status": "implemented",
+   "description": "Parse known host export file formats (PuTTY, MobaXterm, CSV, SecureCRT, FinalShell, ssh_config) into vault hosts. For arbitrary unstructured text, map to host objects and use vault_hosts_create instead.",
+   "policy": {
+    "write": true,
+    "sensitiveRead": false,
+    "longRunning": false,
+    "requiresChatSession": false,
+    "bypassesObserverBlock": false,
+    "bypassesApproval": false,
+    "bypassesChatCancel": false
+   },
+   "surfaces": {
+    "global": {
+     "rpcMethod": "vault/hosts/import"
+    },
+    "public": {
+     "rpcMethod": "public/vault/hosts/import",
+     "mcpTool": "vault_hosts_import"
+    }
+   }
+  },
+  {
+   "id": "vault.host.notes.get",
+   "domain": "vault",
+   "status": "implemented",
+   "description": "Read host metadata notes attached to a saved host (Host Details panel — not Vault sidebar Notes).",
+   "policy": {
+    "write": false,
+    "sensitiveRead": true,
+    "longRunning": false,
+    "requiresChatSession": false,
+    "bypassesObserverBlock": false,
+    "bypassesApproval": true,
+    "bypassesChatCancel": true
+   },
+   "surfaces": {
+    "cli": {
+     "command": [
+      "vault",
+      "host-notes",
+      "get"
+     ]
+    },
+    "global": {
+     "rpcMethod": "vault/host/notes/get"
+    },
+    "public": {
+     "rpcMethod": "public/vault/hostNotes/get",
+     "mcpTool": "host_notes_get"
+    }
+   }
+  },
+  {
+   "id": "vault.host.notes.set",
+   "domain": "vault",
+   "status": "implemented",
+   "description": "Update host metadata notes on a saved host (Host Details panel — not Vault sidebar Notes).",
+   "policy": {
+    "write": true,
+    "sensitiveRead": false,
+    "longRunning": false,
+    "requiresChatSession": false,
+    "bypassesObserverBlock": false,
+    "bypassesApproval": false,
+    "bypassesChatCancel": false
+   },
+   "surfaces": {
+    "cli": {
+     "command": [
+      "vault",
+      "host-notes",
+      "set"
+     ]
+    },
+    "global": {
+     "rpcMethod": "vault/host/notes/set"
+    },
+    "public": {
+     "rpcMethod": "public/vault/hostNotes/set",
+     "mcpTool": "host_notes_set"
+    }
+   }
+  },
+  {
+   "id": "vault.note.list",
+   "domain": "vault",
+   "status": "implemented",
+   "description": "List notes in Vault → Notes (markdown notes visible in the vault sidebar).",
+   "policy": {
+    "write": false,
+    "sensitiveRead": false,
+    "longRunning": false,
+    "requiresChatSession": false,
+    "bypassesObserverBlock": false,
+    "bypassesApproval": true,
+    "bypassesChatCancel": true
+   },
+   "surfaces": {
+    "cli": {
+     "command": [
+      "notes",
+      "list"
+     ]
+    },
+    "global": {
+     "rpcMethod": "vault/notes/list"
+    },
+    "public": {
+     "rpcMethod": "public/vault/notes/list",
+     "mcpTool": "vault_notes_list"
+    }
+   }
+  },
+  {
+   "id": "vault.note.get",
+   "domain": "vault",
+   "status": "implemented",
+   "description": "Read or search a Vault → Notes entry by exact id, at most 6000 characters per call. Content is only the returned range, not necessarily the whole note. Follow nextOffset with expectedUpdatedAt until null for a complete read; query searches only return matching excerpts. Read every range without query before summarizing the whole note or replacing its content; never treat unread text as absent. For long notes, retain section summaries rather than repeatedly loading all ranges. If the note changed, restart.",
+   "policy": {
+    "write": false,
+    "sensitiveRead": false,
+    "longRunning": false,
+    "requiresChatSession": false,
+    "bypassesObserverBlock": false,
+    "bypassesApproval": true,
+    "bypassesChatCancel": true
+   },
+   "surfaces": {
+    "cli": {
+     "command": [
+      "notes",
+      "get"
+     ]
+    },
+    "global": {
+     "rpcMethod": "vault/notes/get"
+    },
+    "public": {
+     "rpcMethod": "public/vault/notes/get",
+     "mcpTool": "vault_notes_get"
+    }
+   }
+  },
+  {
+   "id": "vault.note.create",
+   "domain": "vault",
+   "status": "implemented",
+   "description": "Create a note in Vault → Notes sidebar (markdown documentation). NOT for adding SSH hosts — use vault_hosts_create for that.",
+   "policy": {
+    "write": true,
+    "sensitiveRead": false,
+    "longRunning": false,
+    "requiresChatSession": false,
+    "bypassesObserverBlock": false,
+    "bypassesApproval": false,
+    "bypassesChatCancel": false
+   },
+   "surfaces": {
+    "cli": {
+     "command": [
+      "notes",
+      "create"
+     ]
+    },
+    "global": {
+     "rpcMethod": "vault/notes/create"
+    },
+    "public": {
+     "rpcMethod": "public/vault/notes/create",
+     "mcpTool": "vault_notes_create"
+    }
+   }
+  },
+  {
+   "id": "vault.note.update",
+   "domain": "vault",
+   "status": "implemented",
+   "description": "Update an existing Vault → Notes entry by id.",
+   "policy": {
+    "write": true,
+    "sensitiveRead": false,
+    "longRunning": false,
+    "requiresChatSession": false,
+    "bypassesObserverBlock": false,
+    "bypassesApproval": false,
+    "bypassesChatCancel": false
+   },
+   "surfaces": {
+    "cli": {
+     "command": [
+      "notes",
+      "update"
+     ]
+    },
+    "global": {
+     "rpcMethod": "vault/notes/update"
+    },
+    "public": {
+     "rpcMethod": "public/vault/notes/update",
+     "mcpTool": "vault_notes_update"
+    }
+   }
+  },
+  {
+   "id": "vault.note.delete",
+   "domain": "vault",
+   "status": "implemented",
+   "description": "Delete a Vault → Notes entry by id.",
+   "policy": {
+    "write": true,
+    "sensitiveRead": false,
+    "longRunning": false,
+    "requiresChatSession": false,
+    "bypassesObserverBlock": false,
+    "bypassesApproval": false,
+    "bypassesChatCancel": false
+   },
+   "surfaces": {
+    "cli": {
+     "command": [
+      "notes",
+      "delete"
+     ]
+    },
+    "global": {
+     "rpcMethod": "vault/notes/delete"
+    },
+    "public": {
+     "rpcMethod": "public/vault/notes/delete",
+     "mcpTool": "vault_notes_delete"
+    }
+   }
+  },
+  {
+   "id": "vault.note.import",
+   "domain": "vault",
+   "status": "implemented",
+   "description": "Import one or more markdown documents into Vault → Notes. Titles come from an explicit title, the first level-one heading, or the file name. NOT for adding SSH hosts.",
+   "policy": {
+    "write": true,
+    "sensitiveRead": false,
+    "longRunning": false,
+    "requiresChatSession": false,
+    "bypassesObserverBlock": false,
+    "bypassesApproval": false,
+    "bypassesChatCancel": false
+   },
+   "surfaces": {
+    "cli": {
+     "command": [
+      "notes",
+      "import"
+     ]
+    },
+    "global": {
+     "rpcMethod": "vault/notes/import"
+    },
+    "public": {
+     "rpcMethod": "public/vault/notes/import",
+     "mcpTool": "vault_notes_import"
+    }
+   }
+  },
+  {
+   "id": "vault.identity.list",
+   "domain": "vault",
+   "status": "implemented",
+   "description": "List reusable vault identities without passwords, private keys, or passphrases.",
+   "policy": {
+    "write": false,
+    "sensitiveRead": true,
+    "longRunning": false,
+    "requiresChatSession": false,
+    "bypassesObserverBlock": false,
+    "bypassesApproval": true,
+    "bypassesChatCancel": true
+   },
+   "surfaces": {
+    "global": {
+     "rpcMethod": "vault/identities/list"
+    },
+    "public": {
+     "rpcMethod": "public/vault/identities/list",
+     "mcpTool": "vault_identities_list"
+    }
+   }
+  },
+  {
+   "id": "vault.proxyProfile.list",
+   "domain": "vault",
+   "status": "implemented",
+   "description": "List reusable proxy profiles without credentials.",
+   "policy": {
+    "write": false,
+    "sensitiveRead": true,
+    "longRunning": false,
+    "requiresChatSession": false,
+    "bypassesObserverBlock": false,
+    "bypassesApproval": true,
+    "bypassesChatCancel": true
+   },
+   "surfaces": {
+    "global": {
+     "rpcMethod": "vault/proxyProfiles/list"
+    },
+    "public": {
+     "rpcMethod": "public/vault/proxyProfiles/list",
+     "mcpTool": "vault_proxy_profiles_list"
+    }
+   }
+  },
+  {
+   "id": "vault.group.list",
+   "domain": "vault",
+   "status": "implemented",
+   "description": "List vault groups and their safe default settings.",
+   "policy": {
+    "write": false,
+    "sensitiveRead": false,
+    "longRunning": false,
+    "requiresChatSession": false,
+    "bypassesObserverBlock": false,
+    "bypassesApproval": true,
+    "bypassesChatCancel": true
+   },
+   "surfaces": {
+    "global": {
+     "rpcMethod": "vault/groups/list"
+    },
+    "public": {
+     "rpcMethod": "public/vault/groups/list",
+     "mcpTool": "vault_groups_list"
+    }
+   }
+  },
+  {
+   "id": "vault.group.create",
+   "domain": "vault",
+   "status": "implemented",
+   "description": "Create a vault group with optional default connection settings.",
+   "policy": {
+    "write": true,
+    "sensitiveRead": false,
+    "longRunning": false,
+    "requiresChatSession": false,
+    "bypassesObserverBlock": false,
+    "bypassesApproval": false,
+    "bypassesChatCancel": false
+   },
+   "surfaces": {
+    "global": {
+     "rpcMethod": "vault/groups/create"
+    },
+    "public": {
+     "rpcMethod": "public/vault/groups/create",
+     "mcpTool": "vault_groups_create"
+    }
+   }
+  },
+  {
+   "id": "vault.group.update",
+   "domain": "vault",
+   "status": "implemented",
+   "description": "Update or rename a vault group and its default connection settings.",
+   "policy": {
+    "write": true,
+    "sensitiveRead": false,
+    "longRunning": false,
+    "requiresChatSession": false,
+    "bypassesObserverBlock": false,
+    "bypassesApproval": false,
+    "bypassesChatCancel": false
+   },
+   "surfaces": {
+    "global": {
+     "rpcMethod": "vault/groups/update"
+    },
+    "public": {
+     "rpcMethod": "public/vault/groups/update",
+     "mcpTool": "vault_groups_update"
+    }
+   }
+  },
+  {
+   "id": "vault.group.delete",
+   "domain": "vault",
+   "status": "implemented",
+   "description": "Delete a vault group, moving its hosts to the root unless deleteHosts is true.",
+   "policy": {
+    "write": true,
+    "sensitiveRead": false,
+    "longRunning": false,
+    "requiresChatSession": false,
+    "bypassesObserverBlock": false,
+    "bypassesApproval": false,
+    "bypassesChatCancel": false
+   },
+   "surfaces": {
+    "global": {
+     "rpcMethod": "vault/groups/delete"
+    },
+    "public": {
+     "rpcMethod": "public/vault/groups/delete",
+     "mcpTool": "vault_groups_delete"
+    }
+   }
+  },
+  {
+   "id": "vault.snippets.list",
+   "domain": "vault",
+   "status": "implemented",
+   "description": "List code snippets stored in the vault.",
+   "policy": {
+    "write": false,
+    "sensitiveRead": false,
+    "longRunning": false,
+    "requiresChatSession": false,
+    "bypassesObserverBlock": false,
+    "bypassesApproval": true,
+    "bypassesChatCancel": true
+   },
+   "surfaces": {
+    "cli": {
+     "command": [
+      "snippets",
+      "list"
+     ]
+    },
+    "global": {
+     "rpcMethod": "vault/snippets/list"
+    },
+    "public": {
+     "rpcMethod": "public/vault/snippets/list",
+     "mcpTool": "snippets_list"
+    }
+   }
+  },
+  {
+   "id": "vault.snippets.get",
+   "domain": "vault",
+   "status": "implemented",
+   "description": "Get a single code snippet from the vault.",
+   "policy": {
+    "write": false,
+    "sensitiveRead": false,
+    "longRunning": false,
+    "requiresChatSession": false,
+    "bypassesObserverBlock": false,
+    "bypassesApproval": true,
+    "bypassesChatCancel": true
+   },
+   "surfaces": {
+    "cli": {
+     "command": [
+      "snippets",
+      "get"
+     ]
+    },
+    "global": {
+     "rpcMethod": "vault/snippets/get"
+    },
+    "public": {
+     "rpcMethod": "public/vault/snippets/get",
+     "mcpTool": "snippets_get"
+    }
+   }
+  },
+  {
+   "id": "vault.snippets.run",
+   "domain": "vault",
+   "status": "implemented",
+   "description": "Run a vault snippet or automation script in a terminal session. Text snippets paste shell commands; scripts (kind=script) run via the nct JavaScript runtime.",
+   "policy": {
+    "write": true,
+    "sensitiveRead": false,
+    "longRunning": true,
+    "requiresChatSession": true,
+    "bypassesObserverBlock": false,
+    "bypassesApproval": false,
+    "bypassesChatCancel": false
+   },
+   "surfaces": {
+    "cli": {
+     "command": [
+      "snippets",
+      "run"
+     ]
+    },
+    "global": {
+     "rpcMethod": "vault/snippets/run"
+    },
+    "public": {
+     "rpcMethod": "public/vault/snippets/run",
+     "mcpTool": "snippets_run"
+    }
+   }
+  },
+  {
+   "id": "vault.snippets.create",
+   "domain": "vault",
+   "status": "implemented",
+   "description": "Create a vault snippet or automation script (set kind=script for nct automation).",
+   "policy": {
+    "write": true,
+    "sensitiveRead": false,
+    "longRunning": false,
+    "requiresChatSession": false,
+    "bypassesObserverBlock": false,
+    "bypassesApproval": false,
+    "bypassesChatCancel": false
+   },
+   "surfaces": {
+    "cli": {
+     "command": [
+      "snippets",
+      "create"
+     ]
+    },
+    "global": {
+     "rpcMethod": "vault/snippets/create"
+    },
+    "public": {
+     "rpcMethod": "public/vault/snippets/create",
+     "mcpTool": "snippets_create"
+    }
+   }
+  },
+  {
+   "id": "vault.snippets.update",
+   "domain": "vault",
+   "status": "implemented",
+   "description": "Update an existing vault snippet or automation script by id.",
+   "policy": {
+    "write": true,
+    "sensitiveRead": false,
+    "longRunning": false,
+    "requiresChatSession": false,
+    "bypassesObserverBlock": false,
+    "bypassesApproval": false,
+    "bypassesChatCancel": false
+   },
+   "surfaces": {
+    "cli": {
+     "command": [
+      "snippets",
+      "update"
+     ]
+    },
+    "global": {
+     "rpcMethod": "vault/snippets/update"
+    },
+    "public": {
+     "rpcMethod": "public/vault/snippets/update",
+     "mcpTool": "snippets_update"
+    }
+   }
+  },
+  {
+   "id": "vault.snippets.delete",
+   "domain": "vault",
+   "status": "implemented",
+   "description": "Delete a vault snippet or automation script by id.",
+   "policy": {
+    "write": true,
+    "sensitiveRead": false,
+    "longRunning": false,
+    "requiresChatSession": false,
+    "bypassesObserverBlock": false,
+    "bypassesApproval": false,
+    "bypassesChatCancel": false
+   },
+   "surfaces": {
+    "cli": {
+     "command": [
+      "snippets",
+      "delete"
+     ]
+    },
+    "global": {
+     "rpcMethod": "vault/snippets/delete"
+    },
+    "public": {
+     "rpcMethod": "public/vault/snippets/delete",
+     "mcpTool": "snippets_delete"
+    }
+   }
+  },
+  {
+   "id": "vault.scripts.list",
+   "domain": "vault",
+   "status": "implemented",
+   "description": "List automation scripts (kind=script) in the vault.",
+   "policy": {
+    "write": false,
+    "sensitiveRead": false,
+    "longRunning": false,
+    "requiresChatSession": false,
+    "bypassesObserverBlock": false,
+    "bypassesApproval": true,
+    "bypassesChatCancel": true
+   },
+   "surfaces": {
+    "cli": {
+     "command": [
+      "scripts",
+      "list"
+     ]
+    },
+    "global": {
+     "rpcMethod": "vault/scripts/list"
+    },
+    "public": {
+     "rpcMethod": "public/vault/scripts/list",
+     "mcpTool": "scripts_list"
+    }
+   }
+  },
+  {
+   "id": "vault.scripts.get",
+   "domain": "vault",
+   "status": "implemented",
+   "description": "Get a single automation script including JavaScript source.",
+   "policy": {
+    "write": false,
+    "sensitiveRead": false,
+    "longRunning": false,
+    "requiresChatSession": false,
+    "bypassesObserverBlock": false,
+    "bypassesApproval": true,
+    "bypassesChatCancel": true
+   },
+   "surfaces": {
+    "cli": {
+     "command": [
+      "scripts",
+      "get"
+     ]
+    },
+    "global": {
+     "rpcMethod": "vault/scripts/get"
+    },
+    "public": {
+     "rpcMethod": "public/vault/scripts/get",
+     "mcpTool": "scripts_get"
+    }
+   }
+  },
+  {
+   "id": "vault.scripts.create",
+   "domain": "vault",
+   "status": "implemented",
+   "description": "Create an automation script using the nct JavaScript API. Call scripts_reference first when authoring nct automation.",
+   "policy": {
+    "write": true,
+    "sensitiveRead": false,
+    "longRunning": false,
+    "requiresChatSession": false,
+    "bypassesObserverBlock": false,
+    "bypassesApproval": false,
+    "bypassesChatCancel": false
+   },
+   "surfaces": {
+    "cli": {
+     "command": [
+      "scripts",
+      "create"
+     ]
+    },
+    "global": {
+     "rpcMethod": "vault/scripts/create"
+    },
+    "public": {
+     "rpcMethod": "public/vault/scripts/create",
+     "mcpTool": "scripts_create"
+    }
+   }
+  },
+  {
+   "id": "vault.scripts.update",
+   "domain": "vault",
+   "status": "implemented",
+   "description": "Update an automation script by id (partial fields).",
+   "policy": {
+    "write": true,
+    "sensitiveRead": false,
+    "longRunning": false,
+    "requiresChatSession": false,
+    "bypassesObserverBlock": false,
+    "bypassesApproval": false,
+    "bypassesChatCancel": false
+   },
+   "surfaces": {
+    "cli": {
+     "command": [
+      "scripts",
+      "update"
+     ]
+    },
+    "global": {
+     "rpcMethod": "vault/scripts/update"
+    },
+    "public": {
+     "rpcMethod": "public/vault/scripts/update",
+     "mcpTool": "scripts_update"
+    }
+   }
+  },
+  {
+   "id": "vault.scripts.delete",
+   "domain": "vault",
+   "status": "implemented",
+   "description": "Delete an automation script and remove host connect bindings.",
+   "policy": {
+    "write": true,
+    "sensitiveRead": false,
+    "longRunning": false,
+    "requiresChatSession": false,
+    "bypassesObserverBlock": false,
+    "bypassesApproval": false,
+    "bypassesChatCancel": false
+   },
+   "surfaces": {
+    "cli": {
+     "command": [
+      "scripts",
+      "delete"
+     ]
+    },
+    "global": {
+     "rpcMethod": "vault/scripts/delete"
+    },
+    "public": {
+     "rpcMethod": "public/vault/scripts/delete",
+     "mcpTool": "scripts_delete"
+    }
+   }
+  },
+  {
+   "id": "vault.scripts.run",
+   "domain": "vault",
+   "status": "implemented",
+   "description": "Run an automation script in a terminal session via the nct runtime. Set wait=true to block until completion.",
+   "policy": {
+    "write": true,
+    "sensitiveRead": false,
+    "longRunning": true,
+    "requiresChatSession": true,
+    "bypassesObserverBlock": false,
+    "bypassesApproval": false,
+    "bypassesChatCancel": false
+   },
+   "surfaces": {
+    "cli": {
+     "command": [
+      "scripts",
+      "run"
+     ]
+    },
+    "global": {
+     "rpcMethod": "vault/scripts/run"
+    },
+    "public": {
+     "rpcMethod": "public/vault/scripts/run",
+     "mcpTool": "scripts_run"
+    }
+   }
+  },
+  {
+   "id": "vault.scripts.reference",
+   "domain": "vault",
+   "status": "implemented",
+   "description": "Return Netcatty automation script syntax: nct API, triggers, host targeting, and source wrapping rules.",
+   "policy": {
+    "write": false,
+    "sensitiveRead": false,
+    "longRunning": false,
+    "requiresChatSession": false,
+    "bypassesObserverBlock": false,
+    "bypassesApproval": true,
+    "bypassesChatCancel": true
+   },
+   "surfaces": {
+    "cli": {
+     "command": [
+      "scripts",
+      "reference"
+     ]
+    },
+    "global": {
+     "rpcMethod": "vault/scripts/reference"
+    },
+    "public": {
+     "rpcMethod": "public/vault/scripts/reference",
+     "mcpTool": "scripts_reference"
+    }
+   }
+  },
+  {
+   "id": "vault.scripts.runs.list",
+   "domain": "vault",
+   "status": "implemented",
+   "description": "List automation script runs (optionally filter by sessionId).",
+   "policy": {
+    "write": false,
+    "sensitiveRead": false,
+    "longRunning": false,
+    "requiresChatSession": false,
+    "bypassesObserverBlock": false,
+    "bypassesApproval": true,
+    "bypassesChatCancel": true
+   },
+   "surfaces": {
+    "cli": {
+     "command": [
+      "scripts",
+      "runs",
+      "list"
+     ]
+    },
+    "global": {
+     "rpcMethod": "vault/scripts/runs/list"
+    },
+    "public": {
+     "rpcMethod": "public/vault/scripts/runs/list",
+     "mcpTool": "scripts_runs_list"
+    }
+   }
+  },
+  {
+   "id": "vault.scripts.run.stop",
+   "domain": "vault",
+   "status": "implemented",
+   "description": "Stop a running automation script by runId.",
+   "policy": {
+    "write": true,
+    "sensitiveRead": false,
+    "longRunning": false,
+    "requiresChatSession": true,
+    "bypassesObserverBlock": false,
+    "bypassesApproval": false,
+    "bypassesChatCancel": false
+   },
+   "surfaces": {
+    "cli": {
+     "command": [
+      "scripts",
+      "run",
+      "stop"
+     ]
+    },
+    "global": {
+     "rpcMethod": "vault/scripts/run/stop"
+    },
+    "public": {
+     "rpcMethod": "public/vault/scripts/run/stop",
+     "mcpTool": "scripts_run_stop"
+    }
+   }
+  },
+  {
+   "id": "vault.scripts.run.pause",
+   "domain": "vault",
+   "status": "implemented",
+   "description": "Pause a running automation script by runId.",
+   "policy": {
+    "write": true,
+    "sensitiveRead": false,
+    "longRunning": false,
+    "requiresChatSession": true,
+    "bypassesObserverBlock": false,
+    "bypassesApproval": false,
+    "bypassesChatCancel": false
+   },
+   "surfaces": {
+    "cli": {
+     "command": [
+      "scripts",
+      "run",
+      "pause"
+     ]
+    },
+    "global": {
+     "rpcMethod": "vault/scripts/run/pause"
+    },
+    "public": {
+     "rpcMethod": "public/vault/scripts/run/pause",
+     "mcpTool": "scripts_run_pause"
+    }
+   }
+  },
+  {
+   "id": "vault.scripts.run.resume",
+   "domain": "vault",
+   "status": "implemented",
+   "description": "Resume a paused automation script by runId.",
+   "policy": {
+    "write": true,
+    "sensitiveRead": false,
+    "longRunning": false,
+    "requiresChatSession": true,
+    "bypassesObserverBlock": false,
+    "bypassesApproval": false,
+    "bypassesChatCancel": false
+   },
+   "surfaces": {
+    "cli": {
+     "command": [
+      "scripts",
+      "run",
+      "resume"
+     ]
+    },
+    "global": {
+     "rpcMethod": "vault/scripts/run/resume"
+    },
+    "public": {
+     "rpcMethod": "public/vault/scripts/run/resume",
+     "mcpTool": "scripts_run_resume"
+    }
+   }
+  },
+  {
+   "id": "vault.scripts.targets.set",
+   "domain": "vault",
+   "status": "implemented",
+   "description": "Set host IDs, dynamic group paths, or targetsAllHosts for an automation script. onConnect host IDs sync host connect queues.",
+   "policy": {
+    "write": true,
+    "sensitiveRead": false,
+    "longRunning": false,
+    "requiresChatSession": false,
+    "bypassesObserverBlock": false,
+    "bypassesApproval": false,
+    "bypassesChatCancel": false
+   },
+   "surfaces": {
+    "cli": {
+     "command": [
+      "scripts",
+      "targets",
+      "set"
+     ]
+    },
+    "global": {
+     "rpcMethod": "vault/scripts/targets/set"
+    },
+    "public": {
+     "rpcMethod": "public/vault/scripts/targets/set",
+     "mcpTool": "scripts_targets_set"
+    }
+   }
+  },
+  {
+   "id": "vault.host.connectScripts.list",
+   "domain": "vault",
+   "status": "implemented",
+   "description": "List resolved onConnect automation scripts for a host (global, dynamic group, then host queue).",
+   "policy": {
+    "write": false,
+    "sensitiveRead": false,
+    "longRunning": false,
+    "requiresChatSession": false,
+    "bypassesObserverBlock": false,
+    "bypassesApproval": true,
+    "bypassesChatCancel": true
+   },
+   "surfaces": {
+    "cli": {
+     "command": [
+      "vault",
+      "host",
+      "connect-scripts",
+      "list"
+     ]
+    },
+    "global": {
+     "rpcMethod": "vault/host/connectScripts/list"
+    },
+    "public": {
+     "rpcMethod": "public/vault/hostConnectScripts/list",
+     "mcpTool": "host_connect_scripts_list"
+    }
+   }
+  },
+  {
+   "id": "vault.host.connectScripts.set",
+   "domain": "vault",
+   "status": "implemented",
+   "description": "Set ordered onConnect script IDs for a host (host-specific queue; globals run separately).",
+   "policy": {
+    "write": true,
+    "sensitiveRead": false,
+    "longRunning": false,
+    "requiresChatSession": false,
+    "bypassesObserverBlock": false,
+    "bypassesApproval": false,
+    "bypassesChatCancel": false
+   },
+   "surfaces": {
+    "cli": {
+     "command": [
+      "vault",
+      "host",
+      "connect-scripts",
+      "set"
+     ]
+    },
+    "global": {
+     "rpcMethod": "vault/host/connectScripts/set"
+    },
+    "public": {
+     "rpcMethod": "public/vault/hostConnectScripts/set",
+     "mcpTool": "host_connect_scripts_set"
+    }
+   }
+  },
+  {
+   "id": "portforward.rules.list",
+   "domain": "portforward",
+   "status": "implemented",
+   "description": "List persisted port forwarding rules.",
+   "policy": {
+    "write": false,
+    "sensitiveRead": false,
+    "longRunning": false,
+    "requiresChatSession": false,
+    "bypassesObserverBlock": false,
+    "bypassesApproval": true,
+    "bypassesChatCancel": true
+   },
+   "surfaces": {
+    "cli": {
+     "command": [
+      "portforward",
+      "rules",
+      "list"
+     ]
+    },
+    "global": {
+     "rpcMethod": "portforward/rules/list"
+    },
+    "public": {
+     "rpcMethod": "public/portforward/rules/list",
+     "mcpTool": "portforward_rules_list"
+    }
+   }
+  },
+  {
+   "id": "portforward.tunnels.list",
+   "domain": "portforward",
+   "status": "implemented",
+   "description": "List active port forwarding tunnels.",
+   "policy": {
+    "write": false,
+    "sensitiveRead": false,
+    "longRunning": false,
+    "requiresChatSession": false,
+    "bypassesObserverBlock": false,
+    "bypassesApproval": true,
+    "bypassesChatCancel": true
+   },
+   "surfaces": {
+    "cli": {
+     "command": [
+      "portforward",
+      "tunnels",
+      "list"
+     ]
+    },
+    "global": {
+     "rpcMethod": "portforward/tunnels/list"
+    },
+    "public": {
+     "rpcMethod": "public/portforward/tunnels/list",
+     "mcpTool": "portforward_tunnels_list"
+    }
+   }
+  },
+  {
+   "id": "portforward.rules.create",
+   "domain": "portforward",
+   "status": "implemented",
+   "description": "Create a persisted port forwarding rule.",
+   "policy": {
+    "write": true,
+    "sensitiveRead": false,
+    "longRunning": false,
+    "requiresChatSession": false,
+    "bypassesObserverBlock": false,
+    "bypassesApproval": false,
+    "bypassesChatCancel": false
+   },
+   "surfaces": {
+    "global": {
+     "rpcMethod": "portforward/rules/create"
+    },
+    "public": {
+     "rpcMethod": "public/portforward/rules/create",
+     "mcpTool": "portforward_rules_create"
+    }
+   }
+  },
+  {
+   "id": "portforward.rules.update",
+   "domain": "portforward",
+   "status": "implemented",
+   "description": "Update a persisted port forwarding rule.",
+   "policy": {
+    "write": true,
+    "sensitiveRead": false,
+    "longRunning": false,
+    "requiresChatSession": false,
+    "bypassesObserverBlock": false,
+    "bypassesApproval": false,
+    "bypassesChatCancel": false
+   },
+   "surfaces": {
+    "global": {
+     "rpcMethod": "portforward/rules/update"
+    },
+    "public": {
+     "rpcMethod": "public/portforward/rules/update",
+     "mcpTool": "portforward_rules_update"
+    }
+   }
+  },
+  {
+   "id": "portforward.rules.duplicate",
+   "domain": "portforward",
+   "status": "implemented",
+   "description": "Duplicate a persisted port forwarding rule.",
+   "policy": {
+    "write": true,
+    "sensitiveRead": false,
+    "longRunning": false,
+    "requiresChatSession": false,
+    "bypassesObserverBlock": false,
+    "bypassesApproval": false,
+    "bypassesChatCancel": false
+   },
+   "surfaces": {
+    "global": {
+     "rpcMethod": "portforward/rules/duplicate"
+    },
+    "public": {
+     "rpcMethod": "public/portforward/rules/duplicate",
+     "mcpTool": "portforward_rules_duplicate"
+    }
+   }
+  },
+  {
+   "id": "portforward.rules.delete",
+   "domain": "portforward",
+   "status": "implemented",
+   "description": "Delete a persisted port forwarding rule.",
+   "policy": {
+    "write": true,
+    "sensitiveRead": false,
+    "longRunning": false,
+    "requiresChatSession": false,
+    "bypassesObserverBlock": false,
+    "bypassesApproval": false,
+    "bypassesChatCancel": false
+   },
+   "surfaces": {
+    "global": {
+     "rpcMethod": "portforward/rules/delete"
+    },
+    "public": {
+     "rpcMethod": "public/portforward/rules/delete",
+     "mcpTool": "portforward_rules_delete"
+    }
+   }
+  },
+  {
+   "id": "portforward.start",
+   "domain": "portforward",
+   "status": "implemented",
+   "description": "Start a port forwarding tunnel for a rule.",
+   "policy": {
+    "write": true,
+    "sensitiveRead": false,
+    "longRunning": true,
+    "requiresChatSession": false,
+    "bypassesObserverBlock": false,
+    "bypassesApproval": false,
+    "bypassesChatCancel": false
+   },
+   "surfaces": {
+    "cli": {
+     "command": [
+      "portforward",
+      "start"
+     ]
+    },
+    "global": {
+     "rpcMethod": "portforward/start"
+    },
+    "public": {
+     "rpcMethod": "public/portforward/start",
+     "mcpTool": "portforward_start"
+    }
+   }
+  },
+  {
+   "id": "portforward.stop",
+   "domain": "portforward",
+   "status": "implemented",
+   "description": "Stop an active port forwarding tunnel.",
+   "policy": {
+    "write": true,
+    "sensitiveRead": false,
+    "longRunning": false,
+    "requiresChatSession": false,
+    "bypassesObserverBlock": false,
+    "bypassesApproval": false,
+    "bypassesChatCancel": false
+   },
+   "surfaces": {
+    "cli": {
+     "command": [
+      "portforward",
+      "stop"
+     ]
+    },
+    "global": {
+     "rpcMethod": "portforward/stop"
+    },
+    "public": {
+     "rpcMethod": "public/portforward/stop",
+     "mcpTool": "portforward_stop"
+    }
+   }
+  },
+  {
+   "id": "harness.tool_output.read",
+   "domain": "harness",
+   "status": "implemented",
+   "description": "Read stored tool output by handle id when a prior tool result was truncated.",
+   "policy": {
+    "write": false,
+    "sensitiveRead": false,
+    "longRunning": false,
+    "requiresChatSession": true,
+    "bypassesObserverBlock": false,
+    "bypassesApproval": true,
+    "bypassesChatCancel": true
+   },
+   "surfaces": {
+    "catty": {
+     "toolName": "tool_output_read"
+    }
+   }
+  },
+  {
+   "id": "harness.workspace.get_info",
+   "domain": "harness",
+   "status": "implemented",
+   "description": "Get information about the current workspace, including all terminal sessions and their connection status.",
+   "policy": {
+    "write": false,
+    "sensitiveRead": false,
+    "longRunning": false,
+    "requiresChatSession": true,
+    "bypassesObserverBlock": false,
+    "bypassesApproval": true,
+    "bypassesChatCancel": true
+   },
+   "surfaces": {
+    "catty": {
+     "toolName": "workspace_get_info"
+    }
+   }
+  },
+  {
+   "id": "harness.workspace.get_session_info",
+   "domain": "harness",
+   "status": "implemented",
+   "description": "Get detailed information about a specific terminal or SFTP session.",
+   "policy": {
+    "write": false,
+    "sensitiveRead": false,
+    "longRunning": false,
+    "requiresChatSession": true,
+    "bypassesObserverBlock": false,
+    "bypassesApproval": true,
+    "bypassesChatCancel": true
+   },
+   "surfaces": {
+    "catty": {
+     "toolName": "workspace_get_session_info"
+    }
+   }
+  },
+  {
+   "id": "harness.terminal.read_context",
+   "agentKinds": [
+    "sidebar",
+    "global"
+   ],
+   "domain": "harness",
+   "status": "implemented",
+   "description": "Read a bounded slice of the current terminal screen or scrollback from the active AI scope.",
+   "policy": {
+    "write": false,
+    "sensitiveRead": false,
+    "longRunning": false,
+    "requiresChatSession": true,
+    "bypassesObserverBlock": false,
+    "bypassesApproval": true,
+    "bypassesChatCancel": true
+   },
+   "surfaces": {
+    "catty": {
+     "toolName": "terminal_read_context"
+    },
+    "builtin": {
+     "rpcMethod": "netcatty/readContext",
+     "mcpTool": "terminal_read_context"
+    }
+   }
+  },
+  {
+   "id": "harness.web.search",
+   "domain": "harness",
+   "status": "implemented",
+   "description": "Search the web for current information when configured in AI settings.",
+   "policy": {
+    "write": false,
+    "sensitiveRead": false,
+    "longRunning": false,
+    "requiresChatSession": true,
+    "bypassesObserverBlock": false,
+    "bypassesApproval": true,
+    "bypassesChatCancel": true
+   },
+   "surfaces": {
+    "catty": {
+     "toolName": "web_search"
+    }
+   }
+  },
+  {
+   "id": "harness.url.fetch",
+   "domain": "harness",
+   "status": "implemented",
+   "description": "Fetch and read the content of an HTTPS URL.",
+   "policy": {
+    "write": false,
+    "sensitiveRead": false,
+    "longRunning": false,
+    "requiresChatSession": true,
+    "bypassesObserverBlock": false,
+    "bypassesApproval": true,
+    "bypassesChatCancel": true
+   },
+   "surfaces": {
+    "catty": {
+     "toolName": "url_fetch"
+    }
+   }
+  }
+ ],
+ "toolInputFields": {
+  "terminal.execute": {
+   "sessionId": {
+    "type": "string",
+    "description": "The terminal session ID to execute on."
+   },
+   "command": {
+    "type": "string",
+    "description": "The shell command to execute in the target session."
+   }
+  },
+  "terminal.start": {
+   "sessionId": {
+    "type": "string",
+    "description": "The terminal session ID to start a long-running command on."
+   },
+   "command": {
+    "type": "string",
+    "description": "The command to start in the target session."
+   }
+  },
+  "terminal.poll": {
+   "jobId": {
+    "type": "string",
+    "description": "The background job ID returned by terminal_start."
+   },
+   "offset": {
+    "type": "number",
+    "optional": true,
+    "description": "Character offset from a previous poll (default 0)."
+   }
+  },
+  "terminal.stop": {
+   "jobId": {
+    "type": "string",
+    "description": "The background job ID returned by terminal_start."
+   }
+  },
+  "session.environment": {},
+  "session.reconnect": {
+   "sessionId": {
+    "type": "string",
+    "description": "An existing disconnected terminal session ID in the current granted scope."
+   }
+  },
+  "session.recover": {
+   "sessionId": {
+    "type": "string",
+    "description": "The existing terminal session ID in the current granted scope. Recovery preserves this session and never replays commands."
+   }
+  },
+  "session.close": {
+   "sessionId": {
+    "type": "string",
+    "description": "The session ID returned by host_open."
+   }
+  },
+  "attachment.list": {},
+  "attachment.read": {
+   "filePath": {
+    "type": "string",
+    "optional": true,
+    "description": "Exact local attachment path."
+   },
+   "filename": {
+    "type": "string",
+    "optional": true,
+    "description": "Attachment filename from list_attachments."
+   }
+  },
+  "sftp.list": {
+   "sessionId": {
+    "type": "string",
+    "description": "SFTP session ID."
+   },
+   "path": {
+    "type": "string",
+    "description": "Remote directory path."
+   }
+  },
+  "sftp.read": {
+   "sessionId": {
+    "type": "string",
+    "description": "SFTP session ID."
+   },
+   "path": {
+    "type": "string",
+    "description": "Remote file path to read."
+   }
+  },
+  "sftp.stat": {
+   "sessionId": {
+    "type": "string",
+    "description": "SFTP session ID."
+   },
+   "path": {
+    "type": "string",
+    "description": "Remote path to stat."
+   }
+  },
+  "sftp.home": {
+   "sessionId": {
+    "type": "string",
+    "description": "SFTP session ID."
+   }
+  },
+  "sftp.write": {
+   "sessionId": {
+    "type": "string",
+    "description": "SFTP session ID."
+   },
+   "path": {
+    "type": "string",
+    "description": "Remote file path to write."
+   },
+   "content": {
+    "type": "string",
+    "description": "File content to write."
+   }
+  },
+  "sftp.download": {
+   "sessionId": {
+    "type": "string",
+    "description": "SFTP session ID."
+   },
+   "remotePath": {
+    "type": "string",
+    "description": "Remote file path to download."
+   },
+   "localPath": {
+    "type": "string",
+    "description": "Local destination path."
+   }
+  },
+  "sftp.upload": {
+   "sessionId": {
+    "type": "string",
+    "description": "SFTP session ID."
+   },
+   "localPath": {
+    "type": "string",
+    "description": "Local file path to upload."
+   },
+   "remotePath": {
+    "type": "string",
+    "description": "Remote destination path."
+   }
+  },
+  "sftp.mkdir": {
+   "sessionId": {
+    "type": "string",
+    "description": "SFTP session ID."
+   },
+   "path": {
+    "type": "string",
+    "description": "Remote directory path to create."
+   }
+  },
+  "sftp.delete": {
+   "sessionId": {
+    "type": "string",
+    "description": "SFTP session ID."
+   },
+   "path": {
+    "type": "string",
+    "description": "Remote file or directory path to delete."
+   }
+  },
+  "sftp.rename": {
+   "sessionId": {
+    "type": "string",
+    "description": "SFTP session ID."
+   },
+   "oldPath": {
+    "type": "string",
+    "description": "Current remote path."
+   },
+   "newPath": {
+    "type": "string",
+    "description": "New remote path."
+   }
+  },
+  "sftp.chmod": {
+   "sessionId": {
+    "type": "string",
+    "description": "SFTP session ID."
+   },
+   "path": {
+    "type": "string",
+    "description": "Remote file path."
+   },
+   "mode": {
+    "type": "string",
+    "description": "Octal permission mode (e.g. 755)."
+   }
+  },
+  "vault.host.get": {
+   "hostId": {
+    "type": "string",
+    "description": "Vault host ID."
+   }
+  },
+  "vault.host.list": {},
+  "vault.host.open": {
+   "hostId": {
+    "type": "string",
+    "description": "Vault host ID to open. Use vault_hosts_list / host_get to resolve id from label or hostname."
+   },
+   "workspaceId": {
+    "type": "string",
+    "optional": true,
+    "description": "Target workspace ID or current (active workspace). Applies to newly opened sessions; reused sessions retain their placement. Omit for a standalone tab."
+   },
+   "newTab": {
+    "type": "string",
+    "optional": true,
+    "description": "true or false. Force a brand-new tab even when a session for this host already exists. Default false — reuse the existing session."
+   }
+  },
+  "vault.hosts.create": {
+   "hosts": {
+    "type": "string",
+    "description": "JSON array of host objects you extracted from the user's text. Each object: hostname (required; host/ip aliases accepted), label (name alias accepted), port, username, password, keyPath or keypath (local private-key file path), passphrase (saved passphrase for that key path), group, tags (array or comma-separated string), notes (Host Details remarks — NOT Vault sidebar Notes), protocol (ssh|telnet|local), os (linux|windows|macos)."
+   },
+   "dryRun": {
+    "type": "string",
+    "optional": true,
+    "description": "Set to true to validate and preview without writing to the vault."
+   },
+   "skipDuplicates": {
+    "type": "string",
+    "optional": true,
+    "description": "Set to false to create even when a matching host already exists (default true)."
+   }
+  },
+  "vault.host.update": {
+   "hostId": {
+    "type": "string",
+    "description": "Vault host ID from vault_hosts_list."
+   },
+   "label": {
+    "type": "string",
+    "optional": true,
+    "description": "New display name."
+   },
+   "name": {
+    "type": "string",
+    "optional": true,
+    "description": "Alias for label."
+   },
+   "hostname": {
+    "type": "string",
+    "optional": true,
+    "description": "New hostname or IP address."
+   },
+   "host": {
+    "type": "string",
+    "optional": true,
+    "description": "Alias for hostname."
+   },
+   "ip": {
+    "type": "string",
+    "optional": true,
+    "description": "Alias for hostname."
+   },
+   "port": {
+    "type": "number",
+    "optional": true,
+    "description": "New connection port (1-65535)."
+   },
+   "username": {
+    "type": "string",
+    "optional": true,
+    "description": "New login username. Clears any reusable identity binding so this value takes effect."
+   },
+   "password": {
+    "type": "string",
+    "optional": true,
+    "description": "New password without changing key-based login. Password identities are detached so the new value takes effect. Empty string clears it and blocks inherited saved passwords. Pair with keyPath set to an empty string to switch from key login to password login."
+   },
+   "savePassword": {
+    "type": "string",
+    "optional": true,
+    "description": "Set to true or false to enable or disable saved passwords. Pass true when setting a new password after clearing one."
+   },
+   "keyPath": {
+    "type": "string",
+    "optional": true,
+    "description": "Local private-key file path. Empty string clears and blocks an inherited path."
+   },
+   "keypath": {
+    "type": "string",
+    "optional": true,
+    "description": "Alias for keyPath."
+   },
+   "passphrase": {
+    "type": "string",
+    "optional": true,
+    "description": "Saved passphrase for the host's local private-key path. Empty string clears the saved passphrase."
+   },
+   "group": {
+    "type": "string",
+    "optional": true,
+    "description": "New group path. Empty string moves the host to the root."
+   },
+   "tags": {
+    "type": "string",
+    "optional": true,
+    "description": "JSON array or comma-separated tag names. Empty string clears tags."
+   },
+   "notes": {
+    "type": "string",
+    "optional": true,
+    "description": "Host Details remarks. Empty string clears notes."
+   },
+   "protocol": {
+    "type": "string",
+    "optional": true,
+    "description": "New protocol: ssh, telnet, local, or serial."
+   },
+   "os": {
+    "type": "string",
+    "optional": true,
+    "description": "Operating system override: auto (default), linux, windows, macos, freebsd, or unknown. Use auto to use detected system information; network device mode is separate."
+   },
+   "identityId": {
+    "type": "string",
+    "optional": true,
+    "description": "Reusable identity ID from vault_identities_list. Empty string detaches the identity."
+   },
+   "jumpHostIds": {
+    "type": "string",
+    "optional": true,
+    "description": "JSON array of vault host IDs in jump order. Empty array clears the chain."
+   },
+   "proxyProfileId": {
+    "type": "string",
+    "optional": true,
+    "description": "Reusable proxy ID from vault_proxy_profiles_list. Empty string clears it."
+   },
+   "startupCommand": {
+    "type": "string",
+    "optional": true,
+    "description": "Command to run after connecting. Empty string clears it."
+   },
+   "startupCommandRunMode": {
+    "type": "string",
+    "optional": true,
+    "description": "paste or lineDelay."
+   },
+   "environmentVariables": {
+    "type": "string",
+    "optional": true,
+    "description": "JSON object or array of {name,value} entries. Empty object clears them."
+   },
+   "moshEnabled": {
+    "type": "string",
+    "optional": true,
+    "description": "true or false."
+   },
+   "moshServerPath": {
+    "type": "string",
+    "optional": true,
+    "description": "Optional mosh-server path."
+   },
+   "etEnabled": {
+    "type": "string",
+    "optional": true,
+    "description": "true or false."
+   },
+   "etPort": {
+    "type": "number",
+    "optional": true,
+    "description": "Eternal Terminal server port."
+   },
+   "serialConfig": {
+    "type": "string",
+    "optional": true,
+    "description": "JSON object for serial connections: path, baudRate, and optional dataBits, stopBits, parity, flowControl, localEcho, lineMode, backspaceBehavior (default or ctrl-h), byteOrientedBackspace (boolean, default false; enable only for devices that delete bytes rather than characters). Existing backspaceBehavior and byteOrientedBackspace are preserved when omitted."
+   }
+  },
+  "vault.host.delete": {
+   "hostId": {
+    "type": "string",
+    "description": "Vault host ID from vault_hosts_list."
+   }
+  },
+  "vault.host.import": {
+   "format": {
+    "type": "string",
+    "description": "Import format: csv, putty, mobaxterm, securecrt, finalshell, ssh_config, or auto to detect from text."
+   },
+   "text": {
+    "type": "string",
+    "description": "Exported host data text to import."
+   },
+   "dryRun": {
+    "type": "string",
+    "optional": true,
+    "description": "Set to true to parse and preview without writing to the vault."
+   },
+   "skipDuplicates": {
+    "type": "string",
+    "optional": true,
+    "description": "Set to false to import even when a matching host already exists (default true)."
+   },
+   "fileName": {
+    "type": "string",
+    "optional": true,
+    "description": "Optional source file name (helps SecureCRT .ini parsing)."
+   }
+  },
+  "vault.host.notes.get": {
+   "hostId": {
+    "type": "string",
+    "description": "Vault host ID."
+   }
+  },
+  "vault.host.notes.set": {
+   "hostId": {
+    "type": "string",
+    "description": "Vault host ID."
+   },
+   "notes": {
+    "type": "string",
+    "description": "Host metadata notes (Host Details — not Vault sidebar Notes)."
+   }
+  },
+  "vault.note.list": {},
+  "vault.note.get": {
+   "noteId": {
+    "type": "string",
+    "description": "Vault note ID from vault_notes_list."
+   },
+   "offset": {
+    "type": "number",
+    "optional": true,
+    "description": "Zero-based UTF-16 offset; default 0. Continue with returned nextOffset."
+   },
+   "maxChars": {
+    "type": "number",
+    "optional": true,
+    "description": "Maximum excerpt length in UTF-16 units, at least 2; default and hard cap 6000."
+   },
+   "query": {
+    "type": "string",
+    "optional": true,
+    "description": "Optional case-sensitive literal search, 1-200 UTF-16 units. Returns an excerpt starting at the next match at/after offset; matchOffset=null means no match. Keep query when continuing search."
+   },
+   "expectedUpdatedAt": {
+    "type": "number",
+    "optional": true,
+    "description": "Pass note.updatedAt from the first read on subsequent reads to detect changes; restart if it changed."
+   }
+  },
+  "vault.note.create": {
+   "title": {
+    "type": "string",
+    "description": "Note title shown in Vault → Notes."
+   },
+   "content": {
+    "type": "string",
+    "allowEmpty": true,
+    "description": "Markdown note body. An empty string creates an empty note."
+   },
+   "group": {
+    "type": "string",
+    "optional": true,
+    "description": "Optional folder path (e.g. infra/prod)."
+   },
+   "linkedHostIds": {
+    "type": "string",
+    "optional": true,
+    "description": "Optional JSON array of vault host IDs to link."
+   },
+   "tags": {
+    "type": "string",
+    "optional": true,
+    "description": "Optional JSON array of tag strings."
+   }
+  },
+  "vault.note.update": {
+   "noteId": {
+    "type": "string",
+    "description": "Vault note ID to update."
+   },
+   "title": {
+    "type": "string",
+    "optional": true,
+    "description": "New title."
+   },
+   "content": {
+    "type": "string",
+    "optional": true,
+    "allowEmpty": true,
+    "description": "New markdown body. An empty string clears the body."
+   },
+   "group": {
+    "type": "string",
+    "optional": true,
+    "allowEmpty": true,
+    "description": "New folder path. An empty string clears the folder."
+   },
+   "linkedHostIds": {
+    "type": "string",
+    "optional": true,
+    "description": "Optional JSON array of vault host IDs to link."
+   },
+   "tags": {
+    "type": "string",
+    "optional": true,
+    "description": "Optional JSON array of tag strings."
+   }
+  },
+  "vault.note.delete": {
+   "noteId": {
+    "type": "string",
+    "description": "Vault note ID to delete."
+   }
+  },
+  "vault.note.import": {
+   "content": {
+    "type": "string",
+    "optional": true,
+    "allowEmpty": true,
+    "description": "Markdown body for a single document. An empty string is valid. Omit when documents is set."
+   },
+   "fileName": {
+    "type": "string",
+    "optional": true,
+    "description": "Source file name for a single document, such as runbook.md. Used when the body has no heading."
+   },
+   "title": {
+    "type": "string",
+    "optional": true,
+    "description": "Optional title override for a single document. Otherwise the first level-one heading or file name is used."
+   },
+   "documents": {
+    "type": "string",
+    "optional": true,
+    "description": "JSON array of {fileName, content, title?} for a batch import. Do not combine with content."
+   },
+   "group": {
+    "type": "string",
+    "optional": true,
+    "description": "Optional folder path applied to every imported note."
+   }
+  },
+  "vault.identity.list": {},
+  "vault.proxyProfile.list": {},
+  "vault.group.list": {},
+  "vault.group.create": {
+   "path": {
+    "type": "string",
+    "description": "New group path, for example prod/web."
+   },
+   "defaults": {
+    "type": "string",
+    "optional": true,
+    "description": "JSON object of group defaults: username, identityId, proxyProfileId, jumpHostIds, startupCommand, environmentVariables, moshEnabled, moshServerPath, etEnabled, etPort."
+   }
+  },
+  "vault.group.update": {
+   "path": {
+    "type": "string",
+    "description": "Existing group path."
+   },
+   "newPath": {
+    "type": "string",
+    "optional": true,
+    "description": "Optional replacement path to rename or move the group and descendants."
+   },
+   "defaults": {
+    "type": "string",
+    "optional": true,
+    "description": "JSON object containing only group defaults to change."
+   }
+  },
+  "vault.group.delete": {
+   "path": {
+    "type": "string",
+    "description": "Group path to delete, including descendants."
+   },
+   "deleteHosts": {
+    "type": "string",
+    "optional": true,
+    "description": "Set true to delete hosts in the group; default moves them to the root."
+   }
+  },
+  "vault.snippets.list": {},
+  "vault.snippets.get": {
+   "snippetId": {
+    "type": "string",
+    "description": "Snippet ID."
+   }
+  },
+  "vault.snippets.run": {
+   "snippetId": {
+    "type": "string",
+    "description": "Snippet ID to run."
+   },
+   "sessionId": {
+    "type": "string",
+    "description": "Terminal session ID to execute on."
+   },
+   "variables": {
+    "type": "string",
+    "optional": true,
+    "description": "JSON object of snippet variable values."
+   },
+   "wait": {
+    "type": "string",
+    "optional": true,
+    "description": "Set to true to wait for script completion when kind=script."
+   }
+  },
+  "vault.snippets.create": {
+   "label": {
+    "type": "string",
+    "description": "Snippet or script label."
+   },
+   "content": {
+    "type": "string",
+    "description": "Snippet command text or script JavaScript source."
+   },
+   "kind": {
+    "type": "string",
+    "optional": true,
+    "description": "snippet (default) or script for nct automation."
+   },
+   "tags": {
+    "type": "string",
+    "optional": true,
+    "description": "Optional JSON array of tag strings."
+   },
+   "targets": {
+    "type": "string",
+    "optional": true,
+    "description": "Optional JSON array of vault host IDs."
+   },
+   "targetGroups": {
+    "type": "string",
+    "optional": true,
+    "description": "Optional JSON array of dynamic vault group paths."
+   },
+   "targetsAllHosts": {
+    "type": "string",
+    "optional": true,
+    "description": "Set true to target all connectable hosts."
+   },
+   "package": {
+    "type": "string",
+    "optional": true,
+    "description": "Optional vault package path."
+   },
+   "shortkey": {
+    "type": "string",
+    "optional": true,
+    "description": "Optional keyboard shortcut."
+   },
+   "noAutoRun": {
+    "type": "string",
+    "optional": true,
+    "description": "For text snippets: paste without pressing Enter."
+   },
+   "multiLineRunMode": {
+    "type": "string",
+    "optional": true,
+    "description": "For multi-line text snippets: paste (default) or lineDelay."
+   },
+   "language": {
+    "type": "string",
+    "optional": true,
+    "description": "javascript or python (UI label only; runtime is JS)."
+   },
+   "description": {
+    "type": "string",
+    "optional": true,
+    "description": "Optional script description."
+   },
+   "trigger": {
+    "type": "string",
+    "optional": true,
+    "description": "manual, onConnect, or onOutput (scripts)."
+   },
+   "triggerPattern": {
+    "type": "string",
+    "optional": true,
+    "description": "Regex when trigger=onOutput."
+   }
+  },
+  "vault.snippets.update": {
+   "snippetId": {
+    "type": "string",
+    "description": "Snippet ID to update."
+   },
+   "label": {
+    "type": "string",
+    "optional": true,
+    "description": "New label."
+   },
+   "content": {
+    "type": "string",
+    "optional": true,
+    "description": "New command or script source."
+   },
+   "kind": {
+    "type": "string",
+    "optional": true,
+    "description": "snippet or script."
+   },
+   "tags": {
+    "type": "string",
+    "optional": true,
+    "description": "Optional JSON array of tag strings."
+   },
+   "targets": {
+    "type": "string",
+    "optional": true,
+    "description": "Optional JSON array of vault host IDs."
+   },
+   "targetGroups": {
+    "type": "string",
+    "optional": true,
+    "description": "Optional JSON array of dynamic vault group paths."
+   },
+   "targetsAllHosts": {
+    "type": "string",
+    "optional": true,
+    "description": "Set true to target all connectable hosts."
+   },
+   "package": {
+    "type": "string",
+    "optional": true,
+    "description": "Optional vault package path."
+   },
+   "shortkey": {
+    "type": "string",
+    "optional": true,
+    "description": "Optional keyboard shortcut."
+   },
+   "noAutoRun": {
+    "type": "string",
+    "optional": true,
+    "description": "For text snippets: paste without pressing Enter."
+   },
+   "multiLineRunMode": {
+    "type": "string",
+    "optional": true,
+    "description": "For multi-line text snippets: paste (default) or lineDelay."
+   },
+   "language": {
+    "type": "string",
+    "optional": true,
+    "description": "javascript or python."
+   },
+   "description": {
+    "type": "string",
+    "optional": true,
+    "description": "Optional script description."
+   },
+   "trigger": {
+    "type": "string",
+    "optional": true,
+    "description": "manual, onConnect, or onOutput."
+   },
+   "triggerPattern": {
+    "type": "string",
+    "optional": true,
+    "description": "Regex when trigger=onOutput."
+   }
+  },
+  "vault.snippets.delete": {
+   "snippetId": {
+    "type": "string",
+    "description": "Snippet ID to delete."
+   }
+  },
+  "vault.scripts.list": {},
+  "vault.scripts.get": {
+   "scriptId": {
+    "type": "string",
+    "description": "Automation script ID."
+   }
+  },
+  "vault.scripts.create": {
+   "label": {
+    "type": "string",
+    "description": "Script label."
+   },
+   "content": {
+    "type": "string",
+    "description": "JavaScript automation source using nct.* API."
+   },
+   "tags": {
+    "type": "string",
+    "optional": true,
+    "description": "Optional JSON array of tag strings."
+   },
+   "targets": {
+    "type": "string",
+    "optional": true,
+    "description": "Optional JSON array of vault host IDs."
+   },
+   "targetGroups": {
+    "type": "string",
+    "optional": true,
+    "description": "Optional JSON array of dynamic vault group paths."
+   },
+   "targetsAllHosts": {
+    "type": "string",
+    "optional": true,
+    "description": "Set true to target all connectable hosts."
+   },
+   "package": {
+    "type": "string",
+    "optional": true,
+    "description": "Optional vault package path."
+   },
+   "description": {
+    "type": "string",
+    "optional": true,
+    "description": "Optional script description."
+   },
+   "trigger": {
+    "type": "string",
+    "optional": true,
+    "description": "manual (default), onConnect, or onOutput."
+   },
+   "triggerPattern": {
+    "type": "string",
+    "optional": true,
+    "description": "Regex when trigger=onOutput."
+   }
+  },
+  "vault.scripts.update": {
+   "scriptId": {
+    "type": "string",
+    "description": "Script ID to update."
+   },
+   "label": {
+    "type": "string",
+    "optional": true,
+    "description": "New label."
+   },
+   "content": {
+    "type": "string",
+    "optional": true,
+    "description": "New JavaScript source."
+   },
+   "tags": {
+    "type": "string",
+    "optional": true,
+    "description": "Optional JSON array of tag strings."
+   },
+   "targets": {
+    "type": "string",
+    "optional": true,
+    "description": "Optional JSON array of vault host IDs."
+   },
+   "targetGroups": {
+    "type": "string",
+    "optional": true,
+    "description": "Optional JSON array of dynamic vault group paths."
+   },
+   "targetsAllHosts": {
+    "type": "string",
+    "optional": true,
+    "description": "Set true to target all connectable hosts."
+   },
+   "package": {
+    "type": "string",
+    "optional": true,
+    "description": "Optional vault package path."
+   },
+   "description": {
+    "type": "string",
+    "optional": true,
+    "description": "Optional script description."
+   },
+   "trigger": {
+    "type": "string",
+    "optional": true,
+    "description": "manual, onConnect, or onOutput."
+   },
+   "triggerPattern": {
+    "type": "string",
+    "optional": true,
+    "description": "Regex when trigger=onOutput."
+   }
+  },
+  "vault.scripts.delete": {
+   "scriptId": {
+    "type": "string",
+    "description": "Script ID to delete."
+   }
+  },
+  "vault.scripts.run": {
+   "scriptId": {
+    "type": "string",
+    "description": "Script ID to run."
+   },
+   "sessionId": {
+    "type": "string",
+    "description": "Terminal session ID."
+   },
+   "wait": {
+    "type": "string",
+    "optional": true,
+    "description": "Set to true to block until the script completes."
+   }
+  },
+  "vault.scripts.reference": {},
+  "vault.scripts.runs.list": {
+   "sessionId": {
+    "type": "string",
+    "optional": true,
+    "description": "Optional terminal session ID filter."
+   }
+  },
+  "vault.scripts.run.stop": {
+   "runId": {
+    "type": "string",
+    "description": "Script run ID from scripts_run or scripts_runs_list."
+   }
+  },
+  "vault.scripts.run.pause": {
+   "runId": {
+    "type": "string",
+    "description": "Script run ID to pause."
+   }
+  },
+  "vault.scripts.run.resume": {
+   "runId": {
+    "type": "string",
+    "description": "Script run ID to resume."
+   }
+  },
+  "vault.scripts.targets.set": {
+   "scriptId": {
+    "type": "string",
+    "description": "Script ID."
+   },
+   "targets": {
+    "type": "string",
+    "optional": true,
+    "description": "JSON array of vault host IDs (omit when targetsAllHosts=true)."
+   },
+   "targetGroups": {
+    "type": "string",
+    "optional": true,
+    "description": "JSON array of dynamic vault group paths (omit when targetsAllHosts=true)."
+   },
+   "targetsAllHosts": {
+    "type": "string",
+    "optional": true,
+    "description": "Set true to target all connectable hosts."
+   }
+  },
+  "vault.host.connectScripts.list": {
+   "hostId": {
+    "type": "string",
+    "description": "Vault host ID."
+   }
+  },
+  "vault.host.connectScripts.set": {
+   "hostId": {
+    "type": "string",
+    "description": "Vault host ID."
+   },
+   "scriptIds": {
+    "type": "string",
+    "description": "JSON array of onConnect script IDs in run order."
+   }
+  },
+  "portforward.rules.list": {},
+  "portforward.rules.create": {
+   "label": {
+    "type": "string",
+    "optional": true,
+    "description": "Rule label."
+   },
+   "type": {
+    "type": "string",
+    "description": "local, remote, or dynamic."
+   },
+   "localPort": {
+    "type": "number",
+    "description": "Local listening port (1-65535)."
+   },
+   "bindAddress": {
+    "type": "string",
+    "optional": true,
+    "description": "Bind address; default 127.0.0.1."
+   },
+   "remoteHost": {
+    "type": "string",
+    "optional": true,
+    "description": "Required except for dynamic forwarding."
+   },
+   "remotePort": {
+    "type": "number",
+    "optional": true,
+    "description": "Required except for dynamic forwarding."
+   },
+   "hostId": {
+    "type": "string",
+    "description": "Vault host ID used for the tunnel."
+   },
+   "autoStart": {
+    "type": "string",
+    "optional": true,
+    "description": "true or false."
+   },
+   "autoReconnect": {
+    "type": "string",
+    "optional": true,
+    "description": "true or false. Reconnect automatically after unexpected disconnects."
+   }
+  },
+  "portforward.rules.update": {
+   "ruleId": {
+    "type": "string",
+    "description": "Port forwarding rule ID."
+   },
+   "label": {
+    "type": "string",
+    "optional": true,
+    "description": "New rule label."
+   },
+   "type": {
+    "type": "string",
+    "optional": true,
+    "description": "local, remote, or dynamic."
+   },
+   "localPort": {
+    "type": "number",
+    "optional": true,
+    "description": "Local listening port."
+   },
+   "bindAddress": {
+    "type": "string",
+    "optional": true,
+    "description": "Bind address."
+   },
+   "remoteHost": {
+    "type": "string",
+    "optional": true,
+    "description": "Remote host."
+   },
+   "remotePort": {
+    "type": "number",
+    "optional": true,
+    "description": "Remote port."
+   },
+   "hostId": {
+    "type": "string",
+    "optional": true,
+    "description": "Vault host ID used for the tunnel."
+   },
+   "autoStart": {
+    "type": "string",
+    "optional": true,
+    "description": "true or false."
+   },
+   "autoReconnect": {
+    "type": "string",
+    "optional": true,
+    "description": "true or false. Reconnect automatically after unexpected disconnects."
+   }
+  },
+  "portforward.rules.duplicate": {
+   "ruleId": {
+    "type": "string",
+    "description": "Port forwarding rule ID to copy."
+   }
+  },
+  "portforward.rules.delete": {
+   "ruleId": {
+    "type": "string",
+    "description": "Port forwarding rule ID to delete."
+   }
+  },
+  "portforward.tunnels.list": {},
+  "portforward.start": {
+   "ruleId": {
+    "type": "string",
+    "description": "Port forwarding rule ID."
+   }
+  },
+  "portforward.stop": {
+   "ruleId": {
+    "type": "string",
+    "description": "Port forwarding rule ID."
+   }
+  },
+  "harness.tool_output.read": {
+   "handleId": {
+    "type": "string",
+    "description": "Tool output handle id from a prior truncated result."
+   },
+   "mode": {
+    "type": "string",
+    "optional": true,
+    "description": "Which portion to read: head, tail, range, search, or bounded full."
+   },
+   "maxChars": {
+    "type": "number",
+    "optional": true,
+    "description": "Requested characters to return. The service enforces a hard upper bound."
+   },
+   "offset": {
+    "type": "number",
+    "optional": true,
+    "description": "Zero-based character offset for range reads or search continuation."
+   },
+   "query": {
+    "type": "string",
+    "optional": true,
+    "description": "Case-insensitive search text when mode is search."
+   }
+  },
+  "harness.workspace.get_info": {},
+  "harness.workspace.get_session_info": {
+   "sessionId": {
+    "type": "string",
+    "description": "The session ID to get information about."
+   }
+  },
+  "harness.terminal.read_context": {
+   "sessionId": {
+    "type": "string",
+    "optional": true,
+    "description": "Terminal session ID. Required when the current AI scope contains more than one terminal."
+   },
+   "range": {
+    "type": "string",
+    "optional": true,
+    "description": "Which terminal slice to read: viewport, tail, head, or lines. Defaults to viewport."
+   },
+   "startLine": {
+    "type": "number",
+    "optional": true,
+    "description": "Zero-based terminal buffer line to start from when range is lines."
+   },
+   "maxLines": {
+    "type": "number",
+    "optional": true,
+    "description": "Maximum terminal rows to return. Defaults to 80, capped at 300."
+   }
+  },
+  "harness.web.search": {
+   "query": {
+    "type": "string",
+    "description": "The search query to look up on the web."
+   },
+   "maxResults": {
+    "type": "number",
+    "optional": true,
+    "description": "Maximum number of search results to return."
+   }
+  },
+  "harness.url.fetch": {
+   "url": {
+    "type": "string",
+    "description": "The HTTPS URL to fetch."
+   },
+   "maxLength": {
+    "type": "number",
+    "optional": true,
+    "description": "Maximum characters to return (default 50000)."
+   }
+  }
+ },
+ "modelDescriptionHints": {
+  "session.environment": "Call this first for any task involving a live Netcatty terminal, remote server, SSH session, SFTP path, or terminal tab. Select the target by label or hostname, then pass its sessionId to terminal and SFTP tools. Call it again after the user opens, closes, or renames a session.",
+  "terminal.execute": "Use this instead of the local shell when the command is intended for a Netcatty terminal or remote host. Call get_environment first to resolve the sessionId. Use only for commands expected to finish within about 60 seconds. For long-running commands use terminal_start and terminal_poll. Commands run in an isolated subshell of the visible terminal: the user sees the output live, but shell state such as cd, export, or set does not persist between calls — use absolute paths or combine cd with the command (cd /path && cmd).",
+  "terminal.start": "Use this instead of the local shell for long-running commands on a Netcatty terminal or remote host. Call get_environment first to resolve the sessionId. Prefer for builds, scans, log-following, or anything likely to exceed about 2 minutes. Shell state such as cd or export does not persist between calls — combine cd with the command.",
+  "terminal.poll": "Wait at least about 30 seconds between polls unless output justifies checking sooner.",
+  "vault.host.notes.get": "Host metadata notes on a saved host — not Vault → Notes sidebar entries.",
+  "vault.host.notes.set": "Host metadata notes on a saved host — not Vault → Notes sidebar entries. Prefer vault_notes_create/update when the user wants vault notes they can open in the Notes sidebar.",
+  "vault.host.open": "Reuse-first: if this hostId already has a connected or connecting session with matching connection settings (including one auto-reconnecting after a drop, which keeps the same sessionId), that sessionId is returned and no new tab is opened — retry terminal_execute against it rather than reopening the host. Open a new tab only when get_environment shows no session for the host, when the task truly needs a parallel connection, or with newTab true. Call session_close when finished only for a newly opened session (reused is not true). A reused session keeps its original owner; do not close it as task cleanup. Disconnected or restored tabs needing user action are not reused. Connection may still be establishing when the tool returns — use get_environment or wait briefly before terminal_execute if needed. Auth prompts (passphrase / keyboard-interactive) still require the user in the Netcatty UI.",
+  "vault.host.list": "Use when the user names a saved Netcatty host but get_environment has no matching live session. Resolve the hostId here, call host_open, then call get_environment to obtain the new sessionId.",
+  "vault.host.import": "Only for text in known export formats (PuTTY reg, MobaXterm ini, CSV template, SecureCRT, FinalShell JSON, ssh_config). If attached host text is unknown or auto-detection fails, use read_attachment content, extract fields yourself, and call vault_hosts_create.",
+  "vault.hosts.create": "Use when the user wants to add/create a host in Vault → Hosts (创建主机、SSH 连接凭据). NOT for Vault → Notes sidebar docs. Put SSH password in password, or a local private-key file path in keyPath. If that key is encrypted and the user supplied its passphrase, put it in passphrase so later connections do not prompt. Put long remarks/admin tables in host notes. Never fall back to vault_notes_create if this fails.",
+  "vault.host.update": "Update only fields the user requested. Use vault_hosts_list first to resolve hostId. Empty group, tags, notes, password, keyPath, or passphrase values clear those fields or saved credentials.",
+  "vault.host.delete": "Permanently deletes one saved host. Use vault_hosts_list first to resolve hostId and rely on the normal write approval flow before deleting.",
+  "vault.note.create": "Use ONLY when the user wants markdown documentation in Vault → Notes sidebar (保险箱笔记). Do NOT use when the user asked to create/add a host — use vault_hosts_create instead.",
+  "vault.note.update": "Update an existing Vault → Notes entry (visible in the vault notes sidebar).",
+  "vault.note.import": "Import generated or attached markdown into Vault → Notes. Use content plus fileName for one document, or documents for a batch. This creates notes; it does not add SSH hosts. Confirm mode asks the user to approve the import.",
+  "vault.snippets.run": "Text snippets (kind=snippet) paste shell commands with optional named placeholders written with two curly braces on each side. Scripts (kind=script) run via nct JavaScript runtime — use scripts_run for script-only workflows.",
+  "vault.snippets.create": "Create vault snippets (shell text) or scripts (kind=script, nct JavaScript). For multi-step terminal automation use kind=script and call scripts_reference.",
+  "vault.scripts.run": "Runs automation scripts in the nct JavaScript sandbox. Use wait=true to block until completion. Prefer over terminal_execute for await nct.screen.* workflows.",
+  "vault.scripts.create": "Create nct automation scripts. Call scripts_reference first to learn the nct API, triggers, and source wrapping rules.",
+  "vault.scripts.reference": "Returns full Netcatty automation script syntax reference (nct API, triggers, host targeting). Read before authoring scripts.",
+  "vault.host.connectScripts.set": "Sets per-host onConnect script queue order. Global and matching dynamic-group scripts run first automatically."
+ }
+}

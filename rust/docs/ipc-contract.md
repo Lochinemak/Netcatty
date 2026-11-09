@@ -46,7 +46,7 @@ renderer does not change.
 | `session_ack_flow` | `sessionId, bytes` | `void` | Accepted for compatibility; no-op. |
 | `session_close` | `sessionId` | `void` | Emits `netcatty:exit` with `reason: "closed"` (exactly one `netcatty:exit` is ever emitted per session). Cancels pending prompts of the session. Idempotent. The shared SSH connection is disconnected only when no other session or SFTP browser uses it. |
 | `session_exec` | `payload: ExecCommandOptions` | `ExecResult { stdout, stderr, code }` | Uses the connection of `payload.sessionId` when alive, else dials a private connection (closed afterwards) with prompts only when `enableKeyboardInteractive` is true (otherwise unattended: no prompts, unknown host keys accepted for that one-shot connection). `timeout` ms. |
-| `session_pwd` | `sessionId` | `{ success, cwd?, error? }` | Local sessions: PTY cwd discovery. SSH sessions: **known gap** — the interactive shell's cwd cannot be read from a sibling exec channel, so the login `$HOME` is returned (the Electron bridge's `allowHomeFallback` behaviour); `success: false` when even that fails. |
+| `session_pwd` | `sessionId, allowHomeFallback?, allowLoginShellFallback?, timeoutMs?` | `{ success, cwd?, error? }` | Local sessions: PTY cwd discovery. SSH sessions: Electron's interactive-shell probe on a sibling exec channel with the `$HOME` fallback, see [`ipc-transfers.md`](ipc-transfers.md). |
 | `session_remote_info` | `sessionId` | `{ success, serverBanner?, software?, error? }` | `software` = text after `SSH-2.0-` (first token). |
 | `local_get_default_shell` | — | `string` | |
 | `local_discover_shells` | — | `DiscoveredShell[]` | |
@@ -103,11 +103,10 @@ resources (`<resource_dir>/mosh/`, `<resource_dir>/et/`; in debug builds also
 development layout), then on the session's `PATH`. `ssh` comes from `PATH`
 (Windows: also `%SystemRoot%\System32\OpenSSH\ssh.exe`).
 
-Not ported: ZMODEM / YMODEM (`onZmodemEvent`, `cancelZmodem`,
-`startZmodemDragDropUpload`, `onZmodemOverwriteRequest`,
-`respondZmodemOverwrite`, `sendSerialYmodem`, `receiveSerialYmodem` stay
-undefined), the Mosh / ET host-stats companion SSH connection, session
-logging for these sessions, and FIDO2 agent preparation for the external ssh.
+ZMODEM and serial YMODEM: see [`ipc-zmodem.md`](ipc-zmodem.md). Session
+logs and the Mosh / ET host-stats companion connection: see
+[`ipc-transfers.md`](ipc-transfers.md). FIDO2 agent preparation for the
+external ssh: see [`ipc-security.md`](ipc-security.md).
 
 ## Remote desktop (VNC / RDP)
 
@@ -634,6 +633,8 @@ commands do not appear in logs. A new session kind needs the three hooks:
 | `session_log_prepare` | `payload: { sessionId }` | `{ success, filePath?, error? }` — flushes the live log (or returns the finalized one; manual before automatic) |
 | `session_log_reveal` | `payload: { sessionId }` | as prepare, then reveals the file (opener plugin) |
 
+Script automation (`script_*` commands, `netcatty:script:*` events, the `nct` script API): see [`ipc-scripts.md`](ipc-scripts.md).
+
 ## App
 
 | Command | Args | Returns |
@@ -644,6 +645,17 @@ commands do not appear in logs. A new session kind needs the three hooks:
 
 Dialogs, clipboard and opening URLs use the Tauri plugins directly from the
 adapter (`window.__TAURI__.dialog`, `.clipboardManager`, `.opener`).
+
+Auto-update (`update_*`, `app_report_dirty_editors`, `netcatty:update:*` and `app:query-dirty-editors`): see [ipc-update.md](./ipc-update.md).
+AI core (provider proxy, chat streaming, privacy, user skills, sessions backup): see [ipc-ai.md](ipc-ai.md).
+Host browser (in-app browser panel / window, `hostbrowser_*` commands): see [ipc-hostbrowser.md](ipc-hostbrowser.md).
+Managed SDK agents, agent discovery and Codex login: see [ipc-agents.md](ipc-agents.md).
+AI control plane (Catty exec, capabilities, MCP host, approvals, tool-output store, External MCP): see [`ipc-mcp.md`](ipc-mcp.md).
+Transfer queue controls, compressed folder upload, native file drag, X11 forwarding, Mosh / ET stats companion, SSH cwd: see [`ipc-transfers.md`](ipc-transfers.md).
+Multi-window (detached editor, terminal popups, session windows, attach hand-over, per-window output routing, quit guard, opacity / blur, macOS menu): see [ipc-windows.md](ipc-windows.md).
+Security (app lock, FIDO2 security keys, TOTP QR screen scan, SSH debug log): see [ipc-security.md](ipc-security.md).
+ZMODEM (`rz` / `sz`) and serial YMODEM transfers (`zmodem_*`, `serial_ymodem_*`, `netcatty:zmodem:*`): see [`ipc-zmodem.md`](ipc-zmodem.md).
+Terminal plumbing and autocomplete (paste receipts, reuse fallback, Windows PTY info, fig specs, directory listings): see [`ipc-terminal.md`](ipc-terminal.md).
 
 ## Mapping `NetcattyBridge` → commands (adapter cheat-sheet)
 
@@ -706,7 +718,10 @@ adapter (`window.__TAURI__.dialog`, `.clipboardManager`, `.opener`).
 | `prepareSessionLog`, `revealSessionLog` | `session_log_prepare`, `session_log_reveal` (`payload: { sessionId }` only) |
 
 Bridge methods that have no Rust counterpart in this version (AI, plugins,
-MCP, ZMODEM/YMODEM, FIDO, plugin sync providers, auto-update) are left
+MCP, FIDO, plugin sync providers) are left
 `undefined` on the adapter; the renderer already treats them as optional.
 `onTrayPanelCloseRequest` stays undefined too: the Electron main process
 never sends that event.
+
+OS shell integration (deep links, PuTTY / SecureCRT launches, single instance, open terminal at path, Explorer verbs, portable data, app icon variants, Dock menu): see [ipc-integration.md](ipc-integration.md).
+Plugin host runtime (package store, permissions, browser / Node runtimes, contributions, Providers, sync sidecars): see [`ipc-plugins.md`](ipc-plugins.md).

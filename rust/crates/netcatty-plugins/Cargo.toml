@@ -1,0 +1,40 @@
+[package]
+name = "netcatty-plugins"
+description = "Plugin host runtime: package store, database, permissions, JSON-RPC router, runtime supervisor and provider services (port of electron/plugins)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+netcatty-core = { workspace = true }
+netcatty-store = { workspace = true }
+tokio = { workspace = true }
+tokio-util = { workspace = true }
+futures = { workspace = true }
+async-trait = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+base64 = { workspace = true }
+rand = { workspace = true }
+sha2 = { workspace = true }
+hmac = { workspace = true }
+hex = { workspace = true }
+parking_lot = { workspace = true }
+dashmap = { workspace = true }
+url = { workspace = true }
+reqwest = { workspace = true }
+rusqlite = { version = "0.37", features = ["bundled"] }
+jsonschema = { version = "0.33", default-features = false }
+nodejs-semver = "4"
+regress = "0.12"
+unicode-normalization = "0.1"
+flate2 = "1"
+crc32fast = "1"
+
+[dev-dependencies]
+tempfile = "3"

@@ -608,6 +608,8 @@ mod tests {
         assert!(!again.created);
         assert_eq!(again.backup.id, first.backup.id);
 
+        // Timestamps have millisecond resolution; keep the two creates apart.
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
         let second = store.create(options(payload(3, 1), None)).await.unwrap();
         assert!(second.created && second.backup.created_at > first.backup.created_at);
         let listed = store.list().unwrap();
@@ -624,7 +626,9 @@ mod tests {
             .unwrap()
             .path();
         let raw = std::fs::read_to_string(file).unwrap();
-        assert!(raw.contains("\"payloadEncoding\": \"cipher-v2\"") && !raw.contains("h0"));
+        // Look for the quoted host label: base64 ciphertext can contain the
+        // bare characters `h0` by chance, but never a double quote.
+        assert!(raw.contains("\"payloadEncoding\": \"cipher-v2\"") && !raw.contains("\"h0\""));
         let read = store.read(&first.backup.id).unwrap();
         assert_eq!(read.payload, payload(2, 1));
         assert_eq!(

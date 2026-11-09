@@ -84,6 +84,44 @@ pub struct SessionFlags {
     /// Charset requested by `session_set_encoding`, applied by the pump
     /// before it decodes the next chunk.
     pub charset_change: parking_lot::Mutex<Option<String>>,
+    /// AI exec state: rolling idle-prompt tracker, output taps, shell kind
+    /// and the "prompt never returned" latch (see [`AiExecTap`]).
+    pub ai: AiExecTap,
+}
+
+/// Output tap of a session for AI command execution (`catty exec`, MCP
+/// `terminal_execute`). Every decoded chunk of every session kind passes
+/// through [`deliver_with_meta`] once; it updates the prompt tracker and is
+/// copied to each live subscriber. Subscribers see the channel close when
+/// the session ends (the flags are dropped with the pump).
+#[derive(Default)]
+pub struct AiExecTap {
+    pub prompt: parking_lot::Mutex<netcatty_ptyexec::PromptTracker>,
+    subscribers: parking_lot::Mutex<Vec<mpsc::UnboundedSender<String>>>,
+    pub shell_kind: Arc<netcatty_ptyexec::ShellKindState>,
+    pub prompt_recovery_pending: Arc<AtomicBool>,
+    /// `(protocol, label, host_id)` recorded at insert (no entry lock needed).
+    pub info: parking_lot::Mutex<(&'static str, String, Option<String>)>,
+}
+
+impl AiExecTap {
+    fn observe(&self, text: &str) {
+        if text.is_empty() {
+            return;
+        }
+        self.prompt.lock().track(text, netcatty_core::ids::now_ms());
+        let mut subs = self.subscribers.lock();
+        if !subs.is_empty() {
+            subs.retain(|tx| tx.send(text.to_string()).is_ok());
+        }
+    }
+
+    /// New subscriber receiving decoded output from now on.
+    pub fn subscribe(&self) -> mpsc::UnboundedReceiver<String> {
+        let (tx, rx) = mpsc::unbounded_channel();
+        self.subscribers.lock().push(tx);
+        rx
+    }
 }
 
 pub type SftpMap = Arc<dashmap::DashMap<String, Arc<SftpClient>>>;
@@ -97,6 +135,73 @@ pub(crate) struct Shared<R: Runtime> {
     pub connections: dashmap::DashMap<String, Arc<SshConnection>>,
     /// SFTP clients (owned by `AppState`) — consulted before disconnecting.
     pub sftp: SftpMap,
+    /// Generic output subscribers ([`SessionRegistry::subscribe_output`]).
+    pub taps: OutputTaps,
+}
+
+/// One event of [`SessionRegistry::subscribe_all_output`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum OutputTapEvent {
+    /// Decoded output of a session (every chunk, also while paused).
+    Data { session_id: String, text: String },
+    /// The session ended; no more data follows for it.
+    Closed { session_id: String },
+}
+
+/// Generic taps on decoded session output, fed from the same place as the
+/// session-log tap. Subscribers get unbounded channels; dropped receivers
+/// are pruned on the next publish.
+#[derive(Default)]
+pub struct OutputTaps {
+    per_session:
+        parking_lot::Mutex<std::collections::HashMap<String, Vec<mpsc::UnboundedSender<String>>>>,
+    all: parking_lot::Mutex<Vec<mpsc::UnboundedSender<OutputTapEvent>>>,
+}
+
+impl OutputTaps {
+    fn publish(&self, session_id: &str, text: &str) {
+        {
+            let mut all = self.all.lock();
+            if !all.is_empty() {
+                all.retain(|tx| {
+                    tx.send(OutputTapEvent::Data {
+                        session_id: session_id.to_string(),
+                        text: text.to_string(),
+                    })
+                    .is_ok()
+                });
+            }
+        }
+        let mut per_session = self.per_session.lock();
+        if let Some(subscribers) = per_session.get_mut(session_id) {
+            subscribers.retain(|tx| tx.send(text.to_string()).is_ok());
+            if subscribers.is_empty() {
+                per_session.remove(session_id);
+            }
+        }
+    }
+
+    fn session_closed(&self, session_id: &str) {
+        // Dropping the senders ends the per-session receivers.
+        self.per_session.lock().remove(session_id);
+        self.all.lock().retain(|tx| {
+            tx.send(OutputTapEvent::Closed {
+                session_id: session_id.to_string(),
+            })
+            .is_ok()
+        });
+    }
+}
+
+/// Feed decoded output to the generic taps of the app's session registry.
+fn publish_output<R: Runtime>(app: &AppHandle<R>, session_id: &str, text: &str) {
+    use tauri::Manager;
+    if text.is_empty() {
+        return;
+    }
+    if let Some(state) = app.try_state::<crate::state::AppState<R>>() {
+        state.sessions.shared.taps.publish(session_id, text);
+    }
 }
 
 pub struct SessionRegistry<R: Runtime> {
@@ -210,6 +315,7 @@ impl<R: Runtime> SessionRegistry<R> {
                 flags: dashmap::DashMap::new(),
                 connections: dashmap::DashMap::new(),
                 sftp,
+                taps: OutputTaps::default(),
             }),
         }
     }
@@ -241,6 +347,13 @@ impl<R: Runtime> SessionRegistry<R> {
         let decoder = StreamDecoder::new(Some(&entry.charset));
         let charset = crate::decoder::resolve_charset(Some(&entry.charset));
         let flags = Arc::new(SessionFlags::default());
+        // Local shells have a confirmed kind from the executable; remote
+        // kinds are probed lazily on the first AI exec.
+        *flags.ai.info.lock() = (entry.protocol, entry.label.clone(), entry.host_id.clone());
+        if entry.protocol == "local" {
+            let kind = netcatty_ptyexec::shell_kind::classify_local_shell_type(&entry.label, std::env::consts::OS);
+            flags.ai.shell_kind.set_shell_kind(Some(kind.to_string()));
+        }
         if let Some(conn) = &entry.connection {
             self.shared
                 .connections
@@ -254,8 +367,45 @@ impl<R: Runtime> SessionRegistry<R> {
         tauri::async_runtime::spawn(pump(shared, session_id, source, decoder, charset, flags));
     }
 
+    /// Decoded output of one session from now on; the receiver ends when
+    /// the session does.
+    pub fn subscribe_output(&self, session_id: &str) -> mpsc::UnboundedReceiver<String> {
+        let (tx, rx) = mpsc::unbounded_channel();
+        self.shared
+            .taps
+            .per_session
+            .lock()
+            .entry(session_id.to_string())
+            .or_default()
+            .push(tx);
+        rx
+    }
+
+    /// Decoded output and end of every session.
+    pub fn subscribe_all_output(&self) -> mpsc::UnboundedReceiver<OutputTapEvent> {
+        let (tx, rx) = mpsc::unbounded_channel();
+        self.shared.taps.all.lock().push(tx);
+        rx
+    }
+
     pub fn get(&self, session_id: &str) -> Option<Arc<Mutex<SessionEntry>>> {
         self.shared.sessions.get(session_id).map(|e| e.clone())
+    }
+
+    /// AI exec tap of a live session (prompt tracker, output subscription,
+    /// shell kind). `None` for unknown / ended sessions.
+    pub fn flags_of(&self, session_id: &str) -> Option<Arc<SessionFlags>> {
+        self.shared.flags.get(session_id).map(|f| f.clone())
+    }
+
+    /// Subscribe to decoded output of a live session (closed on exit).
+    pub fn tap_output(&self, session_id: &str) -> Option<mpsc::UnboundedReceiver<String>> {
+        self.flags_of(session_id).map(|f| f.ai.subscribe())
+    }
+
+    /// Ids of every live terminal session.
+    pub fn session_ids(&self) -> Vec<String> {
+        self.shared.sessions.iter().map(|e| e.key().clone()).collect()
     }
 
     pub fn contains(&self, session_id: &str) -> bool {
@@ -488,6 +638,8 @@ impl<R: Runtime> Shared<R> {
         // Session-log hook: finalize the session's automatic log (idempotent;
         // runs before the entry is removed).
         crate::commands::sessionlog::session_ended(&self.app, session_id);
+        crate::commands::zmodem::session_ended(&self.app, session_id);
+        self.taps.session_closed(session_id);
         self.flags.remove(session_id);
         self.connections.remove(session_id);
         let Some((_, entry)) = self.sessions.remove(session_id) else {
@@ -534,6 +686,10 @@ fn deliver_with_meta<R: Runtime>(
     // here exactly once, before flow-control buffering (paused output is
     // logged too). Only buffers; never blocks on I/O.
     crate::commands::sessionlog::tap_output(app, session_id, text);
+    // Generic output taps (script automation, ...): same point, same rules.
+    publish_output(app, session_id, text);
+    // AI exec tap (prompt tracking + subscribers), same single pass.
+    flags.ai.observe(text);
     if !force && flags.paused.load(Ordering::SeqCst) {
         if pending.len() + text.len() > PAUSE_BUFFER_LIMIT {
             if !flags.dropped_output.swap(true, Ordering::SeqCst) {
@@ -582,6 +738,12 @@ async fn pump<R: Runtime>(
             _ = flags.wake.notified() => {
                 // Resumed: flush what was buffered while paused.
                 deliver(&shared.app, &session_id, &flags, &mut pending, "", false);
+                // ZMODEM hook: a withheld partial header that timed out.
+                let flushed = crate::commands::zmodem::poll_flush(&shared.app, &session_id);
+                if !flushed.is_empty() {
+                    let text = decoder.decode(&flushed, false);
+                    deliver(&shared.app, &session_id, &flags, &mut pending, &text, false);
+                }
                 continue;
             }
         };
@@ -648,6 +810,8 @@ async fn pump<R: Runtime>(
                     decoder = StreamDecoder::new(Some(&label));
                     charset = crate::decoder::resolve_charset(Some(&label));
                 }
+                // ZMODEM / YMODEM hook: transfer bytes never reach the display.
+                crate::commands::zmodem::filter_output(&shared.app, &session_id, &mut raw);
                 let text = decoder.decode(&raw, false);
                 source.observe(&text, charset);
                 deliver(&shared.app, &session_id, &flags, &mut pending, &text, false);

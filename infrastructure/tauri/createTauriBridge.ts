@@ -24,8 +24,22 @@ import {
   decodeRemoteDesktopBinaryMessage,
   isRemoteDesktopControlEvent,
 } from '../../domain/remoteDesktop';
+import { createUpdateBridge } from './bridge/update';
 import { pluginClipboard, pluginDialog, pluginOpener } from './plugins';
 import { cancelStagedUpload, stageUploadFile } from './uploadStaging';
+import { createAiBridge } from './bridge/ai';
+import { createScriptsBridge } from './bridge/scripts';
+import { createHostBrowserBridge } from './bridge/hostBrowser';
+import { createAgentsBridge } from './bridge/agents';
+import { createMcpBridge } from './bridge/mcp';
+import { createTransfersBridge } from './bridge/transfers';
+import { createIntegrationBridge } from './bridge/integration';
+import { createSecurityBridge } from './bridge/security';
+import { createZmodemBridge } from './bridge/zmodem';
+import { createTerminalBridge } from './bridge/terminal';
+import { createPluginsBridge } from './bridge/plugins';
+import { McpMarkerFilter } from './bridge/mcpMarkerFilter';
+import { SessionOutputRoutes, createWindowsBridge, listenToCurrentWindow } from './bridge/windows';
 
 // ---------------------------------------------------------------------------
 // Contract constants (see `netcatty_core::ipc::events`)
@@ -102,28 +116,7 @@ type SessionDataCallback = BridgeArgs<'onSessionData'>[1];
 type SessionExitCallback = BridgeArgs<'onSessionExit'>[1];
 type SessionExitPayload = Parameters<SessionExitCallback>[0];
 
-/**
- * The scripting bridge (`netcatty-bridge-script.d.ts`) declares its members as
- * required although every renderer call site guards them with `?.` — there is
- * no Rust counterpart yet, so the adapter omits them and widens once at the end.
- */
-type ScriptBridgeKeys =
-  | 'scriptRun'
-  | 'scriptStop'
-  | 'scriptPause'
-  | 'scriptResume'
-  | 'scriptGetRuns'
-  | 'scriptDialogResponse'
-  | 'scriptScreenSnapshotResponse'
-  | 'scriptRecordingStart'
-  | 'scriptRecordingStop'
-  | 'scriptRecordingAppendStep'
-  | 'onScriptRunsUpdated'
-  | 'onScriptDialogRequest'
-  | 'onScriptScreenSnapshotRequest'
-  | 'onScriptSessionInput';
-
-type TauriBridgeShape = Omit<NetcattyBridge, ScriptBridgeKeys>;
+type TauriBridgeShape = NetcattyBridge;
 
 // ---------------------------------------------------------------------------
 // Wire shapes (what Rust emits / returns; camelCase, see `ipc.rs`)
@@ -133,7 +126,7 @@ interface StartSessionResult { sessionId: string }
 interface OpenSftpResult { sftpId: string; homeDir?: string; reusedConnection?: boolean }
 interface SuccessResult { success: boolean; error?: string }
 
-interface SessionDataEvent { sessionId: string; data: string; meta?: SessionDataMeta }
+interface SessionDataEvent { sessionId: string; data: string; meta?: SessionDataMeta; syntheticEcho?: boolean }
 type SessionDataMeta = Parameters<SessionDataCallback>[1];
 interface SessionExitEvent {
   sessionId: string;
@@ -422,9 +415,17 @@ class SessionEventRouter {
   private readonly displayListeners = new Map<string, Set<SessionDataCallback>>();
   private readonly exitListeners = new Map<string, Set<SessionExitCallback>>();
   private readonly backlog: SessionDataBacklog;
+  /** Hides AI exec marker lines (`__NCMCP_…`) from terminal display. */
+  private readonly mcpFilter = new McpMarkerFilter<SessionDataMeta>({
+    deliver: (sessionId, data, meta) => this.dispatchData(sessionId, data, meta),
+  });
 
-  constructor(hub: EventHub, backlog: SessionDataBacklog) {
+  /** Output of sessions displayed by another window is dropped (`bridge/windows.ts`). */
+  private readonly accepts: (sessionId: string) => boolean;
+
+  constructor(hub: EventHub, backlog: SessionDataBacklog, accepts: (sessionId: string) => boolean = () => true) {
     this.backlog = backlog;
+    this.accepts = accepts;
     hub.subscribe<SessionDataEvent>(TAURI_EVENTS.sessionData, (event) => this.handleData(event));
     hub.subscribe<SessionExitEvent>(TAURI_EVENTS.sessionExit, (event) => this.handleExit(event));
   }
@@ -455,14 +456,19 @@ class SessionEventRouter {
 
   private handleData(event: SessionDataEvent | undefined): void {
     if (!event || typeof event.sessionId !== 'string' || !event.data) return;
-    if ((this.displayListeners.get(event.sessionId)?.size ?? 0) === 0) {
-      this.backlog.append(event.sessionId, event.data);
+    if (!this.accepts(event.sessionId)) return;
+    this.mcpFilter.push(event.sessionId, event.data, event.meta, event.syntheticEcho === true);
+  }
+
+  private dispatchData(sessionId: string, data: string, meta: SessionDataMeta | undefined): void {
+    if ((this.displayListeners.get(sessionId)?.size ?? 0) === 0) {
+      this.backlog.append(sessionId, data);
     }
-    const listeners = this.dataListeners.get(event.sessionId);
+    const listeners = this.dataListeners.get(sessionId);
     if (!listeners || listeners.size === 0) return;
     for (const cb of Array.from(listeners)) {
       try {
-        cb(event.data, event.meta);
+        cb(data, meta);
       } catch (error) {
         warn('session data callback failed', error);
       }
@@ -490,6 +496,7 @@ class SessionEventRouter {
       }
     }
     this.backlog.clear(event.sessionId);
+    this.mcpFilter.clear(event.sessionId);
   }
 }
 
@@ -516,6 +523,8 @@ function removeFrom<T>(map: Map<string, Set<T>>, key: string, value: T): void {
 export interface CreateTauriBridgeOptions {
   /** Injected for tests; defaults to the real `window.__TAURI__` hub. */
   hub?: EventHub;
+  /** Hub for events addressed to this window; defaults to `hub` when injected. */
+  windowHub?: EventHub;
   /** Plugin namespaces; defaults to `window.__TAURI__`. */
   plugins?: Pick<NetcattyTauriGlobal, 'dialog' | 'clipboardManager' | 'opener'>;
 }
@@ -524,7 +533,10 @@ export function createTauriBridge(options: CreateTauriBridgeOptions = {}): Netca
   const hub = options.hub ?? new EventHub();
   const plugins = options.plugins ?? (typeof window !== 'undefined' ? window.__TAURI__ : undefined) ?? {};
   const backlog = new SessionDataBacklog(SESSION_BACKLOG_MAX_CHARS);
-  const sessions = new SessionEventRouter(hub, backlog);
+  // Events Rust addresses to one window (`emit_to`) reach only this hub.
+  const windowHub = options.windowHub ?? options.hub ?? new EventHub({ listen: listenToCurrentWindow });
+  const outputRoutes = new SessionOutputRoutes({ hub, onRoutedAway: (sessionId) => backlog.clear(sessionId) });
+  const sessions = new SessionEventRouter(hub, backlog, (sessionId) => outputRoutes.accepts(sessionId));
 
   // Subscribe eagerly so output emitted right after a start command cannot be
   // lost while the async `listen` registration is still pending.
@@ -541,6 +553,8 @@ export function createTauriBridge(options: CreateTauriBridgeOptions = {}): Netca
   const startSession = async (command: string, payload: Record<string, unknown>): Promise<string> => {
     await sessionEventsReady;
     const result = await invoke<StartSessionResult>(command, { payload });
+    // Owner window: output routing and close-with-window (`bridge/windows.ts`).
+    outputRoutes.track(result.sessionId);
     return result.sessionId;
   };
 
@@ -579,6 +593,8 @@ export function createTauriBridge(options: CreateTauriBridgeOptions = {}): Netca
     invoke<void>('session_set_flow_paused', { sessionId, paused }));
 
   const bridge: TauriBridgeShape = {
+    // Script automation (`bridge/scripts.ts`, `rust/docs/ipc-scripts.md`).
+    ...createScriptsBridge({ hub }),
     // -----------------------------------------------------------------------
     // Sessions and terminal
     // -----------------------------------------------------------------------
@@ -619,10 +635,11 @@ export function createTauriBridge(options: CreateTauriBridgeOptions = {}): Netca
       fireAndForget('session_resize', invoke<void>('session_resize', { payload: { sessionId, cols, rows } }));
     },
     interruptSession: (sessionId, _trace, interruptOptions) => {
-      // `cancelPendingWritesOnly` asks Electron to drop queued paste chunks
-      // without sending ^C; the Rust backend has no write queue to cancel, so
-      // that variant is a deliberate no-op.
-      if (interruptOptions?.cancelPendingWritesOnly === true) return;
+      // `cancelPendingWritesOnly` drops queued paste lines without sending ^C.
+      if (interruptOptions?.cancelPendingWritesOnly === true) {
+        fireAndForget('terminal_cancel_pending_writes', invoke<void>('terminal_cancel_pending_writes', { sessionId }));
+        return;
+      }
       fireAndForget('session_interrupt', invoke<void>('session_interrupt', { sessionId }));
     },
     setSessionFlowPaused: (sessionId, paused) => {
@@ -1043,18 +1060,6 @@ export function createTauriBridge(options: CreateTauriBridgeOptions = {}): Netca
     getSystemInfo: () => invoke<BridgeResult<'getSystemInfo'>>('system_info'),
 
     // -----------------------------------------------------------------------
-    // App lock (not ported yet). The AppLockGate renders nothing until the
-    // runtime state reports `initialized: true`, so an initialized, unlocked
-    // state is required for the UI to appear at all. Mutations are refused.
-    // -----------------------------------------------------------------------
-    getAppLockRuntimeState: async () => unlockedAppLockRuntimeState(),
-    onAppLockRuntimeStateChanged: () => () => {},
-    onAppLockSettingsChanged: () => () => {},
-    setAppLockRuntimeLocked: async () => unlockedAppLockRuntimeState(),
-    reportAppLockActivity: async () => {},
-    requestAppLockUnlock: async () => ({ ok: true }),
-
-    // -----------------------------------------------------------------------
     // Temp files / upload staging. The webview has no local path for a
     // dropped or picked File, so its bytes are streamed into the Rust temp
     // directory first (see uploadStaging.ts); `getPathForFile` stays
@@ -1449,24 +1454,30 @@ export function createTauriBridge(options: CreateTauriBridgeOptions = {}): Netca
       platform: detectPlatform(),
     }),
     getTempDirPath: () => invoke<string>('app_get_temp_dir_path'),
+
+    // Auto-update + dirty-editor round trip (bridge/update.ts).
+    ...createUpdateBridge({ hub: windowHub }),
+    // AI core (provider proxy, chat streaming, privacy, skills, sessions backup).
+    ...createAiBridge({ hub }),
+    // In-app host browser (rust/docs/ipc-hostbrowser.md).
+    ...createHostBrowserBridge({ hub }),
+    ...createAgentsBridge({ hub }),
+    ...createMcpBridge({ hub }),
+    // Transfer queue, compressed upload, native drag, SSH cwd (rust/docs/ipc-transfers.md).
+    ...createTransfersBridge({ hub }),
+    // Deep links, launch intents, Explorer verbs, app icon (rust/docs/ipc-integration.md).
+    ...createIntegrationBridge({ hub }),
+    // Editor / popup / session windows, attach hand-over, window chrome.
+    ...createWindowsBridge({ hub: windowHub, routes: outputRoutes }),
+    ...createSecurityBridge({ hub }),
+    // ZMODEM / YMODEM and terminal plumbing + autocomplete (`bridge/zmodem.ts`, `bridge/terminal.ts`).
+    ...createZmodemBridge({ hub }),
+    ...createTerminalBridge({ hub }),
+    ...createPluginsBridge({ hub }),
   };
 
   return bridge as NetcattyBridge;
 }
-
-/** App lock is not available in the Tauri build: always initialized and unlocked. */
-const unlockedAppLockRuntimeState = (): BridgeResult<'getAppLockRuntimeState'> => {
-  const now = Date.now();
-  return {
-    initialized: true,
-    locked: false,
-    reason: null,
-    version: 0,
-    lastLockedAt: null,
-    lastUnlockedAt: now,
-    lastActivityAt: now,
-  };
-};
 
 const firstPath = (selection: string | string[] | null): string | null => {
   if (Array.isArray(selection)) return selection.length > 0 ? selection[0] : null;
