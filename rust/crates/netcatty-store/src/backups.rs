@@ -626,7 +626,9 @@ mod tests {
             .unwrap()
             .path();
         let raw = std::fs::read_to_string(file).unwrap();
-        assert!(raw.contains("\"payloadEncoding\": \"cipher-v2\"") && !raw.contains("h0"));
+        // Look for the quoted host label: base64 ciphertext can contain the
+        // bare characters `h0` by chance, but never a double quote.
+        assert!(raw.contains("\"payloadEncoding\": \"cipher-v2\"") && !raw.contains("\"h0\""));
         let read = store.read(&first.backup.id).unwrap();
         assert_eq!(read.payload, payload(2, 1));
         assert_eq!(
