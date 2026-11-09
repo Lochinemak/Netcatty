@@ -406,6 +406,8 @@ fn spawn_proxy_command(command: &str) -> SshResult<ProcessTransport> {
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true);
+    #[cfg(windows)]
+    cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
     let mut child = cmd
         .spawn()
         .map_err(|e| SshError::Proxy(format!("failed to spawn ProxyCommand: {e}")))?;

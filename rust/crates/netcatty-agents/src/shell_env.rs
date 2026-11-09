@@ -164,6 +164,7 @@ async fn read_windows_registry_path(env: &EnvMap) -> String {
     for hive in HIVES {
         let mut cmd = tokio::process::Command::new("reg");
         cmd.args(["query", hive, "/v", "Path"]).kill_on_drop(true);
+        cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
         let value = match tokio::time::timeout(Duration::from_secs(1), cmd.output()).await {
             Ok(Ok(output)) => expand_windows_env_refs(&parse_reg_query_path(&String::from_utf8_lossy(&output.stdout)), env),
             _ => String::new(),

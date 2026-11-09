@@ -182,8 +182,13 @@ pub fn prepare_command_for_spawn(command: &str, args: &[String], unwrap_native_e
 }
 
 /// Apply a [`SpawnSpec`] to a tokio command (shell specs run through `cmd.exe /d /s /c`).
+///
+/// Always sets `CREATE_NO_WINDOW` on Windows: the app is a GUI process, so a
+/// console child (cmd.exe, `.cmd` shims, agent CLIs) would otherwise open its
+/// own console window.
 pub fn command_for_spec(spec: &SpawnSpec) -> tokio::process::Command {
-    if spec.shell {
+    #[cfg_attr(not(windows), allow(unused_mut))] // only mutated on Windows
+    let mut cmd = if spec.shell {
         let mut cmd = tokio::process::Command::new("cmd.exe");
         cmd.args(["/d", "/s", "/c", &spec.command]);
         cmd
@@ -191,7 +196,10 @@ pub fn command_for_spec(spec: &SpawnSpec) -> tokio::process::Command {
         let mut cmd = tokio::process::Command::new(&spec.command);
         cmd.args(&spec.args);
         cmd
-    }
+    };
+    #[cfg(windows)]
+    cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+    cmd
 }
 
 /// `resolveClaudeCodeExecutableForSdk` (Windows shim → `cli.js` / native exe).
@@ -594,6 +602,8 @@ pub async fn resolve_cli_from_path(command: &str, shell_env: &EnvMap) -> Option<
     let mut cmd = tokio::process::Command::new(which);
     cmd.arg(command).env_clear().envs(shell_env.iter()).stdin(std::process::Stdio::null());
     cmd.kill_on_drop(true);
+    #[cfg(windows)]
+    cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
     let output = tokio::time::timeout(Duration::from_secs(3), cmd.output()).await.ok()?.ok()?;
     if !output.status.success() {
         return None;

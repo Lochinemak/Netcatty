@@ -442,6 +442,8 @@ impl AgentManager {
                 .stdout(std::process::Stdio::null())
                 .stderr(std::process::Stdio::null())
                 .kill_on_drop(true);
+            #[cfg(windows)]
+            cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
             let _ = tokio::time::timeout(Duration::from_secs(5), cmd.status()).await;
             drop(entry); // staged handle removed after ssh-add -d
         });
@@ -490,6 +492,8 @@ async fn start_agent(options: &StartOptions<'_>) -> Result<AgentProcess, String>
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
             .kill_on_drop(true);
+        #[cfg(windows)]
+        cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
         // The agent must not inherit a caller-bound lease.
         cmd.env_remove(crate::askpass::LEASE_ENV);
         for (k, v) in &options.env {

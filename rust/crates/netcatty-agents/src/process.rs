@@ -62,8 +62,10 @@ pub fn signal_process_tree(pid: Option<u32>, kill: bool) {
     #[cfg(windows)]
     {
         let _ = kill;
+        use std::os::windows::process::CommandExt;
         let _ = std::process::Command::new("taskkill")
             .args(["/pid", &pid.to_string(), "/T", "/F"])
+            .creation_flags(0x0800_0000) // CREATE_NO_WINDOW
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
