@@ -3,7 +3,7 @@ name: build-tauri
 # Builds the Tauri 2 + Rust desktop app (rust/apps/netcatty-desktop) for
 # macOS, Windows and Linux.
 #
-#  - Push to the rust-rewrite branch -> build every platform and keep the
+#  - Push to main -> build every platform and keep the
 #    bundles as workflow artifacts. No release is published.
 #  - Push of a release tag -> build and publish a GitHub Release with the
 #    bundles. Release tags are plain v<MAJOR>.<MINOR>.<PATCH> (v1.2.3): no
@@ -22,7 +22,7 @@ on:
         default: false
   push:
     branches:
-      - claude/rust-rewrite-2f0f0a
+      - main
     tags:
       - "v[0-9]+.[0-9]+.[0-9]+"
 
