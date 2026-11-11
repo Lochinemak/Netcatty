@@ -1,14 +1,14 @@
 name: build-packages
 
 # Trigger philosophy
-#  - Main pushes always run the package matrix. Pull requests run it only
-#    when packaging, native runtimes, or installer inputs change. Ordinary
-#    app changes are covered by the required test workflow's production build.
+#  - main is the Tauri app, so main pushes no longer run this Electron
+#    package matrix; build-tauri.yml builds main instead. Pull requests run
+#    it only when packaging, native runtimes, or installer inputs change.
 #    Artifacts upload as workflow artifacts only; *no* release is published.
-#  - Tag pushes no longer trigger this Electron workflow on the
-#    rust-rewrite branch: version tags publish the Tauri build instead
-#    (see build-tauri.yml). To publish an Electron release, run this
-#    workflow manually on a strict version tag with `publish_release`.
+#  - Tag pushes do not trigger this Electron workflow either: version tags
+#    publish the Tauri build (see build-tauri.yml). To publish an Electron
+#    release, run this workflow manually on a strict version tag with
+#    `publish_release`.
 #  - Manual `workflow_dispatch` -> run the matrix on the selected ref.
 #    `publish_release` only publishes when the selected ref is also a
 #    strict version tag.
@@ -31,9 +31,6 @@ on:
         description: "Release tag containing bundled et (EternalTerminal) binaries"
         type: string
         default: ""
-  push:
-    branches:
-      - main
   pull_request:
     paths:
       - ".github/workflows/build.yml"
