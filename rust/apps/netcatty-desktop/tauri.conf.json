@@ -45,7 +45,7 @@
       "endpoints": [
         "https://github.com/Lochinemak/Netcatty/releases/latest/download/latest.json"
       ],
-      "pubkey": "REPLACE_WITH_TAURI_UPDATER_PUBLIC_KEY",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDk2NTRCRTFBMDA2NjBBMUQKUldRZENtWUFHcjVVbHA3SGFxcjBpdW1LTVJnMEF1VkFra3ZhaDFCeDVpWGl5anNCbFJqa1g4UU8K",
       "windows": {
         "installMode": "passive"
       }
