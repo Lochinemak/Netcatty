@@ -1578,9 +1578,6 @@ pub async fn zmodem_drag_drop_upload<R: Runtime>(
     if paths.is_empty() {
         return fail("No readable files to upload");
     }
-    if entry.drag_drop.lock().is_some() {
-        return fail("ZMODEM drag-drop upload already pending");
-    }
     // -y: overwrite same-named remote files (lrzsz protect mode otherwise skips).
     let command = payload
         .upload_command
@@ -1588,12 +1585,24 @@ pub async fn zmodem_drag_drop_upload<R: Runtime>(
         .filter(|c| !c.is_empty())
         .unwrap_or_else(|| "rz -y\r".to_string());
     let timer = CancellationToken::new();
-    *entry.drag_drop.lock() = Some(DragDropUpload {
-        paths,
-        names,
-        temp_paths,
-        timer: timer.clone(),
-    });
+    {
+        // Check and claim under one lock, after the awaits above: a pending
+        // upload is taken off this slot only once its transfer is active, so
+        // an empty slot plus no active transfer means nothing is in flight.
+        let mut slot = entry.drag_drop.lock();
+        if slot.is_some() {
+            return fail("ZMODEM drag-drop upload already pending");
+        }
+        if entry.transfer_active() {
+            return fail("ZMODEM transfer already in progress");
+        }
+        *slot = Some(DragDropUpload {
+            paths,
+            names,
+            temp_paths: temp_paths.clone(),
+            timer: timer.clone(),
+        });
+    }
     entry.with_sentry(|s, now| s.arm_command_echo(command.as_bytes(), now));
     entry.write(command.into_bytes());
 
