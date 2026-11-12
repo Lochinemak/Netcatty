@@ -61,7 +61,7 @@ test('uninstall requires a visible confirmation, reports failures, and removes t
     await act(async () => { checkbox.click(); button('Cancel', confirmation()!).click(); await settle(); });
     assert.equal(confirmation(), null);
     assert.deepEqual(removed, []);
-    assert.equal(document.activeElement, trigger);
+    assert.ok(document.activeElement === trigger);
     await act(async () => { trigger.click(); await settle(); });
     assert.equal(confirmation()!.querySelector<HTMLInputElement>('input')!.checked, false, 'private data clearing is reset for a new confirmation');
     await act(async () => { button('Uninstall', confirmation()!).click(); await settle(); });

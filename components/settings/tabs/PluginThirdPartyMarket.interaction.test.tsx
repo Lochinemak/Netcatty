@@ -40,7 +40,7 @@ test('source management requires consent and Escape restores either opener insid
       assert.equal(dialog.querySelector<HTMLButtonElement>('button[type="submit"]')?.disabled, true);
       await act(async () => { dialog.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })); await settle(); });
       assert.equal(document.querySelectorAll('[role="dialog"]').length, 1);
-      assert.equal(document.activeElement, opener);
+      assert.ok(document.activeElement === opener);
     }
   } finally {
     // Radix schedules unmount autofocus on a timer. Drain it while the DOM's

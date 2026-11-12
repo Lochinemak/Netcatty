@@ -62,7 +62,7 @@ test('landing settings entry targets the declared plugin and a manager tab round
     assert.ok(document.querySelector('[data-plugin-detail] button[aria-label="Settings for Alpha"]'), 'details offer the same settings entry');
     await act(async () => { document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); await settle(); });
     assert.equal(document.querySelector('[role=dialog]'), null);
-    assert.equal(document.activeElement, browse);
+    assert.ok(document.activeElement === browse);
     const toggle = document.querySelector<HTMLButtonElement>('button[aria-label="Disable Alpha"]')!;
     await act(async () => { toggle.click(); await settle(); });
     assert.match(document.querySelector('[role=alert]')!.textContent!, /Synthetic management failure/);

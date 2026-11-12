@@ -66,7 +66,9 @@ test('local logging controls default off, disclose verbose risk, and call host-o
     assert.match(document.querySelector('[role=alert]')!.textContent!, /synthetic preferences write failed/);
     await act(async () => button('Close').click());
     assert.equal(document.querySelector('[role=dialog]'), null);
-    assert.equal(document.activeElement, configure);
+    // Radix restores focus to the trigger in a setTimeout(0) after the dialog unmounts.
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+    assert.ok(document.activeElement === configure, 'closing the dialog returns focus to Configure');
   } finally {
     await act(async () => root.unmount());
     dom.window.close();

@@ -43,7 +43,7 @@ test('information previews on hover/focus, pins on click and Escape returns focu
     await act(async () => { pinned.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })); await settle(); });
     assert.equal(document.querySelector('[role="dialog"][aria-label="Plugin help"]'), null);
     assert.equal(document.querySelectorAll('[role="dialog"]').length, 1, 'Escape closes only the information layer');
-    assert.equal(document.activeElement, trigger);
+    assert.ok(document.activeElement === trigger);
     assert.equal(Boolean(document.querySelector('[role="tooltip"]')), false, 'Escape does not immediately reopen the focus preview');
     await act(async () => { other.focus(); trigger.focus(); await settle(); });
     assert.ok(document.querySelector('[role="tooltip"]'), 'a subsequent deliberate focus still previews help');

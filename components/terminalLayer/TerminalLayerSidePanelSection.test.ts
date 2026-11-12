@@ -233,7 +233,7 @@ test('moving a stable portal host restores focus to its active input', () => {
     assert.notEqual(dom.window.document.activeElement, input);
 
     movePersistentPortalNode(mountNode, second, focusToRestore);
-    assert.equal(dom.window.document.activeElement, input);
+    assert.ok(dom.window.document.activeElement === input);
   } finally {
     globalThis.document = previousDocument;
     globalThis.HTMLElement = previousHTMLElement;

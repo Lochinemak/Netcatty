@@ -58,13 +58,13 @@ test('plugin manager is single-instance, closes with Escape, restores focus and 
     assert.equal(document.activeElement?.getAttribute('aria-label'), 'Plugin search', 'Tab wraps inside the modal');
     await act(async () => { document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); await settle(); });
     assert.equal(document.querySelector('[role="dialog"]'), null);
-    assert.equal(document.activeElement, trigger);
+    assert.ok(document.activeElement === trigger);
     assert.equal(unmounts, 1);
     await click(trigger);
     assert.equal(mounts, 2);
     await click(document.querySelector<HTMLButtonElement>('[role="dialog"] button[data-dialog-close]:not([aria-hidden])')!);
     assert.equal(document.querySelector('[role="dialog"]'), null);
-    assert.equal(document.activeElement, trigger);
+    assert.ok(document.activeElement === trigger);
     assert.equal(unmounts, 2);
     function ControlledEntry() {
       const [open, setOpen] = useState(false);
@@ -82,7 +82,7 @@ test('plugin manager is single-instance, closes with Escape, restores focus and 
     await click(external);
     assert.equal(document.querySelectorAll('[role=dialog]').length, 1);
     await act(async () => { document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); await settle(); });
-    assert.equal(document.activeElement, external, 'controlled entry restores the actual row opener');
+    assert.ok(document.activeElement === external, 'controlled entry restores the actual row opener');
     await click(external);
     external.disabled = true;
     await act(async () => { document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); await settle(); });
