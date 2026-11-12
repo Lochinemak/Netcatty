@@ -45,6 +45,14 @@ import { SessionOutputRoutes, createWindowsBridge, listenToCurrentWindow } from 
 // Contract constants (see `netcatty_core::ipc::events`)
 // ---------------------------------------------------------------------------
 
+/**
+ * `netcatty:data` addressed to one window (`netcatty:data/<label>`): Rust
+ * sends a routed session's output under this name, so windows that do not
+ * display the session never evaluate the payload. Untracked sessions still
+ * use the broadcast name.
+ */
+export const sessionDataEventFor = (windowLabel: string): string => `netcatty:data/${windowLabel}`;
+
 export const TAURI_EVENTS = {
   sessionData: 'netcatty:data',
   sessionExit: 'netcatty:exit',
@@ -423,10 +431,16 @@ class SessionEventRouter {
   /** Output of sessions displayed by another window is dropped (`bridge/windows.ts`). */
   private readonly accepts: (sessionId: string) => boolean;
 
-  constructor(hub: EventHub, backlog: SessionDataBacklog, accepts: (sessionId: string) => boolean = () => true) {
+  constructor(
+    hub: EventHub,
+    backlog: SessionDataBacklog,
+    accepts: (sessionId: string) => boolean = () => true,
+    windowLabel: string = currentWindowLabel(),
+  ) {
     this.backlog = backlog;
     this.accepts = accepts;
     hub.subscribe<SessionDataEvent>(TAURI_EVENTS.sessionData, (event) => this.handleData(event));
+    hub.subscribe<SessionDataEvent>(sessionDataEventFor(windowLabel), (event) => this.handleData(event));
     hub.subscribe<SessionExitEvent>(TAURI_EVENTS.sessionExit, (event) => this.handleExit(event));
   }
 
@@ -542,6 +556,7 @@ export function createTauriBridge(options: CreateTauriBridgeOptions = {}): Netca
   // lost while the async `listen` registration is still pending.
   const sessionEventsReady = Promise.all([
     hub.ensure(TAURI_EVENTS.sessionData),
+    hub.ensure(sessionDataEventFor(currentWindowLabel())),
     hub.ensure(TAURI_EVENTS.sessionExit),
     hub.ensure(TAURI_EVENTS.authFailed),
   ]).then(() => undefined);

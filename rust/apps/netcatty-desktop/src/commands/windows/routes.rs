@@ -2,10 +2,12 @@
 //! `webContentsId`, `attachHomeWebContentsIds`, `rendererSessionLifetime.cjs`
 //! and the attach-popup grants of `terminalAttachRestore.cjs`).
 //!
-//! Tauri delivers `netcatty:data` to every window, so the backend keeps the
-//! *display* window of each session and broadcasts every change
-//! (`netcatty:window:session-output-route`); the renderer adapter drops output
-//! of sessions displayed elsewhere. The *owner* is the window that started
+//! The backend keeps the *display* window of each session: the session pump
+//! emits a routed session's output as `netcatty:data/<display label>`, which
+//! only that window listens for (untracked sessions use the broadcast
+//! `netcatty:data`). Every change is broadcast
+//! (`netcatty:window:session-output-route`) and the renderer adapter still
+//! drops broadcast output of sessions displayed elsewhere. The *owner* is the window that started
 //! the session: its sessions are closed when it is destroyed. An attach popup
 //! only borrows the display route (the owner does not change), and restoring
 //! the route hands it back to a main window.

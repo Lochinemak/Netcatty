@@ -301,6 +301,23 @@ fn attach_popup_hand_over_and_restore() {
     ));
     assert_eq!(routes.lock().unwrap().last().unwrap()["label"], "main");
 
+    // A routed session's output is addressed to its display window only.
+    let broadcast = collect(&h.app, "netcatty:data");
+    let to_main = collect(&h.app, "netcatty:data/main");
+    let echo = |marker: &str| {
+        ok(invoke(
+            &h.main,
+            "session_write",
+            json!({ "payload": { "sessionId": sid, "data": format!("echo {marker}-$((1+1))\n") } }),
+        ));
+    };
+    let saw = |seen: &Arc<Mutex<Vec<Value>>>, needle: &str| {
+        seen.lock().unwrap().iter().any(|e| e["data"].as_str().is_some_and(|d| d.contains(needle)))
+    };
+    echo("routed-main");
+    assert!(wait_until(Duration::from_secs(10), || saw(&to_main, "routed-main-2")), "output reaches netcatty:data/main");
+    assert!(!saw(&broadcast, "routed-main"), "routed output is not broadcast");
+
     let opened = ok(invoke(
         &h.main,
         "windows_open_terminal_popup",
@@ -356,6 +373,11 @@ fn attach_popup_hand_over_and_restore() {
         routes.lock().unwrap().last().unwrap()["label"],
         popup.label()
     );
+    let to_popup = collect(&h.app, &format!("netcatty:data/{}", popup.label()));
+    echo("routed-popup");
+    assert!(wait_until(Duration::from_secs(10), || saw(&to_popup, "routed-popup-2")), "output follows the attach popup");
+    assert!(!saw(&to_main, "routed-popup"), "the previous display window no longer gets it");
+    assert!(!saw(&broadcast, "routed-popup"));
 
     // Apply the popup state back home before closing.
     auto_reply(

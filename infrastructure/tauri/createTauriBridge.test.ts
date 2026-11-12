@@ -99,6 +99,7 @@ test('startSSHSession sends the options as payload and unwraps sessionId', async
   assert.deepEqual(record.args, { payload: { hostname: 'example.com', username: 'root', port: 2222 } });
   // Session events were subscribed eagerly before the start command ran.
   assert.equal(fake.listenerCount('netcatty:data'), 1);
+  assert.equal(fake.listenerCount('netcatty:data/main'), 1, 'window-addressed output too');
   assert.equal(fake.listenerCount('netcatty:exit'), 1);
 });
 
@@ -445,6 +446,45 @@ test('readKnownHosts rebuilds known_hosts text from parsed entries', async () =>
 
   fake.respond('ssh_read_known_hosts', () => []);
   assert.equal(await bridge.readKnownHosts!(), null);
+});
+
+test('output addressed to this window is delivered like broadcast output', async () => {
+  const { fake, bridge } = setup();
+  await flush();
+  fake.emit('netcatty:data/main', { sessionId: 'a', data: 'early ' });
+  const received: string[] = [];
+  bridge.onSessionData('a', (data) => received.push(data), { replayBacklog: true });
+  fake.emit('netcatty:data/main', { sessionId: 'a', data: 'routed' });
+  fake.emit('netcatty:data/other-window', { sessionId: 'a', data: 'not ours' });
+  assert.deepEqual(received, ['early ', 'routed']);
+});
+
+test('SessionDataBacklog matches the newest-maxChars rule over random appends', () => {
+  // Reference: the one-string implementation this replaced.
+  const reference = (chunks: string[], maxChars: number) => {
+    let kept = '';
+    for (const chunk of chunks) {
+      kept += chunk;
+      if (kept.length > maxChars) kept = kept.slice(kept.length - maxChars);
+    }
+    return kept;
+  };
+  let seed = 7;
+  const random = () => {
+    seed = (seed * 1103515245 + 12345) % 2147483648;
+    return seed / 2147483648;
+  };
+  for (const maxChars of [1, 5, 64, 1000]) {
+    for (let round = 0; round < 50; round += 1) {
+      const chunks = Array.from({ length: 1 + Math.floor(random() * 3000) }, (_, i) =>
+        String.fromCharCode(97 + (i % 26)).repeat(1 + Math.floor(random() * maxChars * 1.5)));
+      const backlog = new SessionDataBacklog(maxChars);
+      for (const chunk of chunks) backlog.append('s', chunk);
+      const expected = reference(chunks, maxChars);
+      assert.equal(backlog.size('s'), expected.length);
+      assert.equal(backlog.take('s'), expected, `maxChars ${maxChars} round ${round}`);
+    }
+  }
 });
 
 test('SessionDataBacklog keeps only the newest bytes up to its limit', () => {

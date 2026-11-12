@@ -92,8 +92,13 @@ attached session's display returns to the main window.
 
 ## Session output routing and attach hand-over
 
-`netcatty:data` reaches every window, so Rust tracks each session's owner and
-display window:
+Rust tracks each session's owner and display window. A routed session's
+output is emitted as `netcatty:data/<display label>`, which only that window
+listens for: Tauri evaluates an event in every webview that has a listener for
+its name (the target only filters the handlers), so a per-window name is what
+keeps hidden windows (tray panel, settings) from receiving terminal output.
+Untracked sessions, and the rare out-of-pump writes (X11 notices, MCP), use the
+broadcast `netcatty:data`.
 
 * the window that started a session reports it with `windows_track_session`
   (the adapter does this after every `startSession`); its sessions are closed

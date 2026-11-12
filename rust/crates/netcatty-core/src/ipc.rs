@@ -17,6 +17,13 @@ use std::collections::HashMap;
 pub mod events {
     /// `{ sessionId, data }` — terminal output.
     pub const SESSION_DATA: &str = "netcatty:data";
+    /// [`SESSION_DATA`] addressed to one window: `netcatty:data/<label>`.
+    /// Only that window listens for the name, so no other webview runs
+    /// the payload script (Tauri evaluates an event in every webview that
+    /// has a listener for its name, whatever the target).
+    pub fn session_data_for(window_label: &str) -> String {
+        format!("{SESSION_DATA}/{window_label}")
+    }
     /// `SessionExitEvent`.
     pub const SESSION_EXIT: &str = "netcatty:exit";
     /// `AuthFailedEvent`.

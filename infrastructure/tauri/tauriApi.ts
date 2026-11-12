@@ -225,7 +225,12 @@ export class EventHub {
  * when the session exits.
  */
 export class SessionDataBacklog {
-  private readonly pending = new Map<string, string>();
+  /**
+   * Chunks as they arrived; only the oldest one is ever sliced. Appending is
+   * O(chunk): concatenating into one string and slicing it back to
+   * `maxChars` copied the whole backlog (2 MB) on every event once full.
+   */
+  private readonly pending = new Map<string, { chunks: string[]; head: number; length: number }>();
   private readonly maxChars: number;
 
   constructor(maxChars = 2 * 1024 * 1024) {
@@ -234,17 +239,34 @@ export class SessionDataBacklog {
 
   append(sessionId: string, data: string): void {
     if (!sessionId || !data) return;
-    const next = (this.pending.get(sessionId) ?? '') + data;
-    this.pending.set(
-      sessionId,
-      next.length <= this.maxChars ? next : next.slice(next.length - this.maxChars),
-    );
+    let entry = this.pending.get(sessionId);
+    if (!entry) {
+      entry = { chunks: [], head: 0, length: 0 };
+      this.pending.set(sessionId, entry);
+    }
+    entry.chunks.push(data);
+    entry.length += data.length;
+    while (entry.length > this.maxChars) {
+      const oldest = entry.chunks[entry.head];
+      const excess = entry.length - this.maxChars;
+      if (oldest.length <= excess) {
+        entry.head += 1;
+        entry.length -= oldest.length;
+      } else {
+        entry.chunks[entry.head] = oldest.slice(excess);
+        entry.length -= excess;
+      }
+    }
+    if (entry.head > 1024 && entry.head * 2 > entry.chunks.length) {
+      entry.chunks = entry.chunks.slice(entry.head);
+      entry.head = 0;
+    }
   }
 
   take(sessionId: string): string {
-    const data = this.pending.get(sessionId) ?? '';
+    const entry = this.pending.get(sessionId);
     this.pending.delete(sessionId);
-    return data;
+    return entry ? entry.chunks.slice(entry.head).join('') : '';
   }
 
   clear(sessionId: string): void {

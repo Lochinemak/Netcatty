@@ -175,6 +175,13 @@ pub(crate) fn state<R: Runtime>(app: &AppHandle<R>) -> tauri::State<'_, WindowsS
     app.state::<WindowsState>()
 }
 
+/// Window that displays `session_id`'s output, when the session is routed
+/// and that window is open (`None`: broadcast to every window).
+pub(crate) fn output_window<R: Runtime>(app: &AppHandle<R>, session_id: &str) -> Option<String> {
+    let label = app.try_state::<WindowsState>()?.routes.lock().display_of(session_id)?.to_owned();
+    app.get_webview_window(&label).is_some().then_some(label)
+}
+
 fn internal(err: impl std::fmt::Display) -> CoreError {
     CoreError::internal(err.to_string())
 }
