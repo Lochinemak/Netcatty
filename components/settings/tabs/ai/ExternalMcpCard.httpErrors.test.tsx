@@ -48,7 +48,7 @@ for (const failure of ['returned', 'thrown'] as const) {
       const message = failure === 'returned' ? 'Fixture: port unavailable.' : 'Fixture: HTTP configuration threw.';
       const alert = dialog().querySelector('[role="alert"]')!;
       assert.match(alert.textContent!, new RegExp(message.replaceAll('.', '\\.')));
-      assert.equal(document.activeElement, alert, 'the error must be reachable without scrolling back manually');
+      assert.ok(document.activeElement === alert, 'the error must be reachable without scrolling back manually');
       assert.equal(port.value, '47401');
       assert.ok(document.querySelector('[role="dialog"]'));
       assert.match(document.querySelector('[data-settings-anchor="ai-external-mcp-http"]')!.textContent!, /Fixture:/);

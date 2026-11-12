@@ -23,6 +23,8 @@ async function mount(setConfig: (config: unknown) => Promise<unknown> = async ()
 }
 const button = (text: string) => [...document.querySelectorAll<HTMLButtonElement>('button')].find((el) => el.textContent === text)!;
 const click = async (text: string) => { await act(async () => button(text).click()); };
+// Radix restores focus to the trigger in a setTimeout(0) after the dialog unmounts.
+const flushFocusRestore = async () => { await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); }); };
 async function input(index: number, value: string) {
   const el = document.querySelectorAll('textarea')[index];
   await act(async () => {
@@ -74,7 +76,8 @@ test('rejected privacy draft stays open and accepted draft commits once and retu
     assert.deepEqual(saved, { enabled: true, redactPrivateIps: false, cidrs: ['192.0.2.0/24', '2001:db8::/32'], patterns: ['INTERNAL_[A-Z0-9]+'] });
     assert.deepEqual(calls[1], { redaction: saved });
     assert.equal(document.querySelector('[role="dialog"]'), null);
-    assert.equal(document.activeElement, trigger);
+    await flushFocusRestore();
+    assert.ok(document.activeElement === trigger, 'closing the dialog returns focus to its trigger');
     assert.match(document.querySelector('[role="status"]')!.textContent!, /new managed conversation/);
     await click('Configure privacy');
     assert.equal(document.querySelectorAll('textarea')[1].value, 'INTERNAL_[A-Z0-9]+');

@@ -84,10 +84,10 @@ test('gear opens a dedicated settings modal without management chrome and restor
     assert.equal(document.querySelector('[role=dialog] [role=tablist]'), null);
     const input = document.querySelector<HTMLInputElement>('input[aria-label="Alpha setting"]')!;
     input.focus(); await f.refresh();
-    assert.equal(document.activeElement, input, 'refresh cannot steal focus');
+    assert.ok(document.activeElement === input, 'refresh cannot steal focus');
     await f.close();
     assert.equal(document.querySelector('[role=dialog]'), null);
-    assert.equal(document.activeElement, f.gear);
+    assert.ok(document.activeElement === f.gear);
     assert.deepEqual(f.viewRequests, [], 'settings never open custom plugin pages');
   } finally { await f.dispose(); }
 });
@@ -133,7 +133,7 @@ test('a slow settings response renders in the modal and never reopens a dismisse
     assert.ok(document.querySelector('input[aria-label="Alpha setting"]'));
     await f.close(); await f.open(true); await f.close(); await f.release();
     assert.equal(document.querySelector('[role=dialog]'), null);
-    assert.equal(document.activeElement, f.gear);
+    assert.ok(document.activeElement === f.gear);
   } finally { await f.dispose(); }
 });
 
@@ -159,7 +159,7 @@ test('plugin details offer the same modal and Escape returns to the detail first
     await f.close();
     assert.equal(f.section(), null);
     assert.ok(document.querySelector('[data-plugin-detail]'));
-    assert.equal(document.activeElement, gear);
-    await f.close(); assert.equal(document.activeElement, browse);
+    assert.ok(document.activeElement === gear);
+    await f.close(); assert.ok(document.activeElement === browse);
   } finally { await f.dispose(); }
 });
