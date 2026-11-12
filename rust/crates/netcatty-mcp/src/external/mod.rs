@@ -209,7 +209,7 @@ impl ExternalMcpController {
             "hostRunning": i.last_known_port.is_some(),
             "error": i.error,
             "http": Self::http_status(&i),
-            "redaction": i.redaction.to_value(),
+            "redaction": crate::redaction::config_value(&i.redaction),
         })
     }
 
@@ -217,7 +217,7 @@ impl ExternalMcpController {
         let (port, token, redaction) = {
             let i = self.inner.lock();
             match (i.last_known_port, i.last_known_token.clone()) {
-                (Some(p), Some(t)) => (p, t, i.redaction.to_value()),
+                (Some(p), Some(t)) => (p, t, crate::redaction::config_value(&i.redaction)),
                 _ => return Ok(()),
             }
         };
@@ -640,7 +640,7 @@ impl http::HttpHooks for HttpHooksImpl {
         })
     }
     fn redaction_config(&self) -> Value {
-        self.0.upgrade().map(|c| c.inner.lock().redaction.to_value()).unwrap_or(Value::Null)
+        self.0.upgrade().map(|c| crate::redaction::config_value(&c.inner.lock().redaction)).unwrap_or(Value::Null)
     }
 }
 
