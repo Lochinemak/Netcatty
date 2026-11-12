@@ -54,7 +54,10 @@ pub(crate) async fn run(
 /// end up with both; `ClientConfig::builder()` then panics, which used to kill
 /// the session task before it could report anything. Installing a provider
 /// explicitly is independent of what the rest of the dependency tree enables.
-pub(crate) fn ensure_crypto_provider() {
+///
+/// The desktop app also calls this at startup, before any task can reach
+/// rustls (v1.2.1 crash logs show the panic on a tokio worker).
+pub fn ensure_crypto_provider() {
     use rustls::crypto::{aws_lc_rs, CryptoProvider};
     if CryptoProvider::get_default().is_none() {
         // Err only when another thread installed one first; either is fine.

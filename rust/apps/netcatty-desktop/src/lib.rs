@@ -111,6 +111,8 @@ pub fn configure_with<R: tauri::Runtime>(
 /// Build and run the Tauri application.
 pub fn run() {
     init_tracing();
+    // One process-level rustls provider before anything can open TLS.
+    netcatty_rdesktop::rdp::ensure_crypto_provider();
 
     let context = tauri::generate_context!();
     commands::diagnostics::install_panic_hook(commands::diagnostics::crash_log_for(

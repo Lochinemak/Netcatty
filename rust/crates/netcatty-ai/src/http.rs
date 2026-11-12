@@ -6,15 +6,41 @@
 //! the callers, chunk by chunk, so long reasoning streams are not cut off.
 
 use netcatty_core::{CoreError, CoreResult};
+use std::sync::Mutex;
 use std::time::Duration;
 
 const USER_AGENT: &str = concat!("Netcatty/", env!("CARGO_PKG_VERSION"));
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(20);
 
-/// Build a client. `skip_tls_verify` accepts invalid certificates
-/// (per-provider "skip TLS verification" setting, Electron
-/// `rejectUnauthorized: false`).
+/// Cached clients, `[verify, skip_tls_verify]`, tagged with the proxy
+/// generation they were built for. A cached client keeps its connection
+/// pool, so a chat turn or model listing does not redo TCP + TLS each time.
+static CLIENTS: Mutex<[Option<(u64, reqwest::Client)>; 2]> = Mutex::new([None, None]);
+
+/// The client for `skip_tls_verify` (per-provider "skip TLS verification"
+/// setting, Electron `rejectUnauthorized: false`), rebuilt after the app
+/// proxy settings change.
 pub fn client(skip_tls_verify: bool) -> CoreResult<reqwest::Client> {
+    let generation = netcatty_sync::proxy::generation();
+    let slot = usize::from(skip_tls_verify);
+    if let Some((built_for, client)) = &CLIENTS.lock().unwrap_or_else(|e| e.into_inner())[slot] {
+        if *built_for == generation {
+            return Ok(client.clone());
+        }
+    }
+    let client = build(skip_tls_verify)?;
+    CLIENTS.lock().unwrap_or_else(|e| e.into_inner())[slot] = Some((generation, client.clone()));
+    Ok(client)
+}
+
+#[cfg(test)]
+fn cached_generation(skip_tls_verify: bool) -> Option<u64> {
+    CLIENTS.lock().unwrap_or_else(|e| e.into_inner())[usize::from(skip_tls_verify)]
+        .as_ref()
+        .map(|(generation, _)| *generation)
+}
+
+fn build(skip_tls_verify: bool) -> CoreResult<reqwest::Client> {
     let mut builder = netcatty_sync::proxy::configure(
         reqwest::Client::builder()
             .user_agent(USER_AGENT)
@@ -135,6 +161,18 @@ mod tests {
         assert_eq!(decoder.push(b"a\xffb"), "a\u{FFFD}b");
         assert_eq!(decoder.push(b"\xe5"), "");
         assert_eq!(decoder.finish(), "\u{FFFD}");
+    }
+
+    #[test]
+    fn clients_are_reused_until_the_proxy_settings_change() {
+        client(true).unwrap();
+        let first = cached_generation(true).unwrap();
+        client(true).unwrap();
+        assert_eq!(cached_generation(true), Some(first), "same generation: cached client reused");
+
+        netcatty_sync::proxy::set(netcatty_sync::proxy::current());
+        client(true).unwrap();
+        assert!(cached_generation(true).unwrap() > first, "proxy change rebuilds the client");
     }
 
     #[test]
