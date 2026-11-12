@@ -29,13 +29,13 @@ use crate::BUILD_LOCK;
 /// Fixed AES-256-GCM master key for the injected test cipher.
 const TEST_KEY: [u8; 32] = [0x5a; 32];
 
-struct Harness {
-    app: App<MockRuntime>,
-    webview: WebviewWindow<MockRuntime>,
+pub(crate) struct Harness {
+    pub(crate) app: App<MockRuntime>,
+    pub(crate) webview: WebviewWindow<MockRuntime>,
     _data_dir: tempfile::TempDir,
 }
 
-fn build_app() -> Harness {
+pub(crate) fn build_app() -> Harness {
     let data_dir = tempfile::Builder::new()
         .prefix("netcatty-ipc-smoke-")
         .tempdir()
@@ -95,7 +95,7 @@ fn request(cmd: &str, body: InvokeBody, headers: tauri::http::HeaderMap) -> Invo
 }
 
 /// Invoke `cmd` with JSON `args` and return the deserialised response.
-fn invoke(webview: &WebviewWindow<MockRuntime>, cmd: &str, args: Value) -> Result<Value, Value> {
+pub(crate) fn invoke(webview: &WebviewWindow<MockRuntime>, cmd: &str, args: Value) -> Result<Value, Value> {
     get_ipc_response(
         webview,
         request(cmd, InvokeBody::Json(args), Default::default()),
@@ -121,7 +121,7 @@ fn invoke_raw(
         .map(|body| body.deserialize::<Value>().expect("json response"))
 }
 
-fn ok(result: Result<Value, Value>) -> Value {
+pub(crate) fn ok(result: Result<Value, Value>) -> Value {
     match result {
         Ok(v) => v,
         Err(e) => panic!("command failed: {e}"),

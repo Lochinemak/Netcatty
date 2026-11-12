@@ -708,15 +708,18 @@ fn deliver_with_meta<R: Runtime>(
     }
     let mut data = std::mem::take(pending);
     data.push_str(text);
-    events::emit(
-        app,
-        ev::SESSION_DATA,
-        SessionDataEvent {
-            session_id: session_id.to_string(),
-            data,
-            meta,
-        },
-    );
+    let payload = SessionDataEvent {
+        session_id: session_id.to_string(),
+        data,
+        meta,
+    };
+    // A routed session's output goes to its display window only (Electron
+    // sends it to the session's webContents); untracked sessions (just
+    // started, not yet claimed by a window) are broadcast.
+    match crate::commands::windows::output_window(app, session_id) {
+        Some(label) => events::emit(app, &ev::session_data_for(&label), payload),
+        None => events::emit(app, ev::SESSION_DATA, payload),
+    }
 }
 
 async fn pump<R: Runtime>(

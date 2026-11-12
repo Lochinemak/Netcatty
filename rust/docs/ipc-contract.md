@@ -56,7 +56,7 @@ Events:
 
 | Event | Payload |
 | --- | --- |
-| `netcatty:data` | `{ sessionId, data: string, meta? }` — `meta` is `{ moshHandshake?, moshHandshakeRequiresUserInput? }` on Mosh bootstrap output (absent otherwise). Output decoded with the session charset (`utf-8` default, `gb18030` (+ `gbk`/`gb2312`/`cp936`), `big5`, `shift_jis`, `euc-kr`, `latin1`/`iso-8859-1`; unknown labels → `utf-8`). Streaming decoder: multi-byte sequences split across chunks are handled. Bursts are coalesced (up to 256 KiB per event). |
+| `netcatty:data` | `{ sessionId, data: string, meta? }` — `meta` is `{ moshHandshake?, moshHandshakeRequiresUserInput? }` on Mosh bootstrap output (absent otherwise). Output decoded with the session charset (`utf-8` default, `gb18030` (+ `gbk`/`gb2312`/`cp936`), `big5`, `shift_jis`, `euc-kr`, `latin1`/`iso-8859-1`; unknown labels → `utf-8`). Streaming decoder: multi-byte sequences split across chunks are handled. Bursts are coalesced (up to 256 KiB per event). Output of a session routed to a window (`windows_track_session`, see `ipc-windows.md`) is emitted as `netcatty:data/<window label>` instead, same payload. |
 | `netcatty:exit` | `SessionExitEvent { sessionId, exitCode?, signal?, exitSignal?, error?, reason, remoteClosedWithoutExitStatus? }` — `reason: "exited"` when the backend ended (`"signaled"` with `exitSignal` when killed by a signal), `"closed"` after `session_close`. |
 | `netcatty:auth:failed` | `{ sessionId, error, hostname }` emitted before the start command rejects with `AUTH_FAILED`. |
 | `netcatty:chain:progress` | `ChainProgressEvent` per jump hop. |
@@ -666,7 +666,7 @@ Terminal plumbing and autocomplete (paste receipts, reuse fallback, Windows PTY 
 | `startLocalSession(o)` | `session_start_local` → `.sessionId` |
 | `writeToSession(id, data, opts)` | `session_write` (fire-and-forget; `opts.logRewrite` forwarded) |
 | `resizeSession`, `interruptSession`, `setSessionFlowPaused`, `ackSessionFlow`, `closeSession` | `session_resize`, `session_interrupt`, `session_set_flow_paused`, `session_ack_flow`, `session_close` |
-| `onSessionData(id, cb)` / `onSessionExit(id, cb)` | listen `netcatty:data` / `netcatty:exit`, filter by `sessionId`; return unlisten |
+| `onSessionData(id, cb)` / `onSessionExit(id, cb)` | listen `netcatty:data` + `netcatty:data/<own label>` / `netcatty:exit`, filter by `sessionId`; return unlisten |
 | `startRemoteDesktopSession(o, onEvent)` | `rdesktop_connect` with a `Channel`; binary messages are decoded into `frame` / `copyRect` events |
 | `sendRemoteDesktopInput(id, events)` / `closeRemoteDesktopSession(id)` | `rdesktop_input` (fire-and-forget) / `rdesktop_close` |
 | `startTelnetSession`, `startSerialSession`, `startMoshSession`, `startEtSession` | `telnet_start`, `serial_start`, `mosh_start`, `et_start` → `.sessionId` (protocol events subscribed first) |

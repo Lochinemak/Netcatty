@@ -20,3 +20,4 @@ mod ipc_smoke;
 mod ipc_transfers;
 mod ipc_windows;
 mod ipc_zmodem_terminal;
+mod perf_terminal;
