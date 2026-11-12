@@ -8,7 +8,9 @@ license.workspace = true
 
 [lib]
 name = "netcatty_desktop_lib"
-crate-type = ["staticlib", "cdylib", "rlib"]
+# Desktop only: `staticlib` / `cdylib` exist for Tauri's iOS / Android
+# targets and cost a second full link (a ~1.7 GB debug `.a`) on every build.
+crate-type = ["rlib"]
 
 [features]
 default = ["hostbrowser-proxy"]

@@ -4,7 +4,6 @@
 use netcatty_desktop_lib::{configure_with, SetupOptions};
 use netcatty_store::CredentialCipher;
 use serde_json::{json, Value};
-use std::sync::Mutex;
 use std::time::{Duration, Instant};
 use tauri::ipc::{CallbackFn, InvokeBody};
 use tauri::test::{
@@ -13,7 +12,7 @@ use tauri::test::{
 use tauri::webview::InvokeRequest;
 use tauri::{App, WebviewWindow};
 
-static BUILD_LOCK: Mutex<()> = Mutex::new(());
+use crate::BUILD_LOCK;
 const TEST_KEY: [u8; 32] = [0x5a; 32];
 
 struct Harness {

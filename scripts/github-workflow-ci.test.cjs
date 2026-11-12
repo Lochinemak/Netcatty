@@ -85,6 +85,30 @@ test("PR validation runs once per commit and includes a production build", () =>
   assert.doesNotMatch(testWorkflow, /\n  mosh-windows-conpty:/);
 });
 
+test("CI tests the Tauri backend and adapter on every change", () => {
+  const rustJob = testWorkflow.slice(testWorkflow.indexOf("\n  rust:\n"));
+  assert.ok(rustJob.length > 1, "test.yml must have a rust job");
+  assert.match(rustJob, /cargo clippy --workspace --all-targets --locked -- -D warnings/);
+  assert.match(rustJob, /cargo test --workspace --locked/);
+  assert.doesNotMatch(rustJob, /\n    if:/, "the rust job must not be skipped by a condition");
+
+  const packageJson = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "package.json"), "utf8"));
+  for (const glob of ["infrastructure/tauri/*.test.ts", "infrastructure/tauri/bridge/*.test.ts"]) {
+    assert.ok(packageJson.scripts.test.split(" ").includes(glob), `npm test must run ${glob}`);
+  }
+});
+
+test("Electron runtime tests run only for Electron inputs", () => {
+  const electronWorkflow = readWorkflow("test-electron.yml");
+  for (const job of ["electron-runtime:", "windows-fido:", "windows-broadcast-ssh:"]) {
+    assert.ok(electronWorkflow.includes(`\n  ${job}\n`), `${job} belongs to test-electron.yml`);
+    assert.ok(!testWorkflow.includes(`\n  ${job}\n`), `${job} must not run on every change`);
+  }
+  assert.match(electronWorkflow, /pull_request:\s*\n\s*paths:\s*\n\s*- "electron\/\*\*"/);
+  assert.match(electronWorkflow, /push:\s*\n\s*branches:\s*\n\s*- main\s*\n\s*paths:\s*\n\s*- "electron\/\*\*"/);
+  assert.doesNotMatch(testWorkflow, /sshChaChaTransport|hostBrowser\.firstLink/);
+});
+
 test("package release concurrency is isolated per tag", () => {
   assert.match(buildWorkflow, /format\('release-\{0\}', github\.ref\)/);
   assert.doesNotMatch(buildWorkflow, /&& 'release' \|\| github\.ref/);
@@ -103,7 +127,9 @@ test("manual package validations do not share push concurrency", () => {
 });
 
 test("package validation avoids duplicate branch runs and scopes PR builds", () => {
-  assert.match(buildWorkflow, /push:\s*\n\s*branches:\s*\n\s*- main/);
+  // main is the Tauri app (build-tauri.yml); the Electron matrix runs only
+  // for packaging PRs and by hand.
+  assert.doesNotMatch(buildWorkflow, /\n  push:/);
   assert.doesNotMatch(buildWorkflow, /branches:\s*\n\s*- "\*\*"/);
   assert.match(buildWorkflow, /pull_request:\s*\n\s*paths:/);
   assert.doesNotMatch(buildWorkflow, /\n  dedupe:/);

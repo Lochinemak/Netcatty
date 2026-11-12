@@ -177,7 +177,7 @@ accepted only while the route is connected.
 * `cargo test -p netcatty-hostbrowser`: stores (Electron's store / download /
   icon tests), address normalisation, page scheme allowlist, loopback
   detection, PDF policy, theme tokens.
-* `cargo test -p netcatty-desktop --test ipc_hostbrowser`: command dispatch on
+* `cargo test -p netcatty-desktop --test ipc ipc_hostbrowser::`: command dispatch on
   `MockRuntime` (bookmark sync, panel requests, embedded lifecycle on a local
   route, tab commands, ownership checks, download commands).
 * `node --test --import tsx infrastructure/tauri/bridge/hostBrowser.test.ts`:

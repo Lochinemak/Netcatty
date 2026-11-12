@@ -18,7 +18,7 @@ use tauri::test::{
 use tauri::webview::InvokeRequest;
 use tauri::{App, AppHandle, Listener, Manager, WebviewWindow};
 
-static BUILD_LOCK: Mutex<()> = Mutex::new(());
+use crate::BUILD_LOCK;
 
 struct Harness {
     app: App<MockRuntime>,

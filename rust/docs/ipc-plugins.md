@@ -141,5 +141,5 @@ OS-backed key is available).
   events, views messages, restart / disable / uninstall over the real
   JSON-RPC contract (runtimePeer under Node). Skips without Node or built
   examples (`npm run build:plugin-packages`).
-* `cargo test -p netcatty-desktop --test ipc_plugins` — headless IPC.
+* `cargo test -p netcatty-desktop --test ipc ipc_plugins::` — headless IPC.
 * `node --test --import tsx infrastructure/tauri/bridge/plugins.test.ts`.

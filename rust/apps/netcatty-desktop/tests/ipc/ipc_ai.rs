@@ -15,7 +15,7 @@ use tauri::test::{get_ipc_response, mock_builder, mock_context, noop_assets, Moc
 use tauri::webview::InvokeRequest;
 use tauri::{App, Listener, WebviewWindow};
 
-static BUILD_LOCK: Mutex<()> = Mutex::new(());
+use crate::BUILD_LOCK;
 const TEST_KEY: [u8; 32] = [0x5a; 32];
 
 struct Harness {

@@ -14,7 +14,7 @@ use tauri::test::{
 use tauri::webview::InvokeRequest;
 use tauri::{App, Listener, WebviewWindow};
 
-static BUILD_LOCK: Mutex<()> = Mutex::new(());
+use crate::BUILD_LOCK;
 const TEST_KEY: [u8; 32] = [0x5a; 32];
 
 struct Harness {
@@ -292,13 +292,19 @@ fn terminal_and_autocomplete_commands() {
         assert!(info.is_null());
     }
 
-    // Debug builds read the specs from the checkout's node_modules.
+    // Debug builds read the specs from the checkout: `electron/specs` is
+    // always there, `@withfig/autocomplete` only after `npm install`.
     let specs = ok(invoke(&h.webview, "figspec_list", json!({})));
     let specs = specs.as_array().unwrap();
     if !specs.is_empty() {
-        assert!(specs.iter().any(|s| s == "git"));
         assert!(!specs.iter().any(|s| s == "aws"));
         assert!(specs.iter().any(|s| s == "yum"), "local electron/specs are merged");
+    }
+    let withfig = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../../node_modules/@withfig/autocomplete/build")
+        .is_dir();
+    if withfig {
+        assert!(specs.iter().any(|s| s == "git"));
         let git = ok(invoke(&h.webview, "figspec_load", json!({ "commandName": "git" })));
         assert!(git.as_str().unwrap().contains("export"));
     }

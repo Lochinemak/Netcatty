@@ -37,7 +37,7 @@ pub struct SetupOptions {
 ///
 /// Generic over the runtime so the same wiring runs under the real `Wry`
 /// runtime (see [`run`]) and under `tauri::test::MockRuntime` in the
-/// headless IPC smoke tests (`tests/ipc_smoke.rs`).
+/// headless IPC smoke tests (`tests/ipc/ipc_smoke.rs`).
 pub fn configure<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
     configure_with(builder, SetupOptions::default())
 }
