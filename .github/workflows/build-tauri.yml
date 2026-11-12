@@ -50,25 +50,25 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: macos-arm64
+          # `targets` is space-separated; each one is built in turn. Both
+          # macOS architectures share one runner: macOS runners are the
+          # scarce ones, and a second queued macOS job was twice cancelled
+          # before it got a machine.
+          - name: macos
             os: macos-latest
-            target: aarch64-apple-darwin
-            bundles: app,dmg
-          - name: macos-x64
-            os: macos-latest
-            target: x86_64-apple-darwin
+            targets: aarch64-apple-darwin x86_64-apple-darwin
             bundles: app,dmg
           - name: windows-x64
             os: windows-latest
-            target: x86_64-pc-windows-msvc
+            targets: x86_64-pc-windows-msvc
             bundles: nsis,msi
           - name: linux-x64
             os: ubuntu-22.04
-            target: x86_64-unknown-linux-gnu
+            targets: x86_64-unknown-linux-gnu
             bundles: deb,rpm,appimage
           - name: linux-arm64
             os: ubuntu-22.04-arm
-            target: aarch64-unknown-linux-gnu
+            targets: aarch64-unknown-linux-gnu
             bundles: deb,rpm
     env:
       # Cloud sync client ids, read at build time by the renderer (Vite) and,
@@ -100,9 +100,10 @@ jobs:
         shell: bash
         run: |
           # rust/rust-toolchain.toml pins the stable channel; install it with
-          # the target this job builds for.
-          rustup toolchain install stable --profile minimal --target "${{ matrix.target }}"
-          rustup target add "${{ matrix.target }}" --toolchain stable
+          # the targets this job builds for.
+          targets=(${{ matrix.targets }})
+          rustup toolchain install stable --profile minimal "${targets[@]/#/--target=}"
+          rustup target add "${targets[@]}" --toolchain stable
           rustc --version
 
       - name: Cache Rust build
@@ -113,9 +114,9 @@ jobs:
             ~/.cargo/registry/cache
             ~/.cargo/git/db
             rust/target
-          key: tauri-${{ matrix.target }}-${{ hashFiles('rust/Cargo.lock', 'rust/rust-toolchain.toml') }}
+          key: tauri-${{ matrix.name }}-${{ hashFiles('rust/Cargo.lock', 'rust/rust-toolchain.toml') }}
           restore-keys: |
-            tauri-${{ matrix.target }}-
+            tauri-${{ matrix.name }}-
 
       - name: Install Linux build dependencies
         if: runner.os == 'Linux'
@@ -161,12 +162,13 @@ jobs:
           # Upstream's binary repo, also when this workflow runs in a fork.
           ET_BIN_OWNER: binaricat
         run: |
-          case "${{ matrix.target }}" in
+          # The macOS entry lists both architectures; its clients are universal.
+          case "${{ matrix.targets }}" in
             *-apple-darwin) platform=darwin; arch=universal ;;
             x86_64-pc-windows-msvc) platform=win32; arch=x64 ;;
             x86_64-unknown-linux-gnu) platform=linux; arch=x64 ;;
             aarch64-unknown-linux-gnu) platform=linux; arch=arm64 ;;
-            *) echo "no bundled clients for ${{ matrix.target }}"; exit 0 ;;
+            *) echo "no bundled clients for ${{ matrix.targets }}"; exit 0 ;;
           esac
           node scripts/fetch-mosh-binaries.cjs --platform="$platform" --arch="$arch" --resolve-release \
             || echo "::warning::bundled mosh-client unavailable for $platform-$arch"
@@ -200,7 +202,7 @@ jobs:
               | sort -t. -k1,1n -k2,2n -k3,3n | tail -n 1 || true)"
           fi
           echo "bundle version: ${version:-<tauri.conf.json>}"
-          case "${{ matrix.target }}" in
+          case "${{ matrix.targets }}" in
             *-apple-darwin) client_dir=darwin-universal; exe="" ;;
             x86_64-pc-windows-msvc) client_dir=win32-x64; exe=".exe" ;;
             x86_64-unknown-linux-gnu) client_dir=linux-x64; exe="" ;;
@@ -241,42 +243,58 @@ jobs:
         shell: bash
         working-directory: ${{ env.APP_DIR }}
         run: |
-          npx --yes "@tauri-apps/cli@${TAURI_CLI_VERSION}" build \
-            --ci \
-            --target "${{ matrix.target }}" \
-            --bundles "${{ matrix.bundles }}" \
-            --config tauri.ci.conf.json
+          # The renderer (beforeBuildCommand) is the same for every target:
+          # build it with the first one and drop the hook for the rest.
+          skip_renderer=()
+          for target in ${{ matrix.targets }}; do
+            echo "::group::tauri build $target"
+            npx --yes "@tauri-apps/cli@${TAURI_CLI_VERSION}" build \
+              --ci \
+              --target "$target" \
+              --bundles "${{ matrix.bundles }}" \
+              --config tauri.ci.conf.json \
+              "${skip_renderer[@]}"
+            echo "::endgroup::"
+            skip_renderer=(--config '{"build":{"beforeBuildCommand":null}}')
+          done
 
       - name: Collect bundles
         shell: bash
         run: |
-          bundle_dir="rust/target/${{ matrix.target }}/release/bundle"
           mkdir -p out
           # Installers plus the updater artifacts next to them: each
           # installer's minisign `.sig`, and on macOS the `.app.tar.gz` the
           # updater downloads (renamed per architecture, the bundler names
           # it after the app only). Nothing is signed without the key.
-          find "$bundle_dir" -maxdepth 2 -type f \( \
-            -name '*.dmg' -o -name '*-setup.exe' -o -name '*.msi' -o -name '*.deb' -o \
-            -name '*.rpm' -o -name '*.AppImage' -o -name '*-setup.exe.sig' -o -name '*.msi.sig' -o \
-            -name '*.deb.sig' -o -name '*.rpm.sig' -o -name '*.AppImage.sig' \) -exec cp -v {} out/ \;
-          case "${{ matrix.target }}" in
-            aarch64-apple-darwin) mac_arch=aarch64 ;;
-            x86_64-apple-darwin) mac_arch=x86_64 ;;
-            *) mac_arch="" ;;
-          esac
-          if [[ -n "$mac_arch" ]]; then
-            for archive in "$bundle_dir"/macos/*.app.tar.gz; do
-              [[ -f "$archive" ]] || continue
-              cp -v "$archive" "out/Netcatty_${mac_arch}.app.tar.gz"
-              if [[ -f "$archive.sig" ]]; then
-                cp -v "$archive.sig" "out/Netcatty_${mac_arch}.app.tar.gz.sig"
+          for target in ${{ matrix.targets }}; do
+            bundle_dir="rust/target/$target/release/bundle"
+            find "$bundle_dir" -maxdepth 2 -type f \( \
+              -name '*.dmg' -o -name '*-setup.exe' -o -name '*.msi' -o -name '*.deb' -o \
+              -name '*.rpm' -o -name '*.AppImage' -o -name '*-setup.exe.sig' -o -name '*.msi.sig' -o \
+              -name '*.deb.sig' -o -name '*.rpm.sig' -o -name '*.AppImage.sig' \) -exec cp -v {} out/ \;
+            case "$target" in
+              aarch64-apple-darwin) mac_arch=aarch64 ;;
+              x86_64-apple-darwin) mac_arch=x86_64 ;;
+              *) mac_arch="" ;;
+            esac
+            if [[ -n "$mac_arch" ]]; then
+              for archive in "$bundle_dir"/macos/*.app.tar.gz; do
+                [[ -f "$archive" ]] || continue
+                cp -v "$archive" "out/Netcatty_${mac_arch}.app.tar.gz"
+                if [[ -f "$archive.sig" ]]; then
+                  cp -v "$archive.sig" "out/Netcatty_${mac_arch}.app.tar.gz.sig"
+                fi
+              done
+              # Each architecture must contribute its own DMG.
+              if ! compgen -G "$bundle_dir/dmg/*.dmg" >/dev/null; then
+                echo "::error::No DMG for $target under $bundle_dir"
+                exit 1
               fi
-            done
-          fi
+            fi
+          done
           if [[ -z "$(ls -A out)" ]]; then
-            echo "::error::No bundles found under $bundle_dir"
-            find "$bundle_dir" -maxdepth 3 || true
+            echo "::error::No bundles found for ${{ matrix.targets }}"
+            find rust/target -maxdepth 3 -path '*/release/bundle' || true
             exit 1
           fi
           ls -la out
