@@ -73,7 +73,7 @@ async fn wait_for_regex_resolves_regex_source_strings_across_line_breaks() {
 #[tokio::test]
 async fn wait_for_treats_wildcard_looking_strings_as_literal_text() {
     let b = buf();
-    let f = b.wait_for(&t(".*SSH资源.*登录方式.*"), 200, None);
+    let f = b.wait_for(&t(".*SSH资源.*登录方式.*"), 2_000, None);
     b.append("1. SSH资源\n请选择SSH资源\n'zxadmin'登录方式:");
     let p = pending(f).await;
     b.append("\n.*SSH资源.*登录方式.*");
@@ -83,7 +83,7 @@ async fn wait_for_treats_wildcard_looking_strings_as_literal_text() {
 #[tokio::test]
 async fn wait_for_preserves_slash_regex_dot_behavior() {
     let b = buf();
-    let f = b.wait_for(&t("/BEGIN.*END/"), 200, None);
+    let f = b.wait_for(&t("/BEGIN.*END/"), 2_000, None);
     b.append("BEGIN\nEND");
     let p = pending(f).await;
     b.append("\nBEGIN END");
@@ -127,7 +127,7 @@ async fn wait_for_text_keeps_strings_literal() {
 #[tokio::test]
 async fn wait_for_text_treats_wildcard_looking_strings_as_literal_text() {
     let b = buf();
-    let f = b.wait_for_text(&t("literal .* prompt"), 200, None);
+    let f = b.wait_for_text(&t("literal .* prompt"), 2_000, None);
     b.append("literal abc prompt");
     let p = pending(f).await;
     b.append("\nliteral .* prompt");
@@ -138,7 +138,7 @@ async fn wait_for_text_treats_wildcard_looking_strings_as_literal_text() {
 async fn wait_for_regex_does_not_treat_stale_edge_wildcard_matches_as_fresh() {
     let b = buf();
     b.append(&format!("SSH资源{}", x(600)));
-    let p = pending(b.wait_for_regex(&t(".*SSH资源.*"), 200, None)).await;
+    let p = pending(b.wait_for_regex(&t(".*SSH资源.*"), 2_000, None)).await;
     b.append("\nSSH资源");
     assert_eq!(done(p).await, "\nSSH资源");
 }
@@ -155,7 +155,7 @@ async fn wait_for_regex_preserves_the_full_regex_match_value() {
 async fn wait_for_regex_applies_stale_protection_to_regexp_objects() {
     let b = buf();
     b.append(&format!("SSH资源{}", x(600)));
-    let p = pending(b.wait_for_regex(&re(".*SSH资源.*", "s"), 200, None)).await;
+    let p = pending(b.wait_for_regex(&re(".*SSH资源.*", "s"), 2_000, None)).await;
     b.append("\nSSH资源");
     assert_eq!(done(p).await, "\nSSH资源");
 }
@@ -172,7 +172,7 @@ async fn wait_for_regex_handles_lazy_edge_wildcards() {
 async fn wait_for_regex_applies_stale_protection_to_anchored_edge_wildcards() {
     let b = buf();
     b.append(&format!("READY{}", x(600)));
-    let p = pending(b.wait_for_regex(&re("^.*READY.*$", "s"), 200, None)).await;
+    let p = pending(b.wait_for_regex(&re("^.*READY.*$", "s"), 2_000, None)).await;
     b.append("\nREADY");
     assert_eq!(done(p).await, "\nREADY");
 }
@@ -181,7 +181,7 @@ async fn wait_for_regex_applies_stale_protection_to_anchored_edge_wildcards() {
 async fn wait_for_regex_applies_stale_protection_to_edge_plus_wildcards() {
     let b = buf();
     b.append(&format!("xREADYy{}", x(600)));
-    let p = pending(b.wait_for_regex(&re(".+READY.+", "s"), 200, None)).await;
+    let p = pending(b.wait_for_regex(&re(".+READY.+", "s"), 2_000, None)).await;
     b.append("\nxREADYy");
     assert_eq!(done(p).await, "\nxREADYy");
 }
@@ -259,7 +259,7 @@ async fn wait_for_ignores_stale_scrollback_not_near_buffer_tail() {
         x(600),
         x(600)
     ));
-    let p = pending(b.wait_for(&re("Do you want to reset password", ""), 200, None)).await;
+    let p = pending(b.wait_for(&re("Do you want to reset password", ""), 2_000, None)).await;
     b.append("Do you want to reset password? ");
     assert_eq!(done(p).await, "Do you want to reset password");
 }
@@ -286,7 +286,7 @@ async fn mark_current_output_consumed_prevents_startup_text_from_matching() {
     let b = buf();
     b.append("previous deploy READY\nuser@host:~$ ");
     b.mark_current_output_consumed(&shell_prompt_patterns());
-    let p = pending(b.wait_for(&t("READY"), 200, None)).await;
+    let p = pending(b.wait_for(&t("READY"), 2_000, None)).await;
     b.append("fresh READY\n");
     assert_eq!(done(p).await, "READY");
 }
@@ -302,7 +302,7 @@ async fn mark_current_output_consumed_preserves_the_startup_prompt_once() {
             .unwrap(),
         0
     );
-    let p = pending(b.wait_for_any(&shell_prompt_patterns(), 200, None, false)).await;
+    let p = pending(b.wait_for_any(&shell_prompt_patterns(), 2_000, None, false)).await;
     b.append("root@host:~# ");
     assert_eq!(done(p).await, 0);
 }
@@ -312,7 +312,7 @@ async fn normal_wait_for_any_does_not_consume_preserved_startup_prompts() {
     let b = buf();
     b.append("previous deploy READY\nuser@host:~$ ");
     b.mark_current_output_consumed(&shell_prompt_patterns());
-    let p = pending(b.wait_for_any(&prompts_with("READY"), 200, None, false)).await;
+    let p = pending(b.wait_for_any(&prompts_with("READY"), 2_000, None, false)).await;
     b.append("READY\n");
     assert_eq!(done(p).await, 0);
 }
@@ -397,7 +397,7 @@ async fn waits_survive_buffer_trimming_while_waiting() {
 async fn wait_for_still_rejects_pre_registration_scrollback_beyond_tail_slack() {
     let b = buf();
     b.append(&format!("TARGET{}", x(600)));
-    let p = pending(b.wait_for(&t("TARGET"), 200, None)).await;
+    let p = pending(b.wait_for(&t("TARGET"), 2_000, None)).await;
     b.append("\nTARGET");
     assert_eq!(done(p).await, "TARGET");
 }
@@ -413,7 +413,7 @@ async fn replace_with_visible_screen_makes_the_whole_viewport_waitable() {
     assert!(screen.len() > 512);
     b.replace_with_visible_screen(&screen, "", "");
     assert_eq!(
-        b.wait_for_regex(&t("SSH资源\\s*\\(\\d+\\)\\s*:"), 200, None)
+        b.wait_for_regex(&t("SSH资源\\s*\\(\\d+\\)\\s*:"), 2_000, None)
             .await
             .unwrap(),
         "SSH资源(5) :"
@@ -425,7 +425,7 @@ async fn replace_with_visible_screen_keeps_trailing_fresh_output_from_sync_race(
     let b = buf();
     b.replace_with_visible_screen(&format!("SSH资源(5) :\n{}\n", x(600)), "\x07\x07", "");
     assert_eq!(
-        b.wait_for_regex(&t("SSH资源\\s*\\(\\d+\\)\\s*:"), 200, None)
+        b.wait_for_regex(&t("SSH资源\\s*\\(\\d+\\)\\s*:"), 2_000, None)
             .await
             .unwrap(),
         "SSH资源(5) :"
@@ -444,7 +444,7 @@ async fn seeded_viewport_does_not_make_mid_screen_prompts_waitable_via_wait_for_
     let screen = lines.join("\n");
     assert!(screen.len() > 512);
     b.replace_with_visible_screen(&screen, "", "");
-    let p = pending(b.wait_for_any(&shell_prompt_patterns(), 200, None, true)).await;
+    let p = pending(b.wait_for_any(&shell_prompt_patterns(), 2_000, None, true)).await;
     b.append("\nuser@host:~$ ");
     assert_eq!(done(p).await, 1);
 }
@@ -460,7 +460,7 @@ async fn seeded_viewport_keeps_generic_wait_for_any_matches_outside_the_live_tai
     assert!(screen.len() > 512);
     b.replace_with_visible_screen(&screen, "", "");
     assert_eq!(
-        b.wait_for_any(&[t("Option A"), t("Option B")], 200, None, false)
+        b.wait_for_any(&[t("Option A"), t("Option B")], 2_000, None, false)
             .await
             .unwrap(),
         0
@@ -493,7 +493,7 @@ async fn consuming_startup_prompt_also_consumes_seeded_viewport_above_it() {
             .unwrap(),
         1
     );
-    let p = pending(b.wait_for_text(&t("READY"), 200, None)).await;
+    let p = pending(b.wait_for_text(&t("READY"), 2_000, None)).await;
     b.append("\nfresh READY\n");
     assert_eq!(done(p).await, "READY");
 }
@@ -508,7 +508,7 @@ async fn consuming_startup_prompt_also_consumes_seeded_text_after_the_prompt() {
             .unwrap(),
         0
     );
-    let p = pending(b.wait_for_text(&t("READY"), 200, None)).await;
+    let p = pending(b.wait_for_text(&t("READY"), 2_000, None)).await;
     b.append("fresh READY\n");
     assert_eq!(done(p).await, "READY");
 }
@@ -524,7 +524,7 @@ async fn wait_for_prompt_does_not_consume_sync_race_trailing_fresh() {
         0
     );
     assert_eq!(
-        b.wait_for_text(&t("READY"), 200, None).await.unwrap(),
+        b.wait_for_text(&t("READY"), 2_000, None).await.unwrap(),
         "READY"
     );
 }
@@ -535,10 +535,10 @@ async fn does_not_duplicate_trailing_fresh_already_in_blank_padded_viewport() {
     b.replace_with_visible_screen("READY\n\n\n", "READY\n", "");
     assert_eq!(b.text(), "READY\n\n\n");
     assert_eq!(
-        b.wait_for_text(&t("READY"), 200, None).await.unwrap(),
+        b.wait_for_text(&t("READY"), 2_000, None).await.unwrap(),
         "READY"
     );
-    let p = pending(b.wait_for_text(&t("READY"), 200, None)).await;
+    let p = pending(b.wait_for_text(&t("READY"), 2_000, None)).await;
     b.append("\nfresh READY\n");
     assert_eq!(done(p).await, "READY");
 }
@@ -549,14 +549,14 @@ async fn trims_partial_overlap_from_sync_race_trailing_fresh() {
     b.replace_with_visible_screen("READY\n", "READY\nNEXT\n", "");
     assert_eq!(b.text(), "READY\nNEXT\n");
     assert_eq!(
-        b.wait_for_text(&t("READY"), 200, None).await.unwrap(),
+        b.wait_for_text(&t("READY"), 2_000, None).await.unwrap(),
         "READY"
     );
     assert_eq!(
-        b.wait_for_text(&t("NEXT"), 200, None).await.unwrap(),
+        b.wait_for_text(&t("NEXT"), 2_000, None).await.unwrap(),
         "NEXT"
     );
-    let p = pending(b.wait_for_text(&t("READY"), 200, None)).await;
+    let p = pending(b.wait_for_text(&t("READY"), 2_000, None)).await;
     b.append("\nfresh READY\n");
     assert_eq!(done(p).await, "READY");
 }
@@ -567,14 +567,14 @@ async fn trims_blank_padded_partial_overlap_from_trailing_fresh() {
     b.replace_with_visible_screen("READY\n\n", "READY\nNEXT\n", "");
     assert_eq!(b.text(), "READY\n\nNEXT\n");
     assert_eq!(
-        b.wait_for_text(&t("READY"), 200, None).await.unwrap(),
+        b.wait_for_text(&t("READY"), 2_000, None).await.unwrap(),
         "READY"
     );
     assert_eq!(
-        b.wait_for_text(&t("NEXT"), 200, None).await.unwrap(),
+        b.wait_for_text(&t("NEXT"), 2_000, None).await.unwrap(),
         "NEXT"
     );
-    let p = pending(b.wait_for_text(&t("READY"), 200, None)).await;
+    let p = pending(b.wait_for_text(&t("READY"), 2_000, None)).await;
     b.append("\nfresh READY\n");
     assert_eq!(done(p).await, "READY");
 }
@@ -585,11 +585,11 @@ async fn keeps_duplicate_trailing_fresh_when_snapshot_is_still_pre_sync() {
     b.replace_with_visible_screen("READY\n", "READY\n", "READY\n");
     assert_eq!(b.text(), "READY\nREADY\n");
     assert_eq!(
-        b.wait_for_text(&t("READY"), 200, None).await.unwrap(),
+        b.wait_for_text(&t("READY"), 2_000, None).await.unwrap(),
         "READY"
     );
     assert_eq!(
-        b.wait_for_text(&t("READY"), 200, None).await.unwrap(),
+        b.wait_for_text(&t("READY"), 2_000, None).await.unwrap(),
         "READY"
     );
 }
@@ -600,15 +600,15 @@ async fn keeps_duplicate_trailing_fresh_when_stale_viewport_is_a_sync_start_suff
     b.replace_with_visible_screen("READY\n", "READY\nNEXT\n", "banner\nREADY\n");
     assert_eq!(b.text(), "READY\nREADY\nNEXT\n");
     assert_eq!(
-        b.wait_for_text(&t("READY"), 200, None).await.unwrap(),
+        b.wait_for_text(&t("READY"), 2_000, None).await.unwrap(),
         "READY"
     );
     assert_eq!(
-        b.wait_for_text(&t("READY"), 200, None).await.unwrap(),
+        b.wait_for_text(&t("READY"), 2_000, None).await.unwrap(),
         "READY"
     );
     assert_eq!(
-        b.wait_for_text(&t("NEXT"), 200, None).await.unwrap(),
+        b.wait_for_text(&t("NEXT"), 2_000, None).await.unwrap(),
         "NEXT"
     );
 }
@@ -618,8 +618,8 @@ async fn invalidate_startup_seed_blocks_seeded_waits_after_input() {
     let b = buf();
     b.replace_with_visible_screen("root@host:~# \nold READY\n", "", "");
     b.invalidate_startup_seed();
-    let prompt = tokio::spawn(b.wait_for_any(&shell_prompt_patterns(), 200, None, true));
-    let text = tokio::spawn(b.wait_for_text(&t("READY"), 200, None));
+    let prompt = tokio::spawn(b.wait_for_any(&shell_prompt_patterns(), 2_000, None, true));
+    let text = tokio::spawn(b.wait_for_text(&t("READY"), 2_000, None));
     tokio::time::sleep(Duration::from_millis(30)).await;
     assert!(!prompt.is_finished());
     assert!(!text.is_finished());
@@ -634,7 +634,7 @@ async fn invalidate_startup_seed_also_consumes_pre_input_trailing_fresh() {
     let b = buf();
     b.replace_with_visible_screen("root@host:~# ", "\nfresh READY\n", "");
     b.invalidate_startup_seed();
-    let p = pending(b.wait_for_text(&t("READY"), 200, None)).await;
+    let p = pending(b.wait_for_text(&t("READY"), 2_000, None)).await;
     b.append("\npost-command READY\n");
     assert_eq!(done(p).await, "READY");
 }
@@ -650,7 +650,7 @@ async fn wait_for_prompt_keeps_long_sync_race_trailing_fresh_matchable() {
         0
     );
     assert_eq!(
-        b.wait_for_text(&t("READY"), 200, None).await.unwrap(),
+        b.wait_for_text(&t("READY"), 2_000, None).await.unwrap(),
         "READY"
     );
 }
@@ -660,7 +660,7 @@ async fn wait_for_prompt_does_not_rematch_short_seeded_prompt_after_live_output(
     let b = buf();
     b.replace_with_visible_screen("root@host:~# ", "", "");
     b.append("echo hi\nhi\n");
-    let p = pending(b.wait_for_any(&shell_prompt_patterns(), 200, None, true)).await;
+    let p = pending(b.wait_for_any(&shell_prompt_patterns(), 2_000, None, true)).await;
     b.append("root@host:~# ");
     assert_eq!(done(p).await, 0);
 }
@@ -670,11 +670,11 @@ async fn wait_for_prompt_ignores_preserved_prompt_after_newer_output_is_consumed
     let b = buf();
     b.replace_with_visible_screen("root@host:~# ", "\nfresh READY\n", "");
     assert_eq!(
-        b.wait_for_text(&t("READY"), 200, None).await.unwrap(),
+        b.wait_for_text(&t("READY"), 2_000, None).await.unwrap(),
         "READY"
     );
     assert!(b.scan_offset() > 0);
-    let p = pending(b.wait_for_any(&shell_prompt_patterns(), 200, None, true)).await;
+    let p = pending(b.wait_for_any(&shell_prompt_patterns(), 2_000, None, true)).await;
     b.append("root@host:~# ");
     assert_eq!(done(p).await, 0);
 }

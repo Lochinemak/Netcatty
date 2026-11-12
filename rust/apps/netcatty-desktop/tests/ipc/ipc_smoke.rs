@@ -24,7 +24,7 @@ use tauri::{App, Listener, WebviewWindow};
 
 /// Serialise app construction: `NETCATTY_PORTABLE_DATA_DIR` is process
 /// global, so two tests must not build their apps at the same time.
-static BUILD_LOCK: Mutex<()> = Mutex::new(());
+use crate::BUILD_LOCK;
 
 /// Fixed AES-256-GCM master key for the injected test cipher.
 const TEST_KEY: [u8; 32] = [0x5a; 32];

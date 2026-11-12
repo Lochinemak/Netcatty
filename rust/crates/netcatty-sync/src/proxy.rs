@@ -43,6 +43,14 @@ pub struct RawProxySettings {
 
 static CURRENT: RwLock<Option<ProxySettings>> = RwLock::new(None);
 
+/// Bumped by every [`set`]; clients built from [`configure`] elsewhere (the
+/// AI proxy) compare it to know when to rebuild.
+static GENERATION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+pub fn generation() -> u64 {
+    GENERATION.load(std::sync::atomic::Ordering::Acquire)
+}
+
 fn trimmed(value: Option<&serde_json::Value>) -> String {
     value
         .and_then(serde_json::Value::as_str)
@@ -103,6 +111,7 @@ pub fn current() -> ProxySettings {
 /// Store new settings; the shared HTTP client is rebuilt on next use.
 pub fn set(settings: ProxySettings) {
     *CURRENT.write() = Some(settings);
+    GENERATION.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
     crate::http::invalidate_client();
 }
 

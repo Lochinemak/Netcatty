@@ -254,7 +254,7 @@ auto-update.
 
 ## Headless IPC tests
 
-`apps/netcatty-desktop/tests/ipc_smoke.rs` drives the real command dispatch,
+`apps/netcatty-desktop/tests/ipc/` (one test binary; `ipc_smoke.rs` is the core suite) drives the real command dispatch,
 managed state and event emission through `tauri::test`'s mock runtime (no
 window): local shell start → write → `netcatty:data` → resize → close →
 exactly one `netcatty:exit`, the store and credential commands, local file

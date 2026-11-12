@@ -10,6 +10,21 @@ export default [
     files: ["examples/plugins/starter-netcatty/panel.js"],
     languageOptions: { globals: globals.browser },
   },
+  // Tauri host-browser chrome pages: plain scripts loaded into a webview.
+  {
+    files: ["rust/apps/netcatty-desktop/hostbrowser/**/*.js"],
+    languageOptions: { sourceType: "script", globals: globals.browser },
+  },
+  // Node build/maintenance scripts that ship with the Rust workspace.
+  {
+    files: ["rust/scripts/**/*.cjs"],
+    languageOptions: { sourceType: "commonjs", globals: globals.node },
+  },
+  // Node runtimes spawned by the Rust backend (e.g. the plugin stdio host).
+  {
+    files: ["rust/crates/*/runtime/**/*.mjs"],
+    languageOptions: { sourceType: "module", globals: globals.node },
+  },
   // The recommended preset has no file scope of its own, so scope it off all of
   // electron/ — that main-process tree is historically unlinted. The bridges
   // get a focused rule set in the dedicated block at the end of this config;

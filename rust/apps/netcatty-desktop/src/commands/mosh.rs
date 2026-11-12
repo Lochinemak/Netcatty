@@ -503,7 +503,9 @@ pub async fn mosh_start<R: Runtime>(
         .cloned()
         .unwrap_or_else(|| handshake::resolve_lang_from_charset(payload.charset.as_deref()));
 
-    let temp_dir = state.paths.temp_dir();
+    // The user's temp root (Settings → custom temp directory), as Electron's
+    // `tempDirBridge.getTempFilePath`.
+    let temp_dir = super::tempdir::current(&state.app);
     let mut files = SessionFiles::new(temp_dir, &session_id);
     let home = dirs::home_dir();
     let default_identities = home
@@ -859,10 +861,7 @@ pub async fn et_start<R: Runtime>(
     let home = dirs::home_dir().unwrap_or_default();
     let real_ssh_dir = home.join(".ssh");
     let _ = std::fs::create_dir_all(&real_ssh_dir);
-    let temp_home = state
-        .paths
-        .temp_dir()
-        .join(format!("et-ssh-home-{session_id}"));
+    let temp_home = super::tempdir::current(&state.app).join(format!("et-ssh-home-{session_id}"));
     let mut include_configs = Vec::new();
     if real_ssh_dir.join("config").is_file() {
         include_configs.push(real_ssh_dir.join("config"));
