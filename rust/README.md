@@ -197,7 +197,8 @@ scan / SSH debug log (`ipc-security.md`), deep links and OS integration
 cwd (`ipc-transfers.md`). Each document lists its own per-platform gaps.
 
 Not yet ported (the renderer treats these bridge methods as optional and
-hides the features when they are absent):
+hides the features when they are absent — except where a bullet says the
+method answers without doing the work):
 
 * Plugin runtime gaps (`docs/ipc-plugins.md`): the plugin catalog and market
   sources (the methods exist but return an empty catalog / `UNSUPPORTED`),
@@ -213,6 +214,15 @@ hides the features when they are absent):
   Apple Remote Desktop authentication, local → remote clipboard, connecting
   through an SSH jump host or proxy
 * Cursor API-key mode for managed agents (needs the Node-only `@cursor/sdk`)
+* Windows terminal clear: `clearSessionPtyBuffer` answers but clears nothing,
+  so after "Clear" the shell can repaint from the pre-clear cursor row — a tall
+  blank gap in PowerShell. Electron calls node-pty's `clear()`, which needs
+  `ConptyClearPseudoConsole` from node-pty's own bundled `conpty.dll`: the
+  function is not a `kernel32` export, and `portable-pty` keeps the `HPCON`
+  private (`win::psuedocon` is a private module, `Inner.con` a private field,
+  no accessor and no `clear()`), so closing this needs a patched `portable-pty`
+  plus that DLL in the bundle. Deliberately left as is; recorded in
+  `scripts/tauri-ipc-contract.test.cjs` (`NOT_IMPLEMENTED`).
 
 The `electron/` directory is untouched; `npm run dev` still runs the Electron
 build so both backends can be compared while the port matures.
