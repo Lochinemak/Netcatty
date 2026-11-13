@@ -92,9 +92,9 @@ jobs:
       # so a Keychain "Always Allow" survives updates; ad-hoc signatures
       # change with every build. The certificate may be self-signed: it is
       # not trusted by Gatekeeper, which treats it like ad-hoc. Without all
-      # three the build falls back to ad-hoc signing. Kept under their own
-      # names and handed to the bundler only by the macOS build step, since
-      # the bundler reads APPLE_CERTIFICATE as soon as it is set.
+      # three the build falls back to ad-hoc signing. Deliberately not named
+      # APPLE_CERTIFICATE: the bundler resolves the identity itself when it
+      # sees that variable and only accepts Apple-issued certificates.
       MACOS_SIGN_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
       MACOS_SIGN_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
       MACOS_SIGN_IDENTITY: ${{ vars.APPLE_SIGNING_IDENTITY || '' }}
@@ -260,6 +260,47 @@ jobs:
             console.log(JSON.stringify(conf));
           ' "$APP_DIR/tauri.ci.conf.json"
 
+      - name: Import macOS signing certificate
+        if: runner.os == 'macOS' && env.MACOS_SIGN_CERTIFICATE != '' && env.MACOS_SIGN_CERTIFICATE_PASSWORD != '' && env.MACOS_SIGN_IDENTITY != ''
+        shell: bash
+        run: |
+          # The certificate is imported here rather than handed to the
+          # bundler as APPLE_CERTIFICATE: with that variable set the bundler
+          # resolves the identity itself through `security find-certificate`,
+          # which only matches certificates whose common name carries one of
+          # Apple's prefixes ("Developer ID Application:" and the like) and
+          # that hold a team id, so a self-signed one is rejected with
+          # "failed to resolve signing identity". With only
+          # APPLE_SIGNING_IDENTITY set, the bundler runs `codesign -s` against
+          # the user's keychain search list, which is what this step prepares.
+          keychain="$RUNNER_TEMP/netcatty-signing.keychain-db"
+          keychain_password="$(openssl rand -base64 24)"
+          cert="$RUNNER_TEMP/netcatty-signing.p12"
+          printf '%s' "$MACOS_SIGN_CERTIFICATE" | base64 -d > "$cert"
+          security create-keychain -p "$keychain_password" "$keychain"
+          # No auto-lock: a locked keychain fails the build mid-way.
+          security set-keychain-settings "$keychain"
+          security unlock-keychain -p "$keychain_password" "$keychain"
+          security import "$cert" -k "$keychain" -P "$MACOS_SIGN_CERTIFICATE_PASSWORD" \
+            -f pkcs12 -T /usr/bin/codesign
+          rm -f "$cert"
+          # Lets codesign use the private key without a prompt.
+          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+            -s -k "$keychain_password" "$keychain" > /dev/null
+          # codesign looks in the search list, so append this keychain to it,
+          # keeping the rest and never listing it twice.
+          # shellcheck disable=SC2046
+          security list-keychains -d user -s \
+            $(security list-keychains -d user | tr -d '"' | grep -v netcatty-signing) "$keychain"
+          # An untrusted certificate is listed but reported as not trusted,
+          # which codesign accepts; -v would leave it out.
+          if ! security find-identity -p codesigning "$keychain" | grep -qF "$MACOS_SIGN_IDENTITY"; then
+            echo "::error::no code signing identity \"$MACOS_SIGN_IDENTITY\" in the imported certificate"
+            security find-identity -p codesigning "$keychain"
+            exit 1
+          fi
+          echo "imported \"$MACOS_SIGN_IDENTITY\""
+
       - name: Build Tauri app
         shell: bash
         working-directory: ${{ env.APP_DIR }}
@@ -273,13 +314,11 @@ jobs:
           for target in ${{ matrix.targets }}; do
             rm -rf "$GITHUB_WORKSPACE/rust/target/$target/release/bundle"
           done
-          # The bundler imports APPLE_CERTIFICATE into a temporary keychain
-          # and signs with APPLE_SIGNING_IDENTITY (set explicitly: the
-          # bundler only infers identities the system trusts, which a
-          # self-signed one is not).
+          # Only the identity: the certificate is already in the keychain
+          # search list (see "Import macOS signing certificate"), and setting
+          # APPLE_CERTIFICATE would send the bundler down a path that cannot
+          # resolve a self-signed certificate.
           if [[ "${{ runner.os }}" == macOS && -n "$MACOS_SIGN_CERTIFICATE" && -n "$MACOS_SIGN_CERTIFICATE_PASSWORD" && -n "$MACOS_SIGN_IDENTITY" ]]; then
-            export APPLE_CERTIFICATE="$MACOS_SIGN_CERTIFICATE"
-            export APPLE_CERTIFICATE_PASSWORD="$MACOS_SIGN_CERTIFICATE_PASSWORD"
             export APPLE_SIGNING_IDENTITY="$MACOS_SIGN_IDENTITY"
           fi
           for target in ${{ matrix.targets }}; do
@@ -353,6 +392,16 @@ jobs:
           name: netcatty-tauri-${{ matrix.name }}
           path: out/*
           if-no-files-found: error
+
+      - name: Remove the signing keychain
+        if: always() && runner.os == 'macOS'
+        shell: bash
+        run: |
+          keychain="$RUNNER_TEMP/netcatty-signing.keychain-db"
+          rm -f "$RUNNER_TEMP/netcatty-signing.p12"
+          [[ -f "$keychain" ]] || exit 0
+          # Takes it out of the search list as well.
+          security delete-keychain "$keychain" || true
 
   release:
     name: release
