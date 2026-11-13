@@ -107,7 +107,10 @@ declare global {
     onWindowWillHide?(cb: () => void): () => void;
 
     // Settings window
-    openSettingsWindow?(): Promise<boolean>;
+    /** `tab` opens (or switches) the settings window on that tab, e.g. `sync`. */
+    openSettingsWindow?(tab?: string): Promise<boolean>;
+    /** Settings window only: another window asked to show `tab`. */
+    onSettingsNavigate?(cb: (payload: { tab: string }) => void): () => void;
     setHostBrowserPanelLayout?(options: { browserId: string; visible: boolean; occluded?: boolean; theme?: 'dark' | 'light'; themeTokens?: Record<string, string>; bounds?: { x: number; y: number; width: number; height: number } }): Promise<boolean | { layers: HostBrowserPanelSnapshotLayer[] }>;
     closeHostBrowserPanel?(browserId: string): Promise<boolean>;
     getHostBrowserPanelState?(browserId: string): Promise<import('../../domain/hostBrowser').HostBrowserState>;

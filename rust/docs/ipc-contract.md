@@ -674,7 +674,7 @@ Terminal plumbing and autocomplete (paste receipts, reuse fallback, Windows PTY 
 | `onTelnetEchoMode`, `onTelnetAutoLoginComplete`, `onTelnetAutoLoginCancelled`, `onMoshSessionReady` | listen `netcatty:telnet:echo-mode`, `netcatty:telnet:auto-login-complete`, `netcatty:telnet:auto-login-cancelled`, `netcatty:mosh:ready`, filtered by `sessionId` |
 | `notifySessionUserInput(id)` / `setSessionEncoding(id, enc)` | `session_notify_user_input` (fire-and-forget) / `session_set_encoding` |
 | `execCommand(o)` | `session_exec` |
-| `openSettingsWindow()` / `closeSettingsWindow()` / `rendererReady()` | `window_open_settings` / `window_close_settings` / `window_renderer_ready` |
+| `openSettingsWindow(tab?)` / `closeSettingsWindow()` / `rendererReady()` / `onSettingsNavigate(cb)` | `window_open_settings { tab? }` / `window_close_settings` / `window_renderer_ready` / event `netcatty:settings:navigate` (to the settings window) |
 | `windowMinimize/Maximize/Close/IsMaximized/IsFullscreen/Focus()`, `setWindowTitle(t)` | `window_*` on the calling window |
 | `setTheme`, `setBackgroundColor`, `setLanguage` / `onLanguageChanged` | `app_set_theme`, `app_set_background_color`, `app_set_language` / `netcatty:language-changed` |
 | `notifySettingsChanged(p)` / `onSettingsChanged(cb)` | `app_broadcast_settings_changed` / `netcatty:settings:changed` minus own window |

@@ -1008,7 +1008,7 @@ export function AppSideEffects() {
   } | null>(null);
   // Populated below so the hotkey dispatcher can open the Settings window
   // even though `handleOpenSettings` is declared further down in the file.
-  const handleOpenSettingsRef = useRef<() => void>(() => {});
+  const handleOpenSettingsRef = useRef<(tab?: string) => void>(() => {});
   const closeTabInFlightRef = useRef(false);
   // Populated by UnsavedChangesProvider render-prop below so that the hotkey
   // dispatcher (defined outside that scope) can still reach the dirty-confirm
@@ -1995,9 +1995,11 @@ export function AppSideEffects() {
   }, []);
 
 
-  const handleOpenSettings = useCallback(() => {
+  // `tab` is ignored unless it is a string: this handler is also wired as a
+  // raw onClick (toast action, buttons) where it receives an event.
+  const handleOpenSettings = useCallback((tab?: unknown) => {
     void (async () => {
-      const opened = await openSettingsWindow();
+      const opened = await openSettingsWindow(typeof tab === 'string' ? tab : undefined);
       if (!opened) toast.error(t('toast.settingsUnavailable'), t('common.settings'));
     })();
   }, [openSettingsWindow, t]);
