@@ -14,7 +14,7 @@ use std::collections::HashMap;
 use std::time::Duration;
 use tauri::window::Color;
 use tauri::{
-    AppHandle, Manager, Runtime, Theme, WebviewUrl, WebviewWindow, WebviewWindowBuilder,
+    AppHandle, Emitter, Manager, Runtime, Theme, WebviewUrl, WebviewWindow, WebviewWindowBuilder,
     WindowEvent,
 };
 
@@ -27,6 +27,21 @@ const SETTINGS_HEIGHT: f64 = 720.0;
 /// A hidden window is shown on `rendererReady`; this is the fallback when
 /// the signal never arrives (Electron uses the same safety net).
 const SHOW_FALLBACK: Duration = Duration::from_secs(3);
+/// Sent to an already-open settings window to switch its active tab.
+pub const EVENT_SETTINGS_NAVIGATE: &str = "netcatty:settings:navigate";
+
+/// Accept only plain tab ids (`sync`, `file-associations`, ...): the value is
+/// spliced into the settings URL.
+fn sanitize_settings_tab(tab: Option<String>) -> Option<String> {
+    let tab = tab?;
+    let tab = tab.trim();
+    let valid = !tab.is_empty()
+        && tab.len() <= 64
+        && tab
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
+    valid.then(|| tab.to_string())
+}
 
 use netcatty_core::ipc::events::{
     LANGUAGE_CHANGED as EVENT_LANGUAGE_CHANGED, SETTINGS_CHANGED as EVENT_SETTINGS_CHANGED,
@@ -166,13 +181,16 @@ fn center_on<R: Runtime>(window: &WebviewWindow<R>, source: Option<&WebviewWindo
     ));
 }
 
-fn build_settings_window<R: Runtime>(app: &AppHandle<R>) -> CmdResult<WebviewWindow<R>> {
+fn build_settings_window<R: Runtime>(
+    app: &AppHandle<R>,
+    tab: Option<&str>,
+) -> CmdResult<WebviewWindow<R>> {
     let state = window_state(app);
-    let builder = WebviewWindowBuilder::new(
-        app,
-        SETTINGS_LABEL,
-        WebviewUrl::App("index.html#/settings".into()),
-    )
+    let url = match tab {
+        Some(tab) => format!("index.html#/settings?tab={tab}"),
+        None => "index.html#/settings".to_string(),
+    };
+    let builder = WebviewWindowBuilder::new(app, SETTINGS_LABEL, WebviewUrl::App(url.into()))
     .title("Settings")
     .inner_size(SETTINGS_WIDTH, SETTINGS_HEIGHT)
     .min_inner_size(720.0, 520.0)
@@ -206,18 +224,28 @@ fn schedule_show_fallback<R: Runtime>(window: WebviewWindow<R>) {
     });
 }
 
-/// Open (or re-show) the settings window. Resolves `true` like Electron.
+/// Open (or re-show) the settings window, optionally on a given tab.
+/// Resolves `true` like Electron.
 #[tauri::command]
 pub async fn window_open_settings<R: Runtime>(
     app: AppHandle<R>,
     window: WebviewWindow<R>,
+    tab: Option<String>,
 ) -> CmdResult<bool> {
+    let tab = sanitize_settings_tab(tab);
     if let Some(existing) = app.get_webview_window(SETTINGS_LABEL) {
+        if let Some(tab) = tab.as_deref() {
+            let _ = app.emit_to(
+                SETTINGS_LABEL,
+                EVENT_SETTINGS_NAVIGATE,
+                serde_json::json!({ "tab": tab }),
+            );
+        }
         center_on(&existing, Some(&window));
         show_and_focus(&existing);
         return Ok(true);
     }
-    let settings = build_settings_window(&app)?;
+    let settings = build_settings_window(&app, tab.as_deref())?;
     center_on(&settings, Some(&window));
     super::windows::apply_window_chrome(&settings);
     schedule_show_fallback(settings);
@@ -442,6 +470,19 @@ mod tests {
 
     fn rgb(color: Color) -> (u8, u8, u8, u8) {
         color.into()
+    }
+
+    #[test]
+    fn settings_tab_accepts_only_plain_ids() {
+        assert_eq!(sanitize_settings_tab(Some("sync".into())).as_deref(), Some("sync"));
+        assert_eq!(
+            sanitize_settings_tab(Some(" file-associations ".into())).as_deref(),
+            Some("file-associations")
+        );
+        assert_eq!(sanitize_settings_tab(None), None);
+        assert_eq!(sanitize_settings_tab(Some(String::new())), None);
+        assert_eq!(sanitize_settings_tab(Some("sync&x=1".into())), None);
+        assert_eq!(sanitize_settings_tab(Some("../evil".into())), None);
     }
 
     #[test]

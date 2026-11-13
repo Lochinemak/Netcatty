@@ -25,9 +25,9 @@ export const useWindowControls = () => {
     await bridge?.closeSettingsWindow?.();
   }, []);
 
-  const openSettingsWindow = useCallback(async () => {
+  const openSettingsWindow = useCallback(async (tab?: string) => {
     const bridge = netcattyBridge.get();
-    return bridge?.openSettingsWindow?.();
+    return bridge?.openSettingsWindow?.(tab);
   }, []);
 
   const minimize = useCallback(async () => {
@@ -62,6 +62,11 @@ export const useWindowControls = () => {
     return bridge?.onWindowCommandCloseRequested?.(cb) ?? (() => {});
   }, []);
 
+  const onSettingsNavigate = useCallback((cb: (payload: { tab: string }) => void) => {
+    const bridge = netcattyBridge.get();
+    return bridge?.onSettingsNavigate?.(cb) ?? (() => {});
+  }, []);
+
   return {
     notifyRendererReady,
     closeSettingsWindow,
@@ -73,5 +78,6 @@ export const useWindowControls = () => {
     isFullscreen,
     onFullscreenChanged,
     onWindowCommandCloseRequested,
+    onSettingsNavigate,
   };
 };

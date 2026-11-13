@@ -112,7 +112,8 @@ const StatusIndicator: React.FC<StatusIndicatorProps> = ({ status, size = 'sm', 
 // ============================================================================
 
 interface SyncStatusButtonProps {
-    onOpenSettings?: () => void;
+    /** Opens the settings window; called with `'sync'` to land on Cloud Sync. */
+    onOpenSettings?: (tab?: string) => void;
     onSyncNow?: () => Promise<void>; // Callback to trigger sync with current data
     className?: string;
     style?: React.CSSProperties;
@@ -257,7 +258,7 @@ export const SyncStatusButton: React.FC<SyncStatusButtonProps> = ({
                                     <button
                                         onClick={() => {
                                             setIsOpen(false);
-                                            onOpenSettings();
+                                            onOpenSettings('sync');
                                         }}
                                         className="p-1 rounded hover:bg-muted transition-colors"
                                     >
@@ -285,7 +286,7 @@ export const SyncStatusButton: React.FC<SyncStatusButtonProps> = ({
                                 className="w-full"
                                 onClick={() => {
                                     setIsOpen(false);
-                                    onOpenSettings?.();
+                                    onOpenSettings?.('sync');
                                 }}
                             >
                                 {t('sync.settings')}
@@ -406,7 +407,7 @@ export const SyncStatusButton: React.FC<SyncStatusButtonProps> = ({
                                          }
                                     } else {
                                         setIsOpen(false);
-                                        onOpenSettings?.();
+                                        onOpenSettings?.('sync');
                                     }
                                 }}
                             >

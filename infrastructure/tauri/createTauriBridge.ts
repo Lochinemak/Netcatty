@@ -54,6 +54,8 @@ import { SessionOutputRoutes, createWindowsBridge, listenToCurrentWindow } from 
 export const sessionDataEventFor = (windowLabel: string): string => `netcatty:data/${windowLabel}`;
 
 export const TAURI_EVENTS = {
+  /** Rust `window_open_settings` → settings window: switch to a tab. */
+  settingsNavigate: 'netcatty:settings:navigate',
   sessionData: 'netcatty:data',
   sessionExit: 'netcatty:exit',
   authFailed: 'netcatty:auth:failed',
@@ -1204,7 +1206,8 @@ export function createTauriBridge(options: CreateTauriBridgeOptions = {}): Netca
     // window. Tauri delivers events to every window, so the ones aimed at a
     // single window are filtered by label here.
     // -----------------------------------------------------------------------
-    openSettingsWindow: () => invoke<boolean>('window_open_settings'),
+    openSettingsWindow: (tab) => invoke<boolean>('window_open_settings', tab ? { tab } : undefined),
+    onSettingsNavigate: (cb) => windowHub.subscribe<{ tab: string }>(TAURI_EVENTS.settingsNavigate, cb),
     closeSettingsWindow: () => invoke<void>('window_close_settings').then(() => undefined),
     rendererReady: () => {
       fireAndForget('window_renderer_ready', invoke<void>('window_renderer_ready'));

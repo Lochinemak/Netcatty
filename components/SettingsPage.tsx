@@ -20,6 +20,7 @@ import { SettingsTabContent } from "./settings/settings-ui";
 import { SettingsFocusProvider, useSettingsFocus } from "./settings/SettingsFocusContext";
 import { SettingsSearchControl } from "./settings/SettingsSearchControl";
 import { cancelSettingsFocus, focusSettingsAnchor } from "./settings/settingsFocus";
+import { normalizeSettingsTab, settingsTabFromHash } from "./settings/settingsNavigation";
 import { Tabs, TabsList, TabsTrigger } from "./ui/tabs";
 import { LazyLoadBoundary } from "./ui/lazy-load-boundary";
 import { ExternalMcpApprovalsHost } from "./ai/ExternalMcpApprovalsHost";
@@ -330,15 +331,19 @@ const SettingsPageContent: React.FC<{ settings: SettingsState; appLock?: AppLock
     const pluginThemeTokens = useMemo(() => selectPluginThemeTokens(committedAppThemeStyle as Record<string, unknown>), [committedAppThemeStyle]);
     const { t } = useI18n();
     const { request, clearFocus, openSearch } = useSettingsFocus();
-    const { notifyRendererReady, closeSettingsWindow, onWindowCommandCloseRequested } = useWindowControls();
+    const { notifyRendererReady, closeSettingsWindow, onWindowCommandCloseRequested, onSettingsNavigate } = useWindowControls();
     const { updateState, checkNow, installUpdate, openReleasePage, startDownload, isUpdateDemoMode } = useUpdateCheck({
         autoUpdateEnabled: settings.autoUpdateEnabled,
         // Install blocked by unsaved editors in the main window — surface a toast
         // here so a click from the Settings window isn't a silent no-op (#1215).
         onNeedsSave: () => toast.warning(t('update.needsSave.message'), t('update.needsSave.title')),
     });
-    const [activeTab, setActiveTab] = useState("application");
-    const [mountedTabs, setMountedTabs] = useState(() => new Set(["application"]));
+    // Another window may open Settings on a tab (`#/settings?tab=sync`).
+    const [initialTab] = useState(() =>
+        (typeof window !== "undefined" ? settingsTabFromHash(window.location.hash) : null) ?? "application",
+    );
+    const [activeTab, setActiveTab] = useState(initialTab);
+    const [mountedTabs, setMountedTabs] = useState(() => new Set([initialTab]));
     const { available: pluginRuntimeAvailable } = usePluginContributions();
     const closeTabKeyStr = useMemo(() => {
         if (settings.hotkeyScheme === "disabled") return null;
@@ -419,6 +424,17 @@ const SettingsPageContent: React.FC<{ settings: SettingsState; appLock?: AppLock
             cancelSettingsFocus();
         };
     }, [request, activeTab, clearFocus]);
+
+    // Re-opening an already-created settings window on a specific tab.
+    useEffect(() => {
+        return onSettingsNavigate((payload) => {
+            const tab = normalizeSettingsTab(payload?.tab);
+            if (!tab) return;
+            cancelSettingsFocus();
+            clearFocus();
+            setActiveTab(tab);
+        });
+    }, [onSettingsNavigate, clearFocus]);
 
     const handleTabChange = useCallback((tab: string) => {
         // Manual sidebar navigation should cancel any pending search jump.

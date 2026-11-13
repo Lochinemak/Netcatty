@@ -148,7 +148,7 @@ interface TopTabsProps {
   onCloseTabsBatch: (targetIds: string[]) => void;
   onOpenQuickSwitcher: () => void;
   onThemeChange: (theme: 'dark' | 'light' | 'system') => void;
-  onOpenSettings: () => void;
+  onOpenSettings: (tab?: string) => void;
   onLockApp?: () => void;
   appLockEnabled?: boolean;
   externalMcpEnabled: boolean;
@@ -1263,7 +1263,7 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
                 size="icon"
                 className="h-7 w-7 shrink-0 app-no-drag top-tab-utility-btn"
                 style={{ color: 'var(--top-tabs-muted, hsl(var(--muted-foreground)))' }}
-                onClick={onOpenSettings}
+                onClick={() => onOpenSettings()}
               >
                 <Settings size={16} />
               </Button>
