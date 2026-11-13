@@ -36,8 +36,20 @@ Events on `netcatty:sftp:global-transfer`:
   endedAt }`; `transfer_start` resolves `{ transferId, error: "Transfer
   cancelled", cancelled: true }`.
 
+The renderer mints the `transferId`, so `transfer_cancel` can arrive before
+`transfer_start` has anything to stop: the transfer registers only after the
+queue wait and endpoint setup. A cancel for an id that is neither queued nor
+running is therefore latched (Electron `pendingCancelTransferIds`; ~5 min TTL,
+4096 ids, oldest dropped first). `run_transfer` takes the latch before
+admission and again before starting, and resolves the same cancelled outcome
+as a queued cancel — without emitting `queued` or `started`. The latch fires
+once, so reusing the id is not cancelled on arrival; the callers that settle a
+cancel themselves (queued job, running transfer) clear it, and
+`transfer_clear_pending_cancel` clears it for the renderer.
+
 | Command | Args | Returns |
 | --- | --- | --- |
+| `transfer_clear_pending_cancel` | `transferId` | `{ success: true }` — drop the pre-start cancel latch of that id |
 | `transfer_prioritize` | `transferId` | `{ success }` — `true` when the transfer was queued and moved to the front |
 | `transfer_set_concurrency` | `limit` | `{ success: true, limit }` — integers 1..=16 apply (and admit waiting jobs at once); anything else leaves the limit unchanged |
 | `transfer_cleanup` | `payload: { transferId, sourcePath, targetPath, targetSftpId?, targetEncoding?, stagedTargetPath? }` | `{ success }` (`false` + `error` only without `transferId`) |

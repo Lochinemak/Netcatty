@@ -278,11 +278,13 @@ pub fn handler<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + 
         sftp::sftp_extract,
         sftp::sftp_home_dir,
         sftp::sftp_close,
+        sftp::sftp_retain_transfer_session,
         sftp::transfer_start,
         sftp::transfer_cancel,
         sftp::transfer_pause,
         // Transfer queue controls, compressed folder upload, native file drag
         // (commands/transfers2.rs, rust/docs/ipc-transfers.md).
+        transfers2::transfer_clear_pending_cancel,
         transfers2::transfer_prioritize,
         transfers2::transfer_set_concurrency,
         transfers2::transfer_cleanup,

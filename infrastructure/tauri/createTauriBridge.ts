@@ -872,9 +872,12 @@ export function createTauriBridge(options: CreateTauriBridgeOptions = {}): Netca
     writeSftpBinary: (sftpId, path, content, encoding) =>
       invokeBinary<void>('sftp_write_binary', content, { sftpId, path, encoding }),
     closeSftp: (sftpId) => invoke<{ success?: boolean }>('sftp_close', { sftpId }),
-    // The Rust backend has no transfer lease bookkeeping: `sftp_close` closes
-    // immediately, so leases are acknowledged without effect.
-    retainSftpTransferSession: async () => ({ success: true }),
+    // The backend holds no lease table: a transfer keeps its SFTP client alive
+    // by holding it, so `sftp_close` cannot close it underneath (see
+    // `sftp_retain_transfer_session`). Retaining therefore only confirms the
+    // session is still open, and releasing has nothing to give back.
+    retainSftpTransferSession: (sftpId) =>
+      invoke<{ success: boolean; reason?: string }>('sftp_retain_transfer_session', { sftpId }),
     releaseSftpTransferSession: async () => ({ success: true }),
     mkdirSftp: (sftpId, path, encoding) => invoke<void>('sftp_mkdir', { sftpId, path, encoding }),
     deleteSftp: (sftpId, path, encoding, expectedType) =>
@@ -936,8 +939,8 @@ export function createTauriBridge(options: CreateTauriBridgeOptions = {}): Netca
     // The contract defines no resume command (a paused transfer is restarted
     // through `startStreamTransfer` with its checkpoint), so report the gap.
     resumeTransfer: async () => ({ success: false, reason: 'not-supported' }),
-    // Electron keeps a pre-start cancel latch in the main process; Rust has none.
-    clearPendingTransferCancel: async () => ({ success: true }),
+    clearPendingTransferCancel: (transferId) =>
+      invoke<{ success: boolean }>('transfer_clear_pending_cancel', { transferId }),
     onGlobalSftpTransferEvent: (cb) => hub.subscribe(TAURI_EVENTS.sftpGlobalTransfer, cb),
 
     // -----------------------------------------------------------------------

@@ -54,6 +54,8 @@ pub struct Transfers2State {
     companions: DashMap<String, Arc<Companion>>,
     /// Window label → pending native drag request id.
     drags: parking_lot::Mutex<HashMap<String, String>>,
+    /// Cancels that arrived before their transfer registered.
+    pending_cancels: PendingCancels,
 }
 
 /// Register the managed state and the stale-session sweep.
@@ -92,6 +94,114 @@ async fn sweep<R: Runtime>(app: &AppHandle<R>) {
 
 fn emit_transfer<R: Runtime>(app: &AppHandle<R>, payload: Value) {
     events::emit(app, ev::SFTP_GLOBAL_TRANSFER, payload);
+}
+
+// ===========================================================================
+// Pre-start cancel latch
+// ===========================================================================
+
+/// How long a latched cancel stays armed (Electron `PENDING_CANCEL_TTL_MS`).
+const PENDING_CANCEL_TTL: Duration = Duration::from_secs(5 * 60);
+/// Most ids kept at once (Electron `MAX_PENDING_CANCEL_TRANSFER_IDS`).
+const MAX_PENDING_CANCELS: usize = 4096;
+
+/// Transfer ids cancelled before `sftp::run_transfer` registered their handle.
+///
+/// The renderer mints the `transferId`, calls `transfer_start` and may cancel a
+/// moment later. `run_transfer` waits for an admission slot and resolves its
+/// endpoints before the handle reaches `state.transfers`, and `transfer_cancel`
+/// has nothing to stop until then: without this latch the cancel is dropped and
+/// the transfer runs to completion (Electron `pendingCancelTransferIds`).
+#[derive(Default)]
+struct PendingCancels {
+    /// Transfer id → when it was armed. Pruned on every access, so a cancel
+    /// for a transfer that never starts cannot pin the id forever.
+    inner: parking_lot::Mutex<HashMap<String, Instant>>,
+}
+
+impl PendingCancels {
+    fn arm(&self, transfer_id: &str) {
+        let mut ids = self.inner.lock();
+        ids.insert(transfer_id.to_owned(), Instant::now());
+        prune_pending_cancels(&mut ids);
+    }
+
+    /// Remove the latch; `true` when it was armed and still fresh.
+    fn disarm(&self, transfer_id: &str) -> bool {
+        let mut ids = self.inner.lock();
+        let armed = ids
+            .remove(transfer_id)
+            .is_some_and(|at| at.elapsed() < PENDING_CANCEL_TTL);
+        prune_pending_cancels(&mut ids);
+        armed
+    }
+}
+
+/// Drop expired ids, then the oldest ones while over the cap.
+fn prune_pending_cancels(ids: &mut HashMap<String, Instant>) {
+    ids.retain(|_, at| at.elapsed() < PENDING_CANCEL_TTL);
+    while ids.len() > MAX_PENDING_CANCELS {
+        let oldest = ids
+            .iter()
+            .min_by_key(|(_, at)| **at)
+            .map(|(id, _)| id.clone());
+        match oldest {
+            Some(id) => ids.remove(&id),
+            None => break,
+        };
+    }
+}
+
+/// Latch a cancel for a transfer that may not have registered yet.
+pub(crate) fn arm_pending_cancel<R: Runtime>(app: &AppHandle<R>, transfer_id: &str) {
+    if let Some(t2) = app.try_state::<Transfers2State>() {
+        t2.pending_cancels.arm(transfer_id);
+    }
+}
+
+/// Take the latch of `transfer_id`; `true` when it was armed. `run_transfer`
+/// calls this to decide whether to start at all; the callers that settled the
+/// cancel themselves call it to clear the latch, ignoring the answer, so a
+/// retry with the same id is not cancelled on arrival.
+pub(crate) fn take_pending_cancel<R: Runtime>(app: &AppHandle<R>, transfer_id: &str) -> bool {
+    app.try_state::<Transfers2State>()
+        .is_some_and(|t2| t2.pending_cancels.disarm(transfer_id))
+}
+
+/// Outcome of a transfer whose latch fired, shaped like the queued-cancel
+/// outcome [`admit`] returns.
+pub(crate) fn cancelled_before_start<R: Runtime>(
+    state: &AppState<R>,
+    transfer_id: &str,
+    emit_events: bool,
+) -> StreamTransferResult {
+    if emit_events {
+        emit_transfer(
+            &state.app,
+            json!({
+                "type": "cancelled",
+                "transferId": transfer_id,
+                "endedAt": netcatty_core::ids::now_ms(),
+            }),
+        );
+    }
+    StreamTransferResult {
+        transfer_id: transfer_id.to_owned(),
+        error: Some("Transfer cancelled".into()),
+        cancelled: Some(true),
+        ..Default::default()
+    }
+}
+
+/// Drop the pre-start cancel latch of `transferId`, so the renderer can reuse
+/// the id for a retry (Electron `netcatty:transfer:clear-pending-cancel`).
+#[tauri::command]
+pub async fn transfer_clear_pending_cancel<R: Runtime>(
+    state: Ctx<'_, R>,
+    transfer_id: String,
+) -> CmdResult<SuccessResult> {
+    take_pending_cancel(&state.app, &transfer_id);
+    Ok(SuccessResult::ok())
 }
 
 // ===========================================================================
@@ -1723,6 +1833,38 @@ mod tests {
             "lifecycleEpoch": 3
         }))
         .unwrap()
+    }
+
+    #[test]
+    fn a_pending_cancel_fires_once() {
+        let latch = PendingCancels::default();
+        assert!(!latch.disarm("t1"), "nothing armed");
+        latch.arm("t1");
+        assert!(latch.disarm("t1"));
+        assert!(!latch.disarm("t1"), "a retry of the id is not cancelled");
+    }
+
+    #[test]
+    fn an_expired_pending_cancel_does_not_fire() {
+        let latch = PendingCancels::default();
+        // Monotonic clocks start at boot, so on a freshly started machine
+        // there may be no instant that far back to construct.
+        let Some(stale) = Instant::now().checked_sub(PENDING_CANCEL_TTL + Duration::from_secs(1))
+        else {
+            return;
+        };
+        latch.inner.lock().insert("t1".to_owned(), stale);
+        assert!(!latch.disarm("t1"));
+        assert!(latch.inner.lock().is_empty(), "expired ids are pruned");
+    }
+
+    #[test]
+    fn pending_cancels_stay_bounded() {
+        let latch = PendingCancels::default();
+        for i in 0..MAX_PENDING_CANCELS + 16 {
+            latch.arm(&format!("t{i}"));
+        }
+        assert_eq!(latch.inner.lock().len(), MAX_PENDING_CANCELS);
     }
 
     #[test]
