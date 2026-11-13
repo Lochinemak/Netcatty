@@ -179,6 +179,108 @@ fn local_transfer_is_queued_then_started() {
     assert_eq!(queued["controlKind"], "stream");
 }
 
+/// The renderer's transfer channel pool asks before handing an `sftpId` to a
+/// transfer, so a session that is gone must be reported as gone rather than
+/// acknowledged (which would start a transfer that then fails).
+#[test]
+fn retaining_a_closed_sftp_session_is_refused() {
+    let h = build_app();
+    assert_eq!(
+        ok(
+            &h.webview,
+            "sftp_retain_transfer_session",
+            json!({ "sftpId": "gone" })
+        ),
+        json!({ "success": false, "reason": "SFTP session not found" })
+    );
+}
+
+/// The renderer mints the `transferId` itself, so a cancel can reach the
+/// backend before `transfer_start` has registered the transfer. It must still
+/// stop it: the latch in `commands/transfers2.rs` holds the cancel until
+/// `run_transfer` consumes it.
+#[test]
+fn a_cancel_that_arrives_before_the_start_still_cancels() {
+    let h = build_app();
+    let events = collect(&h.app, "netcatty:sftp:global-transfer");
+    let dir = tempfile::tempdir().unwrap();
+    let source = dir.path().join("a.bin");
+    std::fs::write(&source, vec![7u8; 4096]).unwrap();
+    let target = dir.path().join("b.bin");
+    let payload = json!({ "payload": {
+        "transferId": "t-early",
+        "sourcePath": source.to_string_lossy(),
+        "targetPath": target.to_string_lossy(),
+        "sourceType": "local",
+        "targetType": "local",
+        "totalBytes": 4096
+    }});
+
+    ok(
+        &h.webview,
+        "transfer_cancel",
+        json!({ "transferId": "t-early" }),
+    );
+    let result = ok(&h.webview, "transfer_start", payload.clone());
+
+    assert_eq!(result["cancelled"], true);
+    assert_eq!(result["error"], "Transfer cancelled");
+    assert!(!target.exists(), "a cancelled transfer copies nothing");
+    assert!(wait_for(&events, Duration::from_secs(5), |e| has(
+        e, "cancelled", "t-early"
+    )));
+    // The latch fires before admission, so the transfer is never announced.
+    let seen = events.lock().unwrap();
+    assert!(!has(&seen, "queued", "t-early"));
+    assert!(!has(&seen, "started", "t-early"));
+    drop(seen);
+
+    // One cancel stops one transfer: the id is usable again.
+    assert_eq!(ok(&h.webview, "transfer_start", payload)["totalBytes"], 4096);
+    assert_eq!(std::fs::read(&target).unwrap().len(), 4096);
+}
+
+/// `clearPendingTransferCancel`: the renderer drops a cancel it no longer
+/// wants applied before reusing the id.
+#[test]
+fn clearing_a_pending_cancel_lets_the_transfer_run() {
+    let h = build_app();
+    let dir = tempfile::tempdir().unwrap();
+    let source = dir.path().join("a.bin");
+    std::fs::write(&source, vec![3u8; 2048]).unwrap();
+    let target = dir.path().join("b.bin");
+
+    ok(
+        &h.webview,
+        "transfer_cancel",
+        json!({ "transferId": "t-cleared" }),
+    );
+    assert_eq!(
+        ok(
+            &h.webview,
+            "transfer_clear_pending_cancel",
+            json!({ "transferId": "t-cleared" })
+        ),
+        json!({ "success": true })
+    );
+
+    let result = ok(
+        &h.webview,
+        "transfer_start",
+        json!({ "payload": {
+            "transferId": "t-cleared",
+            "sourcePath": source.to_string_lossy(),
+            "targetPath": target.to_string_lossy(),
+            "sourceType": "local",
+            "targetType": "local",
+            "totalBytes": 2048
+        }}),
+    );
+    assert_eq!(result["totalBytes"], 2048);
+    assert!(result.get("cancelled").is_none());
+    assert_eq!(std::fs::read(&target).unwrap().len(), 2048);
+}
+
 /// A FIFO source keeps the first transfer running, so the second one waits
 /// in the queue where it can be prioritized, paused and cancelled.
 #[cfg(unix)]

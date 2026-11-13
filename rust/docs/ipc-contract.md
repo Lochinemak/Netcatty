@@ -206,6 +206,7 @@ All `sftp_*` commands take `sftpId` first. `encoding?` is
 | `sftp_extract` | `sftpId, path, encoding?` | `{ success }` |
 | `sftp_home_dir` | `sftpId, encoding?` | `{ success, homeDir?, error? }` |
 | `sftp_close` | `sftpId` | `{ success }` — idempotent; the SSH connection is disconnected only when no terminal session or other browser uses it |
+| `sftp_retain_transfer_session` | `sftpId` | `{ success, reason? }` — whether the browser is still open, for the renderer's transfer channel pool. There is no lease table: a transfer holds the client, so `sftp_close` cannot close it underneath, and the pool's `leaseId` has no counterpart here |
 
 Events: `netcatty:sftp:connection-progress` → `{ sessionId, label, status, detail? }`
 with `status` ∈ `connecting | connected | error` (`sessionId` is the value
@@ -216,7 +217,8 @@ described under `sftp_open`; `label` is `hostLabel` or `user@host`).
 | Command | Args | Returns |
 | --- | --- | --- |
 | `transfer_start` | `payload: StreamTransferOptions` | `StreamTransferResult` (resolves at completion / failure / cancel / pause): completed → `{ transferId, totalBytes }`; cancelled → `{ transferId, cancelled: true }`; paused → `{ transferId, cancelled: true, warning: "paused" }` (the `paused` event carries `checkpointBytes` for the resume); failed → `{ transferId, error }`. `sourceSftpId` / `targetSftpId` are required for `sftp` endpoints. |
-| `transfer_cancel` | `transferId` | `void` (no-op for unknown ids) |
+| `transfer_cancel` | `transferId` | `void`. An id that is neither queued nor running is latched for ~5 min, so a cancel that beats its own `transfer_start` still cancels it |
+| `transfer_clear_pending_cancel` | `transferId` | `{ success }` — drop that latch, for a renderer retrying the same id |
 | `transfer_pause` | `transferId` | `{ success, error? }` |
 
 Event `netcatty:sftp:global-transfer` → `TransferEvent` (`type` ∈ `queued,

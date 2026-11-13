@@ -448,6 +448,23 @@ test('readKnownHosts rebuilds known_hosts text from parsed entries', async () =>
   assert.equal(await bridge.readKnownHosts!(), null);
 });
 
+test('transfer session retention and the pre-start cancel latch reach the backend', async () => {
+  const { fake, bridge } = setup();
+
+  fake.respond('sftp_retain_transfer_session', () => ({ success: false, reason: 'SFTP session not found' }));
+  assert.deepEqual(await bridge.retainSftpTransferSession!('s-gone', 'lease-1'), {
+    success: false,
+    reason: 'SFTP session not found',
+  });
+  // The lease id is the renderer pool's own bookkeeping; the backend keeps
+  // the session alive by being referenced, so it is not sent.
+  assert.deepEqual(lastInvoke(fake, 'sftp_retain_transfer_session').args, { sftpId: 's-gone' });
+
+  fake.respond('transfer_clear_pending_cancel', () => ({ success: true }));
+  assert.deepEqual(await bridge.clearPendingTransferCancel!('t-1'), { success: true });
+  assert.deepEqual(lastInvoke(fake, 'transfer_clear_pending_cancel').args, { transferId: 't-1' });
+});
+
 test('output addressed to this window is delivered like broadcast output', async () => {
   const { fake, bridge } = setup();
   await flush();

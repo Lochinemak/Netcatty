@@ -421,6 +421,43 @@ pub async fn sftp_close<R: tauri::Runtime>(
     Ok(SuccessResult::ok())
 }
 
+/// Result of `retainSftpTransferSession`.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RetainSessionResult {
+    pub success: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
+/// Confirm `sftpId` is still open before a transfer borrows it.
+///
+/// Electron keeps a lease table so a browser cannot be closed under a running
+/// transfer. Here that is structural: a transfer holds an `Arc<SftpClient>`,
+/// [`sftp_close`] gives up its close when it cannot unwrap the last reference,
+/// and `release_connection` leaves the SSH connection alone while anything
+/// still holds it. What the renderer's transfer channel pool needs from this
+/// command is the existence check — without it a closed `sftpId` is handed to a
+/// transfer that then fails, instead of being evicted and reopened. The pool's
+/// `leaseId` is its own bookkeeping and has no counterpart here.
+#[tauri::command]
+pub async fn sftp_retain_transfer_session<R: tauri::Runtime>(
+    state: Ctx<'_, R>,
+    sftp_id: String,
+) -> CmdResult<RetainSessionResult> {
+    Ok(if state.sftp.contains_key(&sftp_id) {
+        RetainSessionResult {
+            success: true,
+            reason: None,
+        }
+    } else {
+        RetainSessionResult {
+            success: false,
+            reason: Some("SFTP session not found".into()),
+        }
+    })
+}
+
 // ---------------------------------------------------------------------------
 // Transfers
 // ---------------------------------------------------------------------------
@@ -571,6 +608,15 @@ pub async fn run_transfer<R: tauri::Runtime>(
             payload.transfer_id
         )));
     }
+    // A cancel that landed while this request was in flight: take neither a
+    // queue slot nor announce a transfer the renderer has already given up on.
+    if super::transfers2::take_pending_cancel(&state.app, &payload.transfer_id) {
+        return Ok(super::transfers2::cancelled_before_start(
+            state,
+            &payload.transfer_id,
+            emit_events,
+        ));
+    }
     // Global transfer queue (commands/transfers2.rs): wait for a slot; the
     // slot is released when this function returns.
     let _admission_slot = match super::transfers2::admit(state, &payload, emit_events).await? {
@@ -601,6 +647,18 @@ pub async fn run_transfer<R: tauri::Runtime>(
         checkpoint_bytes: payload.checkpoint_bytes.unwrap_or(0),
         stage_target: true,
     };
+
+    // Cancel may have won the race against the queue wait and endpoint setup.
+    // Until the handle below reaches `state.transfers` there is nothing for
+    // `transfer_cancel` to stop, so this is the last point where a latched
+    // cancel can still prevent the transfer from running.
+    if super::transfers2::take_pending_cancel(&state.app, &payload.transfer_id) {
+        return Ok(super::transfers2::cancelled_before_start(
+            state,
+            &payload.transfer_id,
+            emit_events,
+        ));
+    }
 
     let (progress_tx, mut progress_rx) = mpsc::unbounded_channel::<(String, TransferProgress)>();
     let mut handle = start_transfer(request, endpoints, Some(progress_tx))?;
@@ -659,11 +717,19 @@ pub async fn transfer_cancel<R: tauri::Runtime>(
     state: Ctx<'_, R>,
     transfer_id: String,
 ) -> CmdResult<()> {
+    // Arm the latch before looking for the transfer: `run_transfer` registers
+    // its handle only after admission and endpoint setup, so a cancel that
+    // wins that race finds nothing here and would otherwise be dropped.
+    super::transfers2::arm_pending_cancel(&state.app, &transfer_id);
     if super::transfers2::cancel_queued(&state.app, &transfer_id) {
+        // Settled by the queue; clear the latch so a retry with the same id is
+        // not cancelled the moment it starts.
+        super::transfers2::take_pending_cancel(&state.app, &transfer_id);
         return Ok(());
     }
     if let Some(handle) = state.transfers.get(&transfer_id) {
         handle.cancel();
+        super::transfers2::take_pending_cancel(&state.app, &transfer_id);
     }
     Ok(())
 }
