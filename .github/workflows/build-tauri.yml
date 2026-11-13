@@ -86,6 +86,18 @@ jobs:
       # Public key matching the secret, when it differs from the one in
       # tauri.conf.json (forks). Optional repository variable.
       TAURI_UPDATER_PUBKEY: ${{ vars.TAURI_UPDATER_PUBKEY || '' }}
+      # macOS code signing certificate: a base64 .p12 (secret), its password
+      # (secret) and the certificate's common name (variable). A stable
+      # certificate keeps the app's code identity the same across releases,
+      # so a Keychain "Always Allow" survives updates; ad-hoc signatures
+      # change with every build. The certificate may be self-signed: it is
+      # not trusted by Gatekeeper, which treats it like ad-hoc. Without all
+      # three the build falls back to ad-hoc signing. Kept under their own
+      # names and handed to the bundler only by the macOS build step, since
+      # the bundler reads APPLE_CERTIFICATE as soon as it is set.
+      MACOS_SIGN_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+      MACOS_SIGN_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+      MACOS_SIGN_IDENTITY: ${{ vars.APPLE_SIGNING_IDENTITY || '' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -181,9 +193,9 @@ jobs:
           # Tag builds take the version from the tag; other builds take the
           # newest released vX.Y.Z tag (so the About page and update check
           # match the latest release), falling back to tauri.conf.json.
-          # macOS bundles are ad-hoc signed so
-          # Apple Silicon reports an unidentified developer instead of a
-          # "damaged" app. Fetched mosh-client / et binaries are bundled as
+          # macOS bundles are signed with the configured certificate (see
+          # MACOS_SIGN_*), or ad-hoc without one, so Apple Silicon reports an
+          # unidentified developer instead of a "damaged" app. Fetched mosh-client / et binaries are bundled as
           # resources (<resource_dir>/mosh/, <resource_dir>/et/), the layout
           # the backend looks up first.
           #
@@ -212,10 +224,19 @@ jobs:
           if [[ -z "$TAURI_SIGNING_PRIVATE_KEY" ]]; then
             echo "::warning::TAURI_SIGNING_PRIVATE_KEY is not set; updater artifacts are skipped and this build cannot auto-update"
           fi
-          VERSION="$version" CLIENT_DIR="$client_dir" EXE="$exe" REPOSITORY="$GITHUB_REPOSITORY" node -e '
+          macos_identity="-"
+          if [[ "${{ matrix.targets }}" == *-apple-darwin* ]]; then
+            if [[ -n "$MACOS_SIGN_CERTIFICATE" && -n "$MACOS_SIGN_CERTIFICATE_PASSWORD" && -n "$MACOS_SIGN_IDENTITY" ]]; then
+              macos_identity="$MACOS_SIGN_IDENTITY"
+              echo "macOS signing identity: $macos_identity"
+            else
+              echo "::warning::APPLE_CERTIFICATE, APPLE_CERTIFICATE_PASSWORD or APPLE_SIGNING_IDENTITY is not set; macOS bundles are ad-hoc signed and Keychain access is asked again after every update"
+            fi
+          fi
+          VERSION="$version" CLIENT_DIR="$client_dir" EXE="$exe" REPOSITORY="$GITHUB_REPOSITORY" MACOS_IDENTITY="$macos_identity" node -e '
             const fs = require("node:fs");
             const path = require("node:path");
-            const conf = { bundle: { macOS: { signingIdentity: "-" } } };
+            const conf = { bundle: { macOS: { signingIdentity: process.env.MACOS_IDENTITY } } };
             if (process.env.VERSION) conf.version = process.env.VERSION;
             conf.bundle.createUpdaterArtifacts = Boolean(process.env.TAURI_SIGNING_PRIVATE_KEY);
             conf.plugins = { updater: {
@@ -246,6 +267,21 @@ jobs:
           # The renderer (beforeBuildCommand) is the same for every target:
           # build it with the first one and drop the hook for the rest.
           skip_renderer=()
+          # rust/target comes back from the cache with the installers of an
+          # earlier build (another version) still under release/bundle;
+          # Collect bundles would pick them up next to this build's.
+          for target in ${{ matrix.targets }}; do
+            rm -rf "$GITHUB_WORKSPACE/rust/target/$target/release/bundle"
+          done
+          # The bundler imports APPLE_CERTIFICATE into a temporary keychain
+          # and signs with APPLE_SIGNING_IDENTITY (set explicitly: the
+          # bundler only infers identities the system trusts, which a
+          # self-signed one is not).
+          if [[ "${{ runner.os }}" == macOS && -n "$MACOS_SIGN_CERTIFICATE" && -n "$MACOS_SIGN_CERTIFICATE_PASSWORD" && -n "$MACOS_SIGN_IDENTITY" ]]; then
+            export APPLE_CERTIFICATE="$MACOS_SIGN_CERTIFICATE"
+            export APPLE_CERTIFICATE_PASSWORD="$MACOS_SIGN_CERTIFICATE_PASSWORD"
+            export APPLE_SIGNING_IDENTITY="$MACOS_SIGN_IDENTITY"
+          fi
           for target in ${{ matrix.targets }}; do
             echo "::group::tauri build $target"
             npx --yes "@tauri-apps/cli@${TAURI_CLI_VERSION}" build \
@@ -289,6 +325,18 @@ jobs:
               if ! compgen -G "$bundle_dir/dmg/*.dmg" >/dev/null; then
                 echo "::error::No DMG for $target under $bundle_dir"
                 exit 1
+              fi
+              # With a certificate the code identity must name it (not a
+              # per-build cdhash), or the Keychain grant breaks on update.
+              if [[ -n "$MACOS_SIGN_CERTIFICATE" && -n "$MACOS_SIGN_CERTIFICATE_PASSWORD" && -n "$MACOS_SIGN_IDENTITY" ]]; then
+                for app in "$bundle_dir"/macos/*.app; do
+                  requirement="$(codesign -d -r- "$app" 2>&1)"
+                  echo "$app: $requirement"
+                  if [[ "$requirement" != *"certificate root"* ]]; then
+                    echo "::error::$app is not signed with the configured certificate"
+                    exit 1
+                  fi
+                done
               fi
             fi
           done
@@ -354,6 +402,17 @@ jobs:
             const repo = process.env.REPOSITORY;
             const tag = process.env.TAG;
             const version = tag.replace(/^v/, "");
+            // Installers carry their version in the file name. One from
+            // another version (left over from a cached build) must not be
+            // published or end up in the manifest.
+            const stale = files.filter((name) => {
+              const found = name.match(/\d+\.\d+\.\d+/);
+              return found && found[0] !== version;
+            });
+            if (stale.length > 0) {
+              console.log(`::error::bundles from another version than ${version}: ${stale.join(", ")}`);
+              process.exit(1);
+            }
             const targets = [
               ["darwin-aarch64", /^Netcatty_aarch64\.app\.tar\.gz$/],
               ["darwin-x86_64", /^Netcatty_x86_64\.app\.tar\.gz$/],
