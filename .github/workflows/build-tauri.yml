@@ -54,8 +54,17 @@ jobs:
           # macOS architectures share one runner: macOS runners are the
           # scarce ones, and a second queued macOS job was twice cancelled
           # before it got a machine.
+          #
+          # The Intel image rather than `macos-latest`: on the arm64 pool the
+          # v1.2.4 job was cancelled three times in a row, each after exactly
+          # 15 minutes with an empty `runner_name` and no steps — it never got
+          # a machine, while the same run's Linux and Windows jobs started in
+          # seconds. `macos-15-intel` is the last published x86_64 image
+          # (supported to ~Aug 2027) and far fewer jobs target it;
+          # `macos-13` is retired and now queues forever. Either way one
+          # architecture is cross-compiled, so only the host swaps.
           - name: macos
-            os: macos-latest
+            os: macos-15-intel
             targets: aarch64-apple-darwin x86_64-apple-darwin
             bundles: app,dmg
           - name: windows-x64
@@ -126,9 +135,12 @@ jobs:
             ~/.cargo/registry/cache
             ~/.cargo/git/db
             rust/target
-          key: tauri-${{ matrix.name }}-${{ hashFiles('rust/Cargo.lock', 'rust/rust-toolchain.toml') }}
+          # The image is part of the key: `rust/target` holds build scripts and
+          # proc macros compiled for the host, so an arm64-host cache must not
+          # be restored onto the Intel macOS image.
+          key: tauri-${{ matrix.name }}-${{ matrix.os }}-${{ hashFiles('rust/Cargo.lock', 'rust/rust-toolchain.toml') }}
           restore-keys: |
-            tauri-${{ matrix.name }}-
+            tauri-${{ matrix.name }}-${{ matrix.os }}-
 
       - name: Install Linux build dependencies
         if: runner.os == 'Linux'
