@@ -98,6 +98,65 @@ The renderer hides `__NCMCP_…` marker lines from terminal display
   flags and output as `netcatty-tool-cli.cjs`), discovery from
   `NETCATTY_TOOL_CLI_DISCOVERY_FILE` or `<data_dir>/netcatty-tool-cli/discovery.json`.
 
+## MCP tool surface
+
+What an MCP client sees (`netcatty --mcp-server`, External MCP over stdio
+and over HTTP). Tool names, descriptions and the RPC behind each tool come
+from the catalog; the points below are layered on top in
+`netcatty-capabilities::mcp_schema`, `netcatty-mcp::protocol` and
+`host/target.rs`, and none of them touches `data/catalog.json`.
+
+* **Real input types.** The catalog types every input as a string or a
+  number (`newTab: "true"`, `hosts: "[{…}]"`). `tools/list` advertises
+  booleans, arrays, objects and enums instead, and the call is folded back
+  into the catalog's string form before it is dispatched, so the backend
+  contract is unchanged. The string form is still accepted. Two tests keep
+  the overlay honest: every overlay entry must match a catalog field, and
+  every field the catalog documents as a flag or as JSON must have one.
+* **Annotations.** Each tool carries `title` and `annotations`
+  (`readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint`)
+  derived from the capability policy, so a client can auto-approve reads and
+  flag destructive calls. They are hints for the client; the permission mode
+  and the approval flow in the host are what is enforced.
+* **Sessions by name.** A `sessionId` argument may be a session's exact
+  label, hostname or `user@hostname` (case-insensitive) instead of its id.
+  One match in the caller's scope resolves; several are rejected with the
+  candidates (`sessions`) and never guessed between; none gives the usual
+  scope error, now with the scope's sessions attached. Resolution happens at
+  the top of `McpHost::dispatch`, before permissions and approvals, and so
+  also applies to the tool CLI. For the External MCP scope an unknown target
+  first refreshes the scope from the live tabs, so a tab opened after the
+  last `get_environment` is addressable.
+* **Toolsets.** 15 core tools and `load_netcatty_tools` are listed at
+  first; the other 57 are grouped in toolsets. Calling a deferred tool by
+  name loads it (toolsets shorten the list, they are not a permission
+  boundary); a delegated tool set (`NETCATTY_MCP_DELEGATED_TOOLS`) stays
+  fixed. The loader's answer includes a one-line summary of each tool. For a
+  client that never re-reads the tool list, toolsets can be loaded up
+  front: `NETCATTY_MCP_TOOLSETS=sftp_advanced,vault_hosts` (or `all`) for a
+  stdio server, `…/mcp?toolsets=all` on the `initialize` request over HTTP.
+* **`sftp_read_file` in pieces.** `netcatty/sftp/read` takes `offset` and
+  `maxBytes` and reports `bytesRead`, `totalBytes`, `truncated` and
+  `nextOffset`. A piece never ends inside a UTF-8 character. Without
+  `maxBytes` the RPC still reads the whole file (the tool CLI's `sftp read`
+  relies on that; it gained `--offset` / `--max-bytes`), but the MCP tool
+  defaults to 256 KiB per call, so a model cannot pull a multi-gigabyte log
+  into memory by naming it. At most 8 MiB per call.
+* **`sftp_find`** (`netcatty/sftp/find`, CLI `sftp find`) searches a
+  directory tree for entries whose name matches a glob (`*`, `?`, `[a-z]`,
+  `[!abc]`), optionally by type. It runs on one SFTP channel, breadth
+  first, never descends into a symlinked directory, and is bounded by
+  depth (default 5, max 20), matches (default 200, max 1000), 5000
+  directories and three quarters of the command timeout; `truncatedBy`
+  names the bound that stopped it. Unreadable directories are skipped and
+  counted. This capability and the two read inputs exist only in this
+  backend: they are declared in `data/catalog_tauri.json`, which is merged
+  over the Electron export at load.
+* **`get_environment`** returns its static usage guidance (`description`,
+  `tools`) on the first call of an MCP session only; later calls return the
+  live sessions and tunnels. The `netcatty://context` resource is always
+  complete.
+
 ## Public Rust API for other modules
 
 * `netcatty_mcp::build_injected_mcp_servers(&McpHost, chat_session_id,
@@ -126,8 +185,15 @@ The renderer hides `__NCMCP_…` marker lines from terminal display
 
 * Tool-output manifests are signed with an HMAC key stored in a 0600 file
   (`<data_dir>/tool-output-signing.key`) instead of `safeStorage`.
-* The External MCP HTTP endpoint answers in JSON response mode; the
-  optional standalone SSE stream (`GET /mcp`) returns 405.
+* The External MCP HTTP endpoint answers in JSON response mode, except for
+  a request that produced a notification (`tools/list_changed` after a
+  toolset load): that one is answered as a short `text/event-stream` with
+  the notification followed by the response, when the client accepts it.
+  The optional standalone SSE stream (`GET /mcp`) returns 405.
+* The MCP tool surface is no longer byte-identical to Electron's: see
+  "MCP tool surface" above (typed inputs, annotations, sessions by name,
+  toolset preloading). Existing tool names and RPC methods are unchanged;
+  `sftp_find` and ranged `sftp_read_file` are additions Electron lacks.
 * `TODO(ai-privacy)`: `external_mcp_set_config` must forward the
   normalised redaction policy to `commands::ai::configure_privacy` once
   the AI core module is merged.

@@ -359,6 +359,58 @@ impl SftpClient {
         result.map(|_| out)
     }
 
+    /// Read up to `max_bytes` starting at `offset` (to the end of the file
+    /// when `max_bytes` is `None`). Returns the bytes and the file size when
+    /// the server reports one. An offset at or past the end yields no bytes.
+    pub async fn read_range(
+        &self,
+        path: &str,
+        offset: u64,
+        max_bytes: Option<u64>,
+        encoding: Option<SftpFilenameEncoding>,
+    ) -> SftpResult<(Vec<u8>, Option<u64>)> {
+        let encoding = self.effective(encoding);
+        let wire = self.wire_path(path, encoding);
+        let handle = self
+            .session
+            .open(wire, OpenFlags::READ, FileAttributes::empty())
+            .await?
+            .handle;
+        let size = match self.session.fstat(handle.as_str()).await {
+            Ok(attrs) => attrs.attrs.size,
+            Err(_) => None,
+        };
+        let end = match (max_bytes, size) {
+            (Some(max), Some(size)) => Some(offset.saturating_add(max).min(size)),
+            (Some(max), None) => Some(offset.saturating_add(max)),
+            (None, size) => size,
+        };
+        if end.is_some_and(|end| offset >= end) {
+            close_quietly(&self.session, &handle).await;
+            return Ok((Vec::new(), size));
+        }
+        let mut reader = PipelinedReader::new(
+            self.session.clone(),
+            handle.clone(),
+            offset,
+            end,
+            self.limits.read_len,
+            PIPELINE_DEPTH,
+        );
+        let expected = end.map(|end| end - offset).unwrap_or(0);
+        let mut out = Vec::with_capacity(expected.min(16 * 1024 * 1024) as usize);
+        let result = loop {
+            match reader.next_chunk().await {
+                Ok(Some(chunk)) => out.extend_from_slice(&chunk),
+                Ok(None) => break Ok(()),
+                Err(err) => break Err(err),
+            }
+        };
+        drop(reader);
+        close_quietly(&self.session, &handle).await;
+        result.map(|_| (out, size))
+    }
+
     /// Write a whole file (create/truncate).
     pub async fn write(
         &self,

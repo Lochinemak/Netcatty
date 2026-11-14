@@ -1,0 +1,81 @@
+{
+ "capabilities": [
+  {
+   "id": "sftp.find",
+   "domain": "sftp",
+   "status": "implemented",
+   "description": "Find files and directories by name under a remote directory over the session file backend.",
+   "policy": {
+    "write": false,
+    "sensitiveRead": true,
+    "longRunning": true,
+    "requiresChatSession": true,
+    "bypassesObserverBlock": false,
+    "bypassesApproval": true,
+    "bypassesChatCancel": true
+   },
+   "surfaces": {
+    "builtin": {
+     "rpcMethod": "netcatty/sftp/find"
+    },
+    "public": {
+     "mcpTool": "sftp_find",
+     "confirmInConfirmMode": true
+    },
+    "cli": {
+     "command": [
+      "sftp",
+      "find"
+     ]
+    }
+   }
+  }
+ ],
+ "toolInputFields": {
+  "sftp.find": {
+   "sessionId": {
+    "type": "string",
+    "description": "SFTP session ID."
+   },
+   "path": {
+    "type": "string",
+    "description": "Remote directory to search under."
+   },
+   "pattern": {
+    "type": "string",
+    "description": "Glob matched against each entry's name (not its path): * any run of characters, ? one character, [abc] / [a-z] / [!abc] a character set. Case-sensitive and matches the whole name, so use *nginx* for \"contains\"."
+   },
+   "type": {
+    "type": "string",
+    "optional": true,
+    "description": "Only return entries of this type: file, directory, or symlink. Default: any."
+   },
+   "maxDepth": {
+    "type": "number",
+    "optional": true,
+    "description": "Directory levels to search below path. 1 searches only path itself (no recursion); default 5, at most 20. Symlinked directories are not followed."
+   },
+   "maxResults": {
+    "type": "number",
+    "optional": true,
+    "description": "Stop after this many matches; default 200, at most 1000."
+   }
+  },
+  "sftp.read": {
+   "offset": {
+    "type": "number",
+    "optional": true,
+    "description": "Byte offset to start reading at; default 0. Continue a truncated read with the returned nextOffset."
+   },
+   "maxBytes": {
+    "type": "number",
+    "optional": true,
+    "description": "Most bytes to return in this call; default 262144 (256 KiB), at most 8388608. The result reports totalBytes, truncated and nextOffset."
+   }
+  }
+ },
+ "modelDescriptionHints": {
+  "sftp.find": "Use this instead of walking directories with sftp_list or running find through terminal_execute. The search is bounded: when truncated is true, narrow path or pattern, or lower maxDepth, rather than repeating the same call. Directories that cannot be read are skipped and counted in unreadableDirectories.",
+  "sftp.read": "Returns text. A large file comes back in pieces: when truncated is true, call again with offset set to nextOffset, or use sftp_stat first to see the size. For a log, read the tail by setting offset near totalBytes."
+ }
+}

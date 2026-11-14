@@ -120,6 +120,8 @@ pub struct StdioConfig {
     pub endpoint: Endpoint,
     pub scope: Map<String, Value>,
     pub delegated_tools: Option<Vec<String>>,
+    /// Toolsets loaded from the start (`NETCATTY_MCP_TOOLSETS=a,b` or `all`).
+    pub toolsets: Vec<String>,
 }
 
 impl StdioConfig {
@@ -164,7 +166,10 @@ impl StdioConfig {
                 Some(names)
             }
         };
-        Ok(Self { endpoint, scope, delegated_tools })
+        let toolsets = env(crate::discovery::TOOLSETS_ENV_VAR)
+            .map(|raw| raw.split(',').map(str::trim).filter(|s| !s.is_empty()).map(str::to_string).collect())
+            .unwrap_or_default();
+        Ok(Self { endpoint, scope, delegated_tools, toolsets })
     }
 }
 
@@ -206,7 +211,7 @@ pub async fn run(config: StdioConfig) -> i32 {
     };
     let endpoint = config.endpoint.clone();
     let observer = Arc::new(move || read_permission_mode(&endpoint, delegated) == "observer");
-    let session = Arc::new(McpSession::new(rpc, config.scope, observer, config.delegated_tools));
+    let session = Arc::new(McpSession::new(rpc, config.scope, observer, config.delegated_tools).with_toolsets(&config.toolsets));
     serve_lines(session, tokio::io::stdin(), tokio::io::stdout()).await;
     0
 }

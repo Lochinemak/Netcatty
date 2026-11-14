@@ -1,10 +1,19 @@
 //! External MCP streamable-HTTP endpoint (Electron
 //! `externalMcp/httpServer.cjs` + `httpSecurity.cjs`).
 //!
-//! `POST /mcp` with JSON-RPC (JSON response mode, like the SDK's
-//! `enableJsonResponse`), `Mcp-Session-Id` sessions created by
-//! `initialize`, `DELETE` to end a session. The standalone SSE stream
-//! (`GET`) is not offered (405, which the spec allows). Every request needs
+//! `POST /mcp` with JSON-RPC, `Mcp-Session-Id` sessions created by
+//! `initialize`, `DELETE` to end a session. A request is answered with plain
+//! JSON (like the SDK's `enableJsonResponse`) unless handling it produced a
+//! notification — `notifications/tools/list_changed` after a toolset load —
+//! in which case the answer is a short `text/event-stream` carrying the
+//! notification and then the response, as the streamable-HTTP transport
+//! allows. Without that the notification had nowhere to go and a client
+//! never learned about the tools it had just loaded. The standalone SSE
+//! stream (`GET`) is not offered (405, which the spec allows).
+//!
+//! `initialize` may carry `?toolsets=sftp_advanced,vault_hosts` (or `all`) to
+//! start the session with those toolsets loaded, for clients that do not
+//! re-read the tool list at all. Every request needs
 //! `Authorization: Bearer <external token>` and a Host / Origin matching the
 //! bind address (DNS-rebinding protection).
 
@@ -245,6 +254,34 @@ fn json_response(status: u16, body: Value, extra: &[(&str, String)]) -> Response
     b.body(Full::new(Bytes::from(bytes))).unwrap()
 }
 
+/// The messages of one POST as a finished event stream.
+fn sse_response(messages: &[Value], extra: &[(&str, String)]) -> Response<Full<Bytes>> {
+    let mut body = String::new();
+    for m in messages {
+        body.push_str("event: message\ndata: ");
+        body.push_str(&serde_json::to_string(m).unwrap_or_default());
+        body.push_str("\n\n");
+    }
+    let mut b = Response::builder().status(200).header("Content-Type", "text/event-stream").header("Cache-Control", "no-store");
+    for (k, v) in extra {
+        b = b.header(*k, v);
+    }
+    b.body(Full::new(Bytes::from(body))).unwrap()
+}
+
+/// `Accept` lists `text/event-stream` (the transport requires clients to).
+pub fn accepts_event_stream(accept: Option<&str>) -> bool {
+    accept.is_some_and(|a| a.split(',').any(|part| part.split(';').next().is_some_and(|t| t.trim().eq_ignore_ascii_case("text/event-stream"))))
+}
+
+/// Toolset names of a `?toolsets=a,b` query (the comma may be `%2C`).
+pub fn toolsets_from_query(query: Option<&str>) -> Vec<String> {
+    let Some(value) = query.and_then(|q| q.split('&').find_map(|pair| pair.strip_prefix("toolsets="))) else {
+        return Vec::new();
+    };
+    value.replace("%2C", ",").replace("%2c", ",").split(',').map(str::trim).filter(|v| !v.is_empty()).map(str::to_string).collect()
+}
+
 fn rpc_error(message: &str, code: i64) -> Value {
     json!({ "jsonrpc": "2.0", "error": { "code": code, "message": message }, "id": null })
 }
@@ -323,6 +360,8 @@ async fn route(
         return json_response(status, rpc_error(msg, -32000), &[]);
     }
     let session_header = header("mcp-session-id");
+    let wants_stream = accepts_event_stream(header("accept").as_deref());
+    let preload = toolsets_from_query(req.uri().query());
     match req.method().as_str() {
         "POST" => {
             let body = match Limited::new(req.into_body(), MAX_BODY_BYTES).collect().await {
@@ -360,7 +399,7 @@ async fn route(
                     let mh = mcp_host.clone();
                     let observer = Arc::new(move || mh.permission_mode() == "observer");
                     let s = Arc::new(HttpSession {
-                        mcp: Arc::new(McpSession::new(rpc, scope, observer, None)),
+                        mcp: Arc::new(McpSession::new(rpc, scope, observer, None).with_toolsets(&preload)),
                         client_id,
                         last_activity: Mutex::new(Instant::now()),
                         in_flight: Default::default(),
@@ -377,8 +416,11 @@ async fn route(
             };
             let batch = messages.len() > 1;
             let mut responses = Vec::new();
+            let mut notifications = Vec::new();
             for m in messages {
-                if let Some(r) = session.mcp.handle(m).await.response {
+                let handled = session.mcp.handle(m).await;
+                notifications.extend(handled.notifications);
+                if let Some(r) = handled.response {
                     responses.push(r);
                 }
             }
@@ -395,6 +437,10 @@ async fn route(
                     b = b.header(*k, v);
                 }
                 return b.body(Full::new(Bytes::new())).unwrap();
+            }
+            if wants_stream && !notifications.is_empty() {
+                notifications.extend(responses);
+                return sse_response(&notifications, &extra);
             }
             let body = if batch { Value::Array(responses) } else { responses.into_iter().next().unwrap() };
             json_response(200, body, &extra)
@@ -451,5 +497,33 @@ mod tests {
         assert_eq!(build_client_url("::1", 1, "").unwrap(), "http://[::1]:1/mcp");
         assert!(normalize_client_host("0.0.0.0").is_err());
         assert!(normalize_listen_address("nope").is_err());
+    }
+
+    #[test]
+    fn accept_header_and_toolset_query() {
+        assert!(accepts_event_stream(Some("application/json, text/event-stream")));
+        assert!(accepts_event_stream(Some("Text/Event-Stream;q=0.9")));
+        assert!(!accepts_event_stream(Some("application/json")));
+        assert!(!accepts_event_stream(None));
+        assert_eq!(toolsets_from_query(Some("toolsets=sftp_advanced,vault_hosts")), ["sftp_advanced", "vault_hosts"]);
+        assert_eq!(toolsets_from_query(Some("x=1&toolsets=all")), ["all"]);
+        assert_eq!(toolsets_from_query(Some("toolsets=snippets%2Cscripts")), ["snippets", "scripts"]);
+        assert!(toolsets_from_query(Some("other=1")).is_empty());
+        assert!(toolsets_from_query(None).is_empty());
+    }
+
+    #[test]
+    fn event_stream_carries_notifications_before_the_response() {
+        let note = json!({ "jsonrpc": "2.0", "method": "notifications/tools/list_changed" });
+        let resp = json!({ "jsonrpc": "2.0", "id": 1, "result": {} });
+        let r = sse_response(&[note.clone(), resp.clone()], &[]);
+        assert_eq!(r.headers()["content-type"], "text/event-stream");
+        let body = body_text(r);
+        assert_eq!(body, format!("event: message\ndata: {note}\n\nevent: message\ndata: {resp}\n\n"));
+    }
+
+    fn body_text(r: Response<Full<Bytes>>) -> String {
+        let bytes = tokio::runtime::Builder::new_current_thread().build().unwrap().block_on(async { r.into_body().collect().await.unwrap().to_bytes() });
+        String::from_utf8(bytes.to_vec()).unwrap()
     }
 }

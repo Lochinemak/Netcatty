@@ -16,6 +16,8 @@ pub const EXTERNAL_MCP_DISCOVERY_ENV_VAR: &str = "NETCATTY_EXTERNAL_MCP_DISCOVER
 /// Selects a helper mode when the Netcatty executable is launched by an
 /// MCP client without arguments (`external` → External MCP stdio server).
 pub const HELPER_MODE_ENV_VAR: &str = "NETCATTY_MCP_HELPER";
+/// Comma-separated toolsets (or `all`) a stdio MCP server loads at start.
+pub const TOOLSETS_ENV_VAR: &str = "NETCATTY_MCP_TOOLSETS";
 pub const HELPER_MODE_EXTERNAL: &str = "external";
 pub const CLI_STATE_DIR_NAME: &str = "netcatty-tool-cli";
 pub const EXTERNAL_MCP_STATE_DIR_NAME: &str = "external-mcp";
