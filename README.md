@@ -16,14 +16,14 @@
 </p>
 
 <p align="center">
-  A beautiful, feature-rich SSH workspace built with Electron, React, and xterm.js.<br/>
+  A beautiful, feature-rich SSH workspace built with Tauri 2, Rust, React, and xterm.js.<br/>
   🔥 Built-in AI Agent · Split terminals · Vault views · SFTP workflows · Custom themes — all in one.
 </p>
 
 <p align="center">
   <a href="https://github.com/binaricat/Netcatty/releases/latest"><img alt="GitHub Release" src="https://img.shields.io/github/v/release/binaricat/Netcatty?style=for-the-badge&logo=github&label=Release"></a>
   &nbsp;
-  <a href="#"><img alt="Platform" src="https://img.shields.io/badge/Platform-macOS%20%7C%20Windows%20%7C%20Linux-blue?style=for-the-badge&logo=electron"></a>
+  <a href="#"><img alt="Platform" src="https://img.shields.io/badge/Platform-macOS%20%7C%20Windows%20%7C%20Linux-blue?style=for-the-badge&logo=tauri"></a>
   &nbsp;
   <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/License-GPL--3.0-green?style=for-the-badge"></a>
 </p>
@@ -43,6 +43,16 @@
 <p align="center">
   <a href="./README.md">English</a> · <a href="./README.zh-CN.md">简体中文</a> · <a href="./README.zh-TW.md">繁體中文</a> · <a href="./README.ja-JP.md">日本語</a>
 </p>
+
+---
+
+> **This repository builds the Rust / Tauri 2 version of Netcatty.** The backend
+> lives in [`rust/`](./rust); the React renderer is reused unchanged and reaches
+> it through a thin adapter in [`infrastructure/tauri/`](./infrastructure/tauri).
+> The original Electron backend remains in [`electron/`](./electron) as the
+> behavioural reference for the port, not as what releases ship.
+> [`rust/README.md`](./rust/README.md) documents the crate layout, what is
+> ported, and what is not.
 
 ---
 
@@ -229,11 +239,11 @@ Netcatty automatically detects and displays OS icons for connected hosts:
 
 Download the latest release for your platform from [GitHub Releases](https://github.com/binaricat/Netcatty/releases/latest).
 
-| OS | Support |
+| OS | Downloads |
 | :--- | :--- |
-| **macOS** | Universal (x64 / arm64) |
-| **Windows** | x64 / arm64 |
-| **Linux** | x64 / arm64 |
+| **macOS** | `.dmg` for arm64 and x64 — two builds, not a universal binary |
+| **Windows** | x64 — `.msi` and an NSIS `.exe` installer |
+| **Linux** | x64 — `.deb`, `.rpm`, AppImage · arm64 — `.deb`, `.rpm` |
 
 Or browse all releases at [GitHub Releases](https://github.com/binaricat/Netcatty/releases).
 
@@ -249,17 +259,19 @@ application and integration are complete.
 
 > **Open folders in Netcatty on Windows:** The installed version adds **Open in Netcatty** to Explorer's folder context menu and folder-background context menu. It opens a local terminal in that folder. On Windows 11, choose **Show more options** first. Turn the menu off or on in **Settings → System → Windows Explorer**. ZIP and portable versions do not add this menu by default.
 
-> **macOS Users:** Current releases are expected to be code-signed and notarized. If Gatekeeper still warns, make sure you downloaded the latest official build from GitHub Releases.
+> **macOS Users:** macOS bundles are code-signed with this project's own certificate and are **not** notarized by Apple, so Gatekeeper warns on first launch — right-click the app in Finder and choose **Open** once to accept it. Builds produced without a signing certificate configured are only ad-hoc signed, and macOS then asks for Keychain access again after every update.
 
 <a name="open-a-local-terminal-from-the-command-line"></a>
 ### Open a local terminal from the command line
 
 `--open-terminal-path <dir>` opens a local terminal in that folder. `--open-terminal-shell <id-or-path>` selects the shell: a discovered id such as `pwsh`, `cmd`, or `wsl-ubuntu`, or a path to a shell executable. Either flag is enough. A shell alone opens a local tab in the default directory. A path alone uses the configured local shell. If Netcatty is already running, the tab opens in that window.
 
-Windows needs an extra `--` so Electron forwards the flags:
+The Tauri build reads these flags from its own argv, so the extra `--` that the
+Electron build needed on Windows is no longer required — it is still accepted,
+so existing shortcuts keep working:
 
 ```bat
-Netcatty.exe -- --open-terminal-shell=pwsh --open-terminal-path="D:\\proj"
+Netcatty.exe --open-terminal-shell=pwsh --open-terminal-path="D:\\proj"
 ```
 
 On macOS, start a new instance with `open`, or run the binary directly:
@@ -304,7 +316,9 @@ nix run github:binaricat/Netcatty
 For declarative installs, add the Netcatty flake as an input and use `inputs.netcatty.packages.${pkgs.system}.default` in your NixOS or Home Manager package list.
 
 ### Prerequisites
-- Node.js 18+ and npm
+- Rust stable via [rustup](https://rustup.rs/) — the toolchain is pinned in [`rust/rust-toolchain.toml`](./rust/rust-toolchain.toml)
+- Node.js 22+ and npm
+- The [Tauri 2 platform prerequisites](https://v2.tauri.app/start/prerequisites/) — Xcode command line tools on macOS, WebKitGTK and friends on Linux
 - macOS, Windows 10+, or Linux
 
 ### Development
@@ -317,9 +331,15 @@ cd Netcatty
 # Install dependencies
 npm install
 
-# Start development mode (Vite + Electron)
-npm run dev
+# Build the plugin workspace packages the renderer imports (once)
+npm run build:plugin-runtime-deps
+
+# Start development mode (Vite on :5173 + the Tauri app)
+npm run tauri:dev
 ```
+
+`npm run dev` starts the legacy Electron build instead. It is kept so the two
+backends can be compared while the port matures.
 
 ---
 
@@ -327,17 +347,35 @@ npm run dev
 # Build & Package
 
 ```bash
-# Build for production
+# Build the renderer only
 npm run build
 
-# Package for current platform
-npm run pack
+# Check and test the Rust workspace
+npm run tauri:check
+npm run tauri:test
 
-# Package for specific platforms
+# Production bundle for the current platform
+# macOS: .app + .dmg · Windows: .msi + NSIS .exe · Linux: .deb + .rpm + AppImage
+npm run tauri:build
+```
+
+Release bundles are signed so the in-app updater can verify them — see
+[Auto-update signing](./rust/README.md#auto-update-signing). Without a signing
+key present, the bundler refuses to sign; pass
+`--config '{"bundle":{"createUpdaterArtifacts":false}}'` to build installers
+without updater artifacts.
+
+<details>
+<summary>Legacy Electron packaging</summary>
+
+```bash
+npm run pack         # current platform
 npm run pack:mac     # macOS (DMG + ZIP)
 npm run pack:win     # Windows (NSIS installer)
 npm run pack:linux   # Linux (AppImage + DEB + RPM)
 ```
+
+</details>
 
 ---
 
@@ -346,13 +384,14 @@ npm run pack:linux   # Linux (AppImage + DEB + RPM)
 
 | Category | Technology |
 |----------|------------|
-| Framework | Electron 40 |
+| Shell | Tauri 2 |
+| Backend | Rust (edition 2021), Tokio |
 | Frontend | React 19, TypeScript |
 | Build Tool | Vite 7 |
-| Terminal | xterm.js 5 |
+| Terminal | xterm.js |
 | Styling | Tailwind CSS 4 |
-| SSH/SFTP | ssh2, ssh2-sftp-client |
-| PTY | node-pty |
+| SSH/SFTP | russh, russh-sftp |
+| PTY | portable-pty |
 | Icons | Lucide React |
 
 ---

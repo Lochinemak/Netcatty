@@ -16,14 +16,14 @@
 </p>
 
 <p align="center">
-  Electron、React、xterm.js で構築された機能豊富な SSH ワークスペース。<br/>
+  Tauri 2、Rust、React、xterm.js で構築された機能豊富な SSH ワークスペース。<br/>
   🔥 内蔵 AI Agent · 分割ターミナル · Vault ビュー · SFTP ワークフロー · カスタムテーマ — すべてが一つに。
 </p>
 
 <p align="center">
   <a href="https://github.com/binaricat/Netcatty/releases/latest"><img alt="GitHub Release" src="https://img.shields.io/github/v/release/binaricat/Netcatty?style=for-the-badge&logo=github&label=Release"></a>
   &nbsp;
-  <a href="#"><img alt="Platform" src="https://img.shields.io/badge/Platform-macOS%20%7C%20Windows%20%7C%20Linux-blue?style=for-the-badge&logo=electron"></a>
+  <a href="#"><img alt="Platform" src="https://img.shields.io/badge/Platform-macOS%20%7C%20Windows%20%7C%20Linux-blue?style=for-the-badge&logo=tauri"></a>
   &nbsp;
   <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/License-GPL--3.0-green?style=for-the-badge"></a>
 </p>
@@ -43,6 +43,16 @@
 <p align="center">
   <a href="./README.md">English</a> · <a href="./README.zh-CN.md">简体中文</a> · <a href="./README.zh-TW.md">繁體中文</a> · <a href="./README.ja-JP.md">日本語</a>
 </p>
+
+---
+
+> **このリポジトリがビルドするのは Netcatty の Rust / Tauri 2 版です。** バックエンドは
+> [`rust/`](./rust) にあり、React レンダラーはそのまま再利用され、
+> [`infrastructure/tauri/`](./infrastructure/tauri) の薄いアダプター経由で通信します。
+> 元の Electron バックエンドは移植作業の挙動の参照用として
+> [`electron/`](./electron) に残っていますが、リリースが使うランタイムではありません。
+> クレート構成、移植済みの機能と未移植の機能は
+> [`rust/README.md`](./rust/README.md) を参照してください。
 
 ---
 
@@ -215,11 +225,11 @@ Netcatty は接続したホストの OS を検出し、ホスト一覧でアイ�
 
 [GitHub Releases](https://github.com/binaricat/Netcatty/releases/latest) からお使いのプラットフォームに対応した最新版をダウンロードしてください。
 
-| OS | サポート状況 |
+| OS | ダウンロード |
 | :--- | :--- |
-| **macOS** | Universal (x64 / arm64) |
-| **Windows** | x64 / arm64 |
-| **Linux** | x64 / arm64 |
+| **macOS** | arm64 と x64 それぞれの `.dmg` — ユニバーサルバイナリではなく 2 つのビルド |
+| **Windows** | x64 — `.msi` と NSIS `.exe` インストーラー |
+| **Linux** | x64 — `.deb`、`.rpm`、AppImage · arm64 — `.deb`、`.rpm` |
 
 または [GitHub Releases](https://github.com/binaricat/Netcatty/releases) ですべてのリリースを参照してください。
 
@@ -235,7 +245,7 @@ Windows リリースは未署名の場合があります。
 
 > **Windows でフォルダーを Netcatty で開く：** インストール版では、エクスプローラーのフォルダーおよびフォルダー背景のコンテキストメニューに **Open in Netcatty** が追加されます。選択すると、そのフォルダーでローカルターミナルが開きます。Windows 11 では、先に **その他のオプションを表示** を選択してください。**設定 → システム → Windows Explorer** からメニューの表示／非表示を切り替えられます。ZIP 版とポータブル版では、既定ではこのメニューは追加されません。
 
-> **macOS ユーザーへ：** 現在のリリースはコード署名と notarization が行われている想定です。Gatekeeper の警告が出る場合は、GitHub Releases から最新版の公式ビルドを取得しているか確認してください。
+> **macOS ユーザーへ：** macOS バンドルはこのプロジェクト自身の証明書でコード署名されていますが、Apple の notarization は**行われていません**。そのため初回起動時に Gatekeeper が警告します — Finder でアプリを右クリックして**開く**を選び、一度だけ許可してください。署名証明書を設定せずにビルドした成果物は ad-hoc 署名のみで、その場合は更新ごとに macOS が Keychain へのアクセスを再度求めます。
 
 ### Scoop（Windows x64、コミュニティ管理）
 
@@ -272,7 +282,9 @@ nix run github:binaricat/Netcatty
 宣言型インストールには、Netcatty flake を input として追加し、NixOS または Home Manager のパッケージリストで `inputs.netcatty.packages.${pkgs.system}.default` を使用してください。
 
 ### 前提条件
-- Node.js 18+ と npm
+- [rustup](https://rustup.rs/) で入れた Rust stable — ツールチェーンは [`rust/rust-toolchain.toml`](./rust/rust-toolchain.toml) で固定されています
+- Node.js 22+ と npm
+- [Tauri 2 のプラットフォーム前提条件](https://v2.tauri.app/start/prerequisites/) — macOS では Xcode コマンドラインツール、Linux では WebKitGTK など
 - macOS、Windows 10+、または Linux
 
 ### 開発
@@ -285,9 +297,15 @@ cd Netcatty
 # 依存関係をインストール
 npm install
 
-# 開発モードを起動（Vite + Electron）
-npm run dev
+# レンダラーが読み込むプラグインワークスペースパッケージをビルド（初回のみ）
+npm run build:plugin-runtime-deps
+
+# 開発モードを起動（Vite が :5173 + Tauri アプリ）
+npm run tauri:dev
 ```
+
+`npm run dev` は従来の Electron ビルドを起動します。移植中に両方のバックエンドの
+挙動を比較できるよう残してあります。
 
 ---
 
@@ -295,17 +313,35 @@ npm run dev
 # ビルドとパッケージ
 
 ```bash
-# 本番用ビルド
+# レンダラーのみビルド
 npm run build
 
-# 現在のプラットフォーム用にパッケージ
-npm run pack
+# Rust ワークスペースのチェックとテスト
+npm run tauri:check
+npm run tauri:test
 
-# 特定のプラットフォーム用にパッケージ
+# 現在のプラットフォーム用の本番バンドル
+# macOS: .app + .dmg · Windows: .msi + NSIS .exe · Linux: .deb + .rpm + AppImage
+npm run tauri:build
+```
+
+リリースバンドルは署名されており、アプリ内アップデーターがそれを検証します —
+[自動更新の署名](./rust/README.md#auto-update-signing) を参照してください。署名鍵が
+ない場合バンドラーは署名を拒否するため、`tauri:build` に
+`--config '{"bundle":{"createUpdaterArtifacts":false}}'` を渡してアップデーター成果物
+なしでインストーラーだけを作成します。
+
+<details>
+<summary>従来の Electron パッケージング</summary>
+
+```bash
+npm run pack         # 現在のプラットフォーム
 npm run pack:mac     # macOS (DMG + ZIP)
 npm run pack:win     # Windows (NSIS インストーラー)
 npm run pack:linux   # Linux (AppImage + DEB + RPM)
 ```
+
+</details>
 
 ---
 
@@ -314,13 +350,14 @@ npm run pack:linux   # Linux (AppImage + DEB + RPM)
 
 | カテゴリ | テクノロジー |
 |--------|------------|
-| フレームワーク | Electron 40 |
+| シェル | Tauri 2 |
+| バックエンド | Rust (edition 2021), Tokio |
 | フロントエンド | React 19, TypeScript |
 | ビルドツール | Vite 7 |
-| ターミナル | xterm.js 5 |
+| ターミナル | xterm.js |
 | スタイリング | Tailwind CSS 4 |
-| SSH/SFTP | ssh2, ssh2-sftp-client |
-| PTY | node-pty |
+| SSH/SFTP | russh, russh-sftp |
+| PTY | portable-pty |
 | アイコン | Lucide React |
 
 ---

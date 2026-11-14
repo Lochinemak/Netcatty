@@ -2,6 +2,36 @@
 
 This project is wired around three layers: domain (pure logic), application state (React hooks orchestrating the domain), and UI (components). Use this document as a quick guide for extending or reusing the codebase.
 
+## Runtimes
+
+`main` ships the **Tauri 2 + Rust** backend in [`rust/`](./rust). The Electron
+backend in `electron/` is kept as the behavioural reference for the port — it is
+the spec when you need to know what a bridge method should do, not the product.
+
+Everything in this document about the renderer (`domain/`, `application/`,
+`infrastructure/`, `components/`) applies to both, because both sit behind one
+contract: **`window.netcatty`**, typed in `types/global/netcatty-bridge-*.d.ts`.
+Under Tauri that surface is installed by `infrastructure/tauri/` over
+`snake_case` Tauri commands; under Electron by `electron/preload.cjs` over IPC.
+`scripts/tauri-ipc-contract.test.cjs` (part of `npm test`) cross-checks the two
+sides and fails on an orphan on either.
+
+Sections below that name an `electron/` path describe the reference
+implementation. Their Rust counterparts:
+
+| Subsystem | Electron | Rust |
+|-----------|----------|------|
+| SSH / SFTP / forwards / PTY | `electron/bridges/*.cjs` | `netcatty-ssh`, `netcatty-sftp`, `netcatty-forward`, `netcatty-pty` |
+| Capability catalog + MCP + tool CLI | `electron/capabilities/`, `electron/mcp/`, `electron/cli/` | `netcatty-capabilities`, `netcatty-mcp` |
+| AI core (providers, privacy, skills) | `electron/bridges/aiBridge/` | `netcatty-ai` |
+| Managed SDK agents | `electron/bridges/aiBridge/sdk/`, `codexAppServer/` | `netcatty-agents` |
+| Plugin host | `electron/plugins/` | `netcatty-plugins` |
+| Script automation | `electron/bridges/scriptBridge*` | `netcatty-scripts` (QuickJS) |
+| Storage + credential cipher | `electron/bridges/storeBridge*` | `netcatty-store` |
+
+See [`rust/README.md`](./rust/README.md) for the full crate list, what is ported
+and what is not, and `rust/docs/ipc-*.md` for per-domain contracts.
+
 ## Current Agents (Roles)
 - **Domain** (`domain/`): Models and pure helpers. Examples:
   - `models.ts` defines Host/SSHKey/Snippet/Workspace entities.
@@ -46,6 +76,14 @@ Codex can opt into a persistent `codex app-server --stdio` runtime under
 the default. The main process owns JSONL RPC correlation, thread/turn routing,
 native approvals, `request_user_input`, model discovery, and process cleanup.
 
+> **Rust build:** `netcatty-agents` does not use the Node SDKs at all. It drives
+> the user's CLIs directly over the same wire protocols (`codex exec
+> --experimental-json`, `codex app-server` JSON-RPC, Claude Code's
+> `stream-json` with control requests). The renderer-facing contract and the
+> permission-mode mapping below are the same; the transport is not. Cursor's
+> API-key mode is not ported — it needs the Node-only `@cursor/sdk`. See
+> `rust/docs/ipc-agents.md`.
+
 - Session identities include the Codex runtime; SDK and App Server threads must
   never resume across runtimes.
 - Observer maps to `read-only + never`, Confirm to `read-only + on-request`, and
@@ -75,6 +113,14 @@ Compaction remains **`prepareTurnContext` / `compactCattyMessages`** (pre-turn +
 ### Capability exposure (Round 2 + gap fill)
 
 Single source of truth: `electron/capabilities/catalog/` + `electron/capabilities/codegen/toolSurfaces.cjs`.
+
+> **Rust build:** `netcatty-capabilities` carries the catalog as a verbatim JSON
+> export at `rust/crates/netcatty-capabilities/data/catalog.json`, so external
+> agents see the same tool names, descriptions and schemas. The Electron catalog
+> stays the source of truth: after changing it, regenerate that JSON with the
+> command in the doc comment at the top of
+> `rust/crates/netcatty-capabilities/src/catalog.rs`. **Nothing in CI checks
+> this for drift** — the regeneration is manual, so do it in the same commit.
 
 **Agent kinds** (where an in-app agent runs — orthogonal to MCP/CLI/RPC surfaces):
 
@@ -139,6 +185,15 @@ Run `npm run test:plugin-runtime` for main-process boundaries and
 `npm run test:plugin-runtime:electron` for real BrowserWindow/utilityProcess
 smoke coverage. Packaged-resource changes must also pass `npm run pack:dir`.
 
+> **Rust build:** `netcatty-plugins` speaks the same JSON-RPC contract from
+> `packages/plugin-contract/schema/`, so plugins built with
+> `@netcatty/plugin-sdk` run unchanged, and the SQLite schema matches
+> `database.cjs`. Several pieces are not ported — the plugin catalog and market
+> sources, AI/agent host adapters, byte streams, terminal interceptors,
+> companion executables, runtime resource sampling, and bundling
+> `plugin-runtime/` into release builds. `rust/docs/ipc-plugins.md` has the
+> current list; `cargo test -p netcatty-plugins` covers the Rust side.
+
 ## Extending the System
 1) **New domain logic**: Add pure functions/types under `domain/`; avoid side effects.  
 2) **New stateful behavior**: Wrap it in a hook under `application/state/`; keep external I/O behind adapters.  
@@ -148,7 +203,7 @@ smoke coverage. Packaged-resource changes must also pass `npm run pack:dir`.
 ## Data & Storage
 - Persisted keys: see `storageKeys.ts`. Use `localStorageAdapter` for all reads/writes.
 - Seed data: `config/defaultData.ts`; terminal themes: `config/terminalThemes.ts`.
-- **Temporary files**: All temporary files (e.g., SFTP downloaded files for external editing) must be written to Netcatty's dedicated temp directory via `tempDirBridge.getTempFilePath(fileName)`. Do not write directly to `os.tmpdir()`. This ensures proper cleanup and user visibility in Settings > System.
+- **Temporary files**: All user-visible temporary files (e.g., SFTP downloaded files for external editing) must be written to Netcatty's dedicated temp directory — `tempDirBridge.getTempFilePath(fileName)` in the Electron main process, `commands::tempdir::temp_file_path(app, name)` in the Rust build. Do not write directly to `os.tmpdir()` / `std::env::temp_dir()`. This ensures proper cleanup and user visibility in Settings > System.
 
 ## Terminal Side Panel Splits
 
@@ -162,12 +217,16 @@ smoke coverage. Packaged-resource changes must also pass `npm run pack:dir`.
 - Favor unit tests for domain helpers (e.g., `workspace.ts`, `host.ts`) and hook-level tests for application state.
 - When changing storage keys or schema, provide migration or backward-compat handling.
 - Keep components dumb: if a prop list grows large, consider deriving a smaller view model in the hook.
+- Rust: unit tests live in each crate; `rust/apps/netcatty-desktop/tests/ipc/` drives real command dispatch, state and events through `tauri::test`'s mock runtime (no window); `crates/netcatty-e2e` runs SSH/SFTP/forwarding against a throwaway sshd container (`rust/scripts/e2e-sshd/run.sh`). CI gates on `cargo clippy --workspace --all-targets -- -D warnings` and `cargo test --workspace`.
+- A new or changed Tauri command needs its adapter method and its `types/global/` declaration in the same change, or `scripts/tauri-ipc-contract.test.cjs` fails.
 
 ## Coding Conventions
 - Keep logic pure in domain; side effects belong to application/infrastructure layers.
 - Prefer composition over deep prop drilling; lift shared state into hooks.
 - Avoid direct network/fetch in components; add a service/adaptor first.
 - Maintain ASCII-only unless required by existing file content.
+- Rust: commands are `snake_case`, renderer-facing JSON is camelCase; IPC types are `serde` types in `netcatty-core::ipc`; errors cross the boundary as `{ code, message }` (`CoreError`); event names are the Electron channel names (`netcatty:data`, …) so the adapter stays a thin mapping.
+- Never log credentials, key material or terminal output, in either runtime.
 
 ## Reporting Issues & PRs
 
@@ -180,7 +239,7 @@ Issues opened without the required format are **auto-closed** by the issue-forma
 Full contributor guidance (setup, commits, PR process): [CONTRIBUTING.md](./CONTRIBUTING.md).
 
 ## Review Boundaries
-- Treat `electron/cli/*`, `netcatty-tool-cli`, the CLI discovery file, and the local TCP bridge as internal Netcatty integration surfaces unless a task explicitly says otherwise.
+- Treat `electron/cli/*`, `netcatty-tool-cli`, the tool CLI and MCP host in `netcatty-mcp`, the CLI discovery file, and the local TCP bridge as internal Netcatty integration surfaces unless a task explicitly says otherwise.
 - Do not review those surfaces as public APIs by default, and do not assume they must support third-party callers, manual launches, or non-Netcatty agents.
 - On supported first-party paths, assume Netcatty's own launcher provides required integration environment such as `NETCATTY_TOOL_CLI_DISCOVERY_FILE`.
 - If a review concern depends on external exposure, third-party compatibility, or public API stability, call it out as out of scope unless the task explicitly includes that contract.
