@@ -14,6 +14,7 @@ import '@fontsource/jetbrains-mono/400.css';
 import '@fontsource/jetbrains-mono/500.css';
 import '@fontsource/jetbrains-mono/600.css';
 import App from './App';
+import { installAutoCorrectionGuard } from './infrastructure/textInputAutoCorrection';
 import { AppLockGate } from './components/AppLockGate';
 
 const LazySettingsPage = lazy(() => import('./components/SettingsPage'));
@@ -155,6 +156,9 @@ const getRoute = () => {
   }
   return 'main';
 };
+
+// Before the first render, so no field is ever focused without it.
+installAutoCorrectionGuard();
 
 const root = ReactDOM.createRoot(rootElement);
 
