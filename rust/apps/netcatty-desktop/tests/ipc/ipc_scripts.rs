@@ -7,15 +7,15 @@
 use netcatty_desktop_lib::{configure_with, SetupOptions};
 use netcatty_store::CredentialCipher;
 use serde_json::{json, Value};
-use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tauri::ipc::{CallbackFn, InvokeBody};
 use tauri::test::{
     get_ipc_response, mock_builder, mock_context, noop_assets, MockRuntime, INVOKE_KEY,
 };
 use tauri::webview::InvokeRequest;
-use tauri::{App, Listener, WebviewWindow};
+use tauri::{App, WebviewWindow};
 
+use crate::support::{collect, install_pump, Events};
 use crate::BUILD_LOCK;
 const TEST_KEY: [u8; 32] = [0x5a; 32];
 
@@ -39,6 +39,7 @@ fn build_app() -> Harness {
         let mut app = configure_with(mock_builder(), options)
             .build(mock_context(noop_assets()))
             .expect("build mock app");
+        install_pump(&app);
         #[allow(deprecated)]
         app.run_iteration(|_, _| {});
         app
@@ -79,30 +80,20 @@ fn ok(result: Result<Value, Value>) -> Value {
     }
 }
 
-fn collect(app: &App<MockRuntime>, event: &str) -> Arc<Mutex<Vec<Value>>> {
-    let seen = Arc::new(Mutex::new(Vec::new()));
-    let sink = seen.clone();
-    app.listen_any(event.to_string(), move |e| {
-        let payload: Value = serde_json::from_str(e.payload()).unwrap_or(Value::Null);
-        sink.lock().unwrap().push(payload);
-    });
-    seen
-}
-
 /// Poll `script_get_runs` until `run_id` has ended, answering screen
 /// snapshot and dialog requests like the renderer meanwhile.
 fn drive_until_ended(
     h: &Harness,
     run_id: &str,
-    snapshots: &Arc<Mutex<Vec<Value>>>,
-    dialogs: &Arc<Mutex<Vec<Value>>>,
+    snapshots: &Events,
+    dialogs: &Events,
     dialog_answer: impl Fn(&Value) -> Value,
 ) -> Value {
     let started = Instant::now();
     let mut answered_snapshots = 0;
     let mut answered_dialogs = 0;
     loop {
-        let pending: Vec<Value> = snapshots.lock().unwrap()[answered_snapshots..].to_vec();
+        let pending: Vec<Value> = snapshots.lock()[answered_snapshots..].to_vec();
         for request in pending {
             answered_snapshots += 1;
             ok(invoke(
@@ -114,7 +105,7 @@ fn drive_until_ended(
                 } }),
             ));
         }
-        let pending: Vec<Value> = dialogs.lock().unwrap()[answered_dialogs..].to_vec();
+        let pending: Vec<Value> = dialogs.lock()[answered_dialogs..].to_vec();
         for request in pending {
             answered_dialogs += 1;
             ok(invoke(
@@ -194,13 +185,13 @@ fn script_drives_a_local_shell() {
     assert_eq!(run["sessionId"], session_id.as_str());
 
     // The terminal was told about the automated input (scroll to bottom).
-    let inputs = inputs.lock().unwrap().clone();
+    let inputs = inputs.lock().clone();
     assert!(inputs
         .iter()
         .any(|i| i["sessionId"] == session_id.as_str() && i["data"] == "echo script-$((40 + 2))"));
-    assert_eq!(dialogs.lock().unwrap()[0]["type"], "confirm");
-    assert_eq!(dialogs.lock().unwrap()[0]["message"], "continue?");
-    assert!(!updates.lock().unwrap().is_empty());
+    assert_eq!(dialogs.lock()[0]["type"], "confirm");
+    assert_eq!(dialogs.lock()[0]["message"], "continue?");
+    assert!(!updates.lock().is_empty());
 
     // Filters by session.
     let none = ok(invoke(

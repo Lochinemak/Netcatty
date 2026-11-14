@@ -8,12 +8,12 @@ use netcatty_desktop_lib::commands::integration::on_second_instance;
 use netcatty_desktop_lib::{configure_with, SetupOptions};
 use netcatty_store::CredentialCipher;
 use serde_json::{json, Value};
-use std::sync::{Arc, Mutex};
 use tauri::ipc::{CallbackFn, InvokeBody};
 use tauri::test::{get_ipc_response, mock_builder, mock_context, noop_assets, MockRuntime, INVOKE_KEY};
 use tauri::webview::InvokeRequest;
-use tauri::{App, Listener, Manager, WebviewWindow};
+use tauri::{App, Manager, WebviewWindow};
 
+use crate::support::{collect, install_pump};
 use crate::BUILD_LOCK;
 
 struct Harness {
@@ -38,6 +38,7 @@ fn build_app() -> Harness {
         let mut app = configure_with(mock_builder(), options)
             .build(mock_context(noop_assets()))
             .expect("build mock app");
+        install_pump(&app);
         #[allow(deprecated)]
         app.run_iteration(|_, _| {});
         app
@@ -66,17 +67,6 @@ fn invoke(webview: &WebviewWindow<MockRuntime>, cmd: &str, args: Value) -> Value
     }
 }
 
-fn collect(app: &App<MockRuntime>, event: &str) -> Arc<Mutex<Vec<Value>>> {
-    let seen = Arc::new(Mutex::new(Vec::new()));
-    let sink = seen.clone();
-    app.listen_any(event.to_string(), move |e| {
-        sink.lock()
-            .unwrap()
-            .push(serde_json::from_str(e.payload()).unwrap_or(Value::Null));
-    });
-    seen
-}
-
 fn argv(items: &[&str]) -> Vec<String> {
     items.iter().map(|s| s.to_string()).collect()
 }
@@ -100,7 +90,7 @@ fn launch_intents_wait_for_the_main_renderer_then_go_live() {
     );
     // Scheme links are dropped while disabled.
     on_second_instance(&handle, argv(&["Netcatty", "ssh://bob@example.com"]), "/tmp".into());
-    assert!(live.lock().unwrap().is_empty());
+    assert!(live.lock().is_empty());
 
     // Another window attaching gets nothing and does not drain the queue.
     let settings = tauri::WebviewWindowBuilder::new(&h.app, "settings", Default::default())
@@ -134,7 +124,7 @@ fn launch_intents_wait_for_the_main_renderer_then_go_live() {
         json!({ "enabled": true, "success": true })
     );
     on_second_instance(&handle, argv(&["Netcatty", "ssh://bob@example.com"]), "/tmp".into());
-    assert_eq!(*live.lock().unwrap(), vec![json!({ "url": "ssh://bob@example.com" })]);
+    assert_eq!(*live.lock(), vec![json!({ "url": "ssh://bob@example.com" })]);
 
     let opened = collect(&h.app, "netcatty:openTerminalPath");
     let dir = h.data_dir.path().to_string_lossy().into_owned();
@@ -143,7 +133,7 @@ fn launch_intents_wait_for_the_main_renderer_then_go_live() {
         argv(&["Netcatty", "--", "--open-terminal-shell=zsh", "--open-terminal-path", &dir]),
         "/".into(),
     );
-    let opened = opened.lock().unwrap().clone();
+    let opened = opened.lock().clone();
     assert_eq!(opened.len(), 1);
     assert_eq!(opened[0]["shell"], json!("zsh"));
     assert!(opened[0]["path"].as_str().is_some_and(|p| !p.is_empty()));
@@ -157,14 +147,14 @@ fn jms_switch_defaults_off_and_gates_links() {
     invoke(&h.main, "integration_renderer_attach", json!({}));
     let jms = collect(&h.app, "netcatty:deepLink:jms");
     on_second_instance(&handle, argv(&["Netcatty", "jms://payload"]), String::new());
-    assert!(jms.lock().unwrap().is_empty());
+    assert!(jms.lock().is_empty());
 
     assert_eq!(
         invoke(&h.main, "integration_set_jms_deep_link_enabled", json!({ "enabled": true })),
         json!({ "enabled": true, "success": true })
     );
     on_second_instance(&handle, argv(&["Netcatty", "jms://payload"]), String::new());
-    assert_eq!(*jms.lock().unwrap(), vec![json!({ "url": "jms://payload" })]);
+    assert_eq!(*jms.lock(), vec![json!({ "url": "jms://payload" })]);
 
     // Persisted next to the other app data, like Electron's userData files.
     let saved = std::fs::read_to_string(h.data_dir.path().join("jms-deep-link-preferences.json")).unwrap();

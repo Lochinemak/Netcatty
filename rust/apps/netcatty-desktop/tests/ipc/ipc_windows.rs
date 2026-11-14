@@ -10,7 +10,7 @@ use netcatty_desktop_lib::{configure_with, SetupOptions};
 use netcatty_store::CredentialCipher;
 use serde_json::{json, Value};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use tauri::ipc::{CallbackFn, InvokeBody};
 use tauri::test::{
     get_ipc_response, mock_builder, mock_context, noop_assets, MockRuntime, INVOKE_KEY,
@@ -18,6 +18,7 @@ use tauri::test::{
 use tauri::webview::InvokeRequest;
 use tauri::{App, AppHandle, Listener, Manager, WebviewWindow};
 
+use crate::support::{collect, install_pump, wait_until, Events};
 use crate::BUILD_LOCK;
 
 struct Harness {
@@ -40,6 +41,7 @@ fn build_app() -> Harness {
         let mut app = configure_with(mock_builder(), options)
             .build(mock_context(noop_assets()))
             .expect("build mock app");
+        install_pump(&app);
         #[allow(deprecated)]
         app.run_iteration(|_, _| {});
         app
@@ -78,27 +80,6 @@ fn ok(result: Result<Value, Value>) -> Value {
         Ok(v) => v,
         Err(e) => panic!("command failed: {e}"),
     }
-}
-
-fn collect(app: &App<MockRuntime>, event: &str) -> Arc<Mutex<Vec<Value>>> {
-    let seen = Arc::new(Mutex::new(Vec::new()));
-    let sink = seen.clone();
-    app.listen_any(event.to_string(), move |e| {
-        let payload: Value = serde_json::from_str(e.payload()).unwrap_or(Value::Null);
-        sink.lock().unwrap().push(payload);
-    });
-    seen
-}
-
-fn wait_until(timeout: Duration, mut pred: impl FnMut() -> bool) -> bool {
-    let start = Instant::now();
-    while start.elapsed() < timeout {
-        if pred() {
-            return true;
-        }
-        std::thread::sleep(Duration::from_millis(20));
-    }
-    pred()
 }
 
 fn window_with_prefix(
@@ -186,7 +167,7 @@ fn editor_window_open_save_dirty_and_close_round_trip() {
     {
         let handle = handle.clone();
         std::thread::spawn(move || {
-            assert!(wait_until(Duration::from_secs(5), || handle
+            assert!(wait_until(&handle, Duration::from_secs(5), || handle
                 .get_webview_window("editor")
                 .is_some()));
             let editor = handle.get_webview_window("editor").unwrap();
@@ -215,7 +196,7 @@ fn editor_window_open_save_dirty_and_close_round_trip() {
         json!({ "payload": { "editorId": "e1", "dirty": true } }),
     ));
     assert_eq!(
-        dirty.lock().unwrap().as_slice(),
+        dirty.lock().as_slice(),
         [json!({ "editorId": "e1", "dirty": true })]
     );
 
@@ -241,7 +222,7 @@ fn editor_window_open_save_dirty_and_close_round_trip() {
     ));
     assert_eq!(saved, json!({ "ok": true, "liveConnectionId": "live-2" }));
     assert_eq!(
-        remaps.lock().unwrap()[0],
+        remaps.lock()[0],
         json!({ "fromSessionId": "sftp-s", "toSessionId": "live-2" })
     );
     let unknown = ok(invoke(
@@ -273,13 +254,13 @@ fn editor_window_open_save_dirty_and_close_round_trip() {
         json!({ "success": true, "cancelled": false, "closedIds": ["e1"] })
     );
     assert_eq!(
-        closed_events.lock().unwrap().as_slice(),
+        closed_events.lock().as_slice(),
         [json!({ "editorIds": ["e1"] })]
     );
 
     // The editor window goes away: the remaining tab is released to its source.
     destroyed(&editor);
-    let events = closed_events.lock().unwrap().clone();
+    let events = closed_events.lock().clone();
     assert_eq!(events.last().unwrap(), &json!({ "editorIds": ["e2"] }));
 }
 
@@ -299,7 +280,7 @@ fn attach_popup_hand_over_and_restore() {
         "windows_track_session",
         json!({ "sessionId": sid }),
     ));
-    assert_eq!(routes.lock().unwrap().last().unwrap()["label"], "main");
+    assert_eq!(routes.lock().last().unwrap()["label"], "main");
 
     // A routed session's output is addressed to its display window only.
     let broadcast = collect(&h.app, "netcatty:data");
@@ -311,11 +292,11 @@ fn attach_popup_hand_over_and_restore() {
             json!({ "payload": { "sessionId": sid, "data": format!("echo {marker}-$((1+1))\n") } }),
         ));
     };
-    let saw = |seen: &Arc<Mutex<Vec<Value>>>, needle: &str| {
-        seen.lock().unwrap().iter().any(|e| e["data"].as_str().is_some_and(|d| d.contains(needle)))
+    let saw = |seen: &Events, needle: &str| {
+        seen.lock().iter().any(|e| e["data"].as_str().is_some_and(|d| d.contains(needle)))
     };
     echo("routed-main");
-    assert!(wait_until(Duration::from_secs(10), || saw(&to_main, "routed-main-2")), "output reaches netcatty:data/main");
+    assert!(wait_until(h.app.handle(), Duration::from_secs(10), || saw(&to_main, "routed-main-2")), "output reaches netcatty:data/main");
     assert!(!saw(&broadcast, "routed-main"), "routed output is not broadcast");
 
     let opened = ok(invoke(
@@ -370,12 +351,12 @@ fn attach_popup_hand_over_and_restore() {
     assert_eq!(rebound["success"], true, "{rebound}");
     assert_ne!(rebound["previousWebContentsId"], rebound["webContentsId"]);
     assert_eq!(
-        routes.lock().unwrap().last().unwrap()["label"],
+        routes.lock().last().unwrap()["label"],
         popup.label()
     );
     let to_popup = collect(&h.app, &format!("netcatty:data/{}", popup.label()));
     echo("routed-popup");
-    assert!(wait_until(Duration::from_secs(10), || saw(&to_popup, "routed-popup-2")), "output follows the attach popup");
+    assert!(wait_until(h.app.handle(), Duration::from_secs(10), || saw(&to_popup, "routed-popup-2")), "output follows the attach popup");
     assert!(!saw(&to_main, "routed-popup"), "the previous display window no longer gets it");
     assert!(!saw(&broadcast, "routed-popup"));
 
@@ -415,7 +396,7 @@ fn attach_popup_hand_over_and_restore() {
 
     // Closing the popup restores the display to main without closing the session.
     destroyed(&popup);
-    assert_eq!(routes.lock().unwrap().last().unwrap()["label"], "main");
+    assert_eq!(routes.lock().last().unwrap()["label"], "main");
     let after = ok(invoke(&h.main, "windows_output_routes", json!({})));
     assert_eq!(after["routes"][0]["label"], "main");
     ok(invoke(
@@ -441,7 +422,7 @@ fn session_window_takes_its_tab_and_closes_its_sessions() {
     {
         let taken = taken.clone();
         std::thread::spawn(move || {
-            assert!(wait_until(Duration::from_secs(5), || window_with_prefix(
+            assert!(wait_until(&handle, Duration::from_secs(5), || window_with_prefix(
                 &handle, "session-"
             )
             .is_some()));
@@ -480,9 +461,8 @@ fn session_window_takes_its_tab_and_closes_its_sessions() {
     ));
     destroyed(&window);
     assert!(
-        wait_until(Duration::from_secs(10), || exits
+        wait_until(h.app.handle(), Duration::from_secs(10), || exits
             .lock()
-            .unwrap()
             .iter()
             .any(|e| e["sessionId"] == sid.as_str())),
         "the session window's session must be closed"
