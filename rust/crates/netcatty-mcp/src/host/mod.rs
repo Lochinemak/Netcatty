@@ -9,10 +9,12 @@ pub mod approvals;
 pub mod backend;
 pub mod dispatch;
 pub mod exec;
+pub mod find;
 pub mod idle;
 pub mod jobs;
 pub mod meta;
 pub mod sftp;
+pub mod target;
 pub mod tcp;
 pub mod vault_agent;
 

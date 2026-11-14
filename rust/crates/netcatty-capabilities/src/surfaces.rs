@@ -27,8 +27,8 @@ impl McpToolDef {
         !self.input_fields.is_empty()
     }
 
-    /// JSON Schema of the tool input (what the MCP SDK emits for the
-    /// generated Zod object: strings, non-negative integers, `required`).
+    /// JSON Schema of the tool input. Field types come from the catalog,
+    /// refined by [`crate::mcp_schema`] where the catalog only knows strings.
     pub fn input_schema(&self) -> Value {
         if self.input_fields.is_empty() {
             return json!({ "type": "object", "properties": {} });
@@ -36,15 +36,7 @@ impl McpToolDef {
         let mut properties = Map::new();
         let mut required = Vec::new();
         for (name, field) in &self.input_fields {
-            let mut prop = if field.field_type == "number" {
-                json!({ "type": "integer", "minimum": 0 })
-            } else {
-                json!({ "type": "string" })
-            };
-            if !field.description.is_empty() {
-                prop["description"] = Value::String(field.description.clone());
-            }
-            properties.insert(name.clone(), prop);
+            properties.insert(name.clone(), crate::mcp_schema::field_schema(&self.capability_id, name, field));
             if !field.optional {
                 required.push(Value::String(name.clone()));
             }
@@ -59,6 +51,31 @@ impl McpToolDef {
             schema["required"] = Value::Array(required);
         }
         schema
+    }
+
+    /// MCP `annotations` (title and read-only / destructive hints).
+    pub fn annotations(&self) -> Value {
+        crate::mcp_schema::tool_annotations(&self.capability_id, &self.domain, &self.mcp_tool, &self.policy)
+    }
+
+    /// Type-check `args` against the advertised schema.
+    pub fn validate_arguments(&self, args: &Map<String, Value>) -> Result<(), String> {
+        for (name, field) in &self.input_fields {
+            match args.get(name) {
+                None | Some(Value::Null) => {
+                    if !field.optional {
+                        return Err(format!("{name}: Required"));
+                    }
+                }
+                Some(v) => crate::mcp_schema::validate_field(&self.capability_id, name, field, v)?,
+            }
+        }
+        Ok(())
+    }
+
+    /// `args` in the string form the backend receives.
+    pub fn normalize_arguments(&self, args: &Map<String, Value>) -> Map<String, Value> {
+        crate::mcp_schema::normalize_arguments(&self.capability_id, &self.input_fields, args)
     }
 }
 
@@ -289,7 +306,7 @@ mod tests {
     #[test]
     fn mcp_tools_match_electron() {
         let tools = list_mcp_tools();
-        assert_eq!(tools.len(), 71);
+        assert_eq!(tools.len(), 72);
         let names: HashSet<_> = tools.iter().map(|t| t.mcp_tool.as_str()).collect();
         for n in ["host_open", "vault_hosts_update", "vault_hosts_delete", "session_close", "session_reconnect", "terminal_read_context"] {
             assert!(names.contains(n), "{n}");

@@ -116,7 +116,11 @@ Single source of truth: `electron/capabilities/catalog/` + `electron/capabilitie
 
 > **Rust build:** `netcatty-capabilities` carries the catalog as a verbatim JSON
 > export at `rust/crates/netcatty-capabilities/data/catalog.json`, so external
-> agents see the same tool names, descriptions and schemas. The Electron catalog
+> agents see the same tool names and descriptions. Input types and tool
+> annotations are refined on top of it in `netcatty-capabilities::mcp_schema`
+> (see "MCP tool surface" in `rust/docs/ipc-mcp.md`), and capabilities that
+> exist only in the Rust backend are declared in `data/catalog_tauri.json`
+> next to the export, never in it. The Electron catalog
 > stays the source of truth: after changing it, regenerate that JSON with the
 > command in the doc comment at the top of
 > `rust/crates/netcatty-capabilities/src/catalog.rs`. **Nothing in CI checks

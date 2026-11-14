@@ -10,6 +10,8 @@
 //! * [`policy`] + [`grants`] — observer / confirm / auto policy and the
 //!   permission-grant memory table.
 //! * [`surfaces`] — MCP tool definitions (JSON schemas) and the CLI adapter.
+//! * [`mcp_schema`] — real input types and tool annotations for the MCP
+//!   surface, layered over the string-typed catalog.
 //! * [`services`] — vault / port-forward / session services over the
 //!   renderer request bridge ([`services::VaultAgent`]).
 //! * [`dispatch`] — service-backed capability RPC dispatch with approvals.
@@ -18,6 +20,7 @@
 pub mod catalog;
 pub mod dispatch;
 pub mod grants;
+pub mod mcp_schema;
 pub mod policy;
 pub mod registry;
 pub mod services;

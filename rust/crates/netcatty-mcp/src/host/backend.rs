@@ -73,7 +73,11 @@ pub trait TerminalSession: Send + Sync {
 #[derive(Debug, Clone)]
 pub enum SftpOp {
     List { path: String },
-    Read { path: String },
+    /// `max_bytes: None` reads to the end of the file. The result is the
+    /// fragment built by [`super::sftp::read_chunk`].
+    Read { path: String, offset: u64, max_bytes: Option<u64> },
+    /// The result is the fragment built by [`super::find::find`].
+    Find { options: super::find::FindOptions },
     Write { path: String, content: String },
     Mkdir { path: String },
     Delete { path: String },

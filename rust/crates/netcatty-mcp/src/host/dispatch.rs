@@ -2,6 +2,7 @@
 //! `handleGetStatus`, attachments, `handleReadContext`).
 
 use super::backend::HostBackend;
+use super::target::SessionTarget;
 use super::{find_meta_across_scopes, McpHost, EXTERNAL_MCP_CHAT_SESSION_ID, MCP_APPROVAL_TIMEOUT_MS};
 use netcatty_capabilities::catalog::SURFACE_BUILTIN;
 use netcatty_capabilities::grants::PermissionGrant;
@@ -52,7 +53,7 @@ fn build_mcp_tool_hints() -> Value {
         "environment": get("session.environment"),
         "terminal": pick(&[("execute", "terminal.execute"), ("start", "terminal.start"), ("poll", "terminal.poll"), ("stop", "terminal.stop")]),
         "attachments": pick(&[("list", "attachment.list"), ("read", "attachment.read")]),
-        "sftp": pick(&[("list", "sftp.list"), ("read", "sftp.read"), ("write", "sftp.write"), ("download", "sftp.download"), ("upload", "sftp.upload")]),
+        "sftp": pick(&[("list", "sftp.list"), ("find", "sftp.find"), ("read", "sftp.read"), ("write", "sftp.write"), ("download", "sftp.download"), ("upload", "sftp.upload")]),
     })
 }
 
@@ -95,7 +96,18 @@ fn is_likely_text_attachment(media_type: &str, filename: &str) -> bool {
 impl McpHost {
     /// Top-level dispatch of one RPC (`dispatch` / `dispatchCore`). `Err`
     /// becomes a JSON-RPC error response.
-    pub async fn dispatch(&self, method: &str, params: Map<String, Value>, ctx: DispatchContext) -> Result<Value, String> {
+    pub async fn dispatch(&self, method: &str, mut params: Map<String, Value>, ctx: DispatchContext) -> Result<Value, String> {
+        // A session named by label / hostname becomes its id before anything
+        // (permissions, approvals, scope checks) looks at the target.
+        if method != "netcatty/getContext" {
+            match self.resolve_session_target(&params) {
+                SessionTarget::Resolved(id) => {
+                    params.insert("sessionId".into(), json!(id));
+                }
+                SessionTarget::Ambiguous(error) => return Ok(error),
+                SessionTarget::Unchanged => {}
+            }
+        }
         if !method.starts_with("netcatty/") {
             if let Some(result) = self.capabilities.dispatch(method, &params, &ctx).await? {
                 return Ok(result);
@@ -130,7 +142,7 @@ impl McpHost {
         if method != "netcatty/getContext" {
             if let Some(sid) = &session_id {
                 if let Some(err) = self.validate_session_scope(sid, chat.as_deref(), explicit.as_deref()) {
-                    return Ok(json!({ "ok": false, "error": err }));
+                    return Ok(self.scope_error(err, &params));
                 }
             }
         }

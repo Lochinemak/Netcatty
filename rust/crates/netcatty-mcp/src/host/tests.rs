@@ -146,12 +146,18 @@ impl HostBackend for FakeBackend {
     async fn sftp(&self, _id: &str, op: SftpOp, cancel: tokio_util::sync::CancellationToken) -> Result<Value, String> {
         match op {
             SftpOp::Home => Ok(json!("/root")),
-            SftpOp::Read { .. } => {
+            SftpOp::Read { offset, max_bytes, .. } => {
                 tokio::select! {
                     _ = cancel.cancelled() => Err("Cancelled".into()),
-                    _ = tokio::time::sleep(Duration::from_millis(20)) => Ok(json!("file-content")),
+                    _ = tokio::time::sleep(Duration::from_millis(20)) => {
+                        let file = b"file-content";
+                        let start = (offset as usize).min(file.len());
+                        let end = max_bytes.map_or(file.len(), |m| (start + m as usize).min(file.len()));
+                        Ok(super::sftp::read_chunk(file[start..end].to_vec(), offset, Some(file.len() as u64), max_bytes))
+                    }
                 }
             }
+            SftpOp::Find { options } => Ok(json!({ "path": options.root, "pattern": options.pattern, "matches": [{ "path": "/etc/app.conf", "type": "file" }], "matchCount": 1, "truncated": false, "maxDepth": options.max_depth })),
             SftpOp::List { .. } => Ok(json!([{ "name": "a.txt", "type": "file" }])),
             _ => Ok(Value::Null),
         }
@@ -421,6 +427,51 @@ async fn sftp_handlers_and_cancellation() {
     assert_eq!(err, "path is required");
 }
 
+#[tokio::test]
+async fn sftp_read_ranges_and_find() {
+    let backend = Arc::new(FakeBackend::default());
+    backend.add("s1", "ssh", Some("posix"));
+    let host = host_with(backend);
+    scope(&host, "chat", &["s1"]);
+    let read = |extra: Value| {
+        let host = host.clone();
+        async move {
+            let mut params = p(json!({ "sessionId": "s1", "path": "/x", "chatSessionId": "chat" }));
+            params.extend(p(extra));
+            host.dispatch("netcatty/sftp/read", params, Default::default()).await.unwrap()
+        }
+    };
+    // No limit: the whole file, as before, now with its extent.
+    let whole = read(json!({})).await;
+    assert_eq!(whole, json!({ "ok": true, "path": "/x", "content": "file-content", "offset": 0, "bytesRead": 12, "truncated": false, "totalBytes": 12 }));
+    let first = read(json!({ "maxBytes": 5 })).await;
+    assert_eq!((first["content"].clone(), first["truncated"].clone(), first["nextOffset"].clone()), (json!("file-"), json!(true), json!(5)));
+    // The tool CLI sends numbers as floats.
+    let rest = read(json!({ "offset": 5.0, "maxBytes": 100.0 })).await;
+    assert_eq!((rest["content"].clone(), rest["truncated"].clone()), (json!("content"), json!(false)));
+    assert!(rest.get("nextOffset").is_none());
+    // A limit too small to hold one character is raised, not honoured.
+    assert_eq!(read(json!({ "maxBytes": 1 })).await["bytesRead"], 4);
+
+    let find = |params: Value| {
+        let host = host.clone();
+        async move { host.dispatch("netcatty/sftp/find", p(params), Default::default()).await }
+    };
+    let r = find(json!({ "sessionId": "s1", "path": "/etc", "pattern": "*.conf", "type": "file", "chatSessionId": "chat" })).await.unwrap();
+    assert_eq!(r["ok"], true);
+    assert_eq!(r["matches"][0]["path"], "/etc/app.conf");
+    assert_eq!(r["maxDepth"], 5, "default depth");
+    assert_eq!(find(json!({ "sessionId": "s1", "path": "/etc", "chatSessionId": "chat" })).await.unwrap_err(), "pattern is required");
+    assert_eq!(find(json!({ "sessionId": "s1", "pattern": "*", "chatSessionId": "chat" })).await.unwrap_err(), "path is required");
+    assert_eq!(find(json!({ "sessionId": "s1", "path": "/", "pattern": "*", "type": "socket", "chatSessionId": "chat" })).await.unwrap_err(), "type must be file, directory, or symlink");
+    assert!(find(json!({ "sessionId": "s1", "path": "/", "pattern": "a/b", "chatSessionId": "chat" })).await.unwrap_err().contains("not paths"));
+    // Read-only: allowed in observer mode, and scoped like every other tool.
+    host.set_permission_mode("observer");
+    assert_eq!(find(json!({ "sessionId": "s1", "path": "/etc", "pattern": "*", "chatSessionId": "chat" })).await.unwrap()["ok"], true);
+    let r = find(json!({ "sessionId": "s9", "path": "/etc", "pattern": "*", "chatSessionId": "chat" })).await.unwrap();
+    assert_eq!(r["error"], "Session \"s9\" is not in the current scope.");
+}
+
 async fn rpc(lines: &mut tokio::io::Lines<BufReader<tokio::net::tcp::OwnedReadHalf>>, w: &mut tokio::net::tcp::OwnedWriteHalf, id: u64, method: &str, params: Value) -> Value {
     let msg = json!({ "jsonrpc": "2.0", "id": id, "method": method, "params": params });
     w.write_all(format!("{msg}\n").as_bytes()).await.unwrap();
@@ -470,4 +521,71 @@ async fn tcp_auth_gate_status_and_discovery_self_heal() {
     assert_eq!(resp["error"]["message"], "External MCP is disabled. Re-enable it in Netcatty Settings → AI.");
     host.shutdown_host(false);
     assert!(!discovery.exists());
+}
+
+fn named_scope(host: &McpHost, chat: &str, sessions: &[(&str, &str, &str)]) {
+    let list: Vec<Value> = sessions
+        .iter()
+        .map(|(id, label, hostname)| json!({ "sessionId": id, "label": label, "hostname": hostname, "username": "root", "connected": true, "protocol": "ssh" }))
+        .collect();
+    host.update_session_metadata(&list, Some(chat));
+}
+
+fn wrote_command(backend: &FakeBackend, id: &str) -> bool {
+    backend.sessions.lock()[id].writes.lock().iter().any(|w| w.contains("uptime"))
+}
+
+#[tokio::test]
+async fn a_session_is_addressed_by_label_hostname_or_user_at_host() {
+    let backend = Arc::new(FakeBackend::default());
+    backend.add("s1", "ssh", Some("posix"));
+    backend.add("s2", "ssh", Some("posix"));
+    let host = host_with(backend.clone());
+    host.set_permission_mode("auto");
+    named_scope(&host, "chat", &[("s1", "web", "web.internal"), ("s2", "Database", "db.internal")]);
+    let exec = |target: &'static str| {
+        let host = host.clone();
+        async move { host.dispatch("netcatty/exec", p(json!({ "sessionId": target, "command": "uptime", "chatSessionId": "chat" })), Default::default()).await.unwrap() }
+    };
+    for target in ["database", "db.internal", "root@db.internal", " Database "] {
+        let r = exec(target).await;
+        assert_eq!(r["ok"], true, "{target}: {r}");
+    }
+    assert!(wrote_command(&backend, "s2"));
+    assert!(!wrote_command(&backend, "s1"), "a name must never reach another session");
+    // An id still wins, and SFTP resolves the same way.
+    assert_eq!(exec("s1").await["ok"], true);
+    let r = host.dispatch("netcatty/sftp/home", p(json!({ "sessionId": "web", "chatSessionId": "chat" })), Default::default()).await.unwrap();
+    assert_eq!(r["homeDir"], "/root");
+}
+
+#[tokio::test]
+async fn an_ambiguous_or_unknown_session_name_is_rejected_with_the_candidates() {
+    let backend = Arc::new(FakeBackend::default());
+    backend.add("s1", "ssh", Some("posix"));
+    backend.add("s2", "ssh", Some("posix"));
+    backend.add("s3", "ssh", Some("posix"));
+    let host = host_with(backend.clone());
+    host.set_permission_mode("auto");
+    // s3 shares the label but is outside this chat's scope.
+    named_scope(&host, "chat", &[("s1", "web", "a.internal"), ("s2", "web", "b.internal")]);
+    named_scope(&host, "other", &[("s3", "web", "c.internal")]);
+    let r = host.dispatch("netcatty/exec", p(json!({ "sessionId": "web", "command": "uptime", "chatSessionId": "chat" })), Default::default()).await.unwrap();
+    assert_eq!(r["ok"], false);
+    assert_eq!(r["error"], "\"web\" matches 2 sessions in the current scope. Pass the sessionId of the one you mean.");
+    let ids: Vec<&str> = r["sessions"].as_array().unwrap().iter().map(|s| s["sessionId"].as_str().unwrap()).collect();
+    assert_eq!(ids, ["s1", "s2"]);
+    assert_eq!(r["sessions"][0]["hostname"], "a.internal");
+    for id in ["s1", "s2", "s3"] {
+        assert!(!wrote_command(&backend, id), "{id}");
+    }
+    // The hostname is unique, so it resolves where the label could not.
+    let r = host.dispatch("netcatty/exec", p(json!({ "sessionId": "b.internal", "command": "uptime", "chatSessionId": "chat" })), Default::default()).await.unwrap();
+    assert_eq!(r["ok"], true, "{r}");
+    assert!(wrote_command(&backend, "s2"));
+    // A name from another scope is unknown here, and says what is available.
+    let r = host.dispatch("netcatty/exec", p(json!({ "sessionId": "c.internal", "command": "uptime", "chatSessionId": "chat" })), Default::default()).await.unwrap();
+    assert_eq!(r["error"], "Session \"c.internal\" is not in the current scope.");
+    assert_eq!(r["sessions"].as_array().unwrap().len(), 2);
+    assert!(!wrote_command(&backend, "s3"));
 }

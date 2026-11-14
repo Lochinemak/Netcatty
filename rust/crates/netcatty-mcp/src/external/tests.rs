@@ -34,8 +34,14 @@ fn free_port() -> u16 {
 }
 
 async fn http(port: u16, host_header: &str, token: Option<&str>, session: Option<&str>, body: &str) -> (u16, String, String) {
+    let (status, sid, _, body) = http_at(port, "/mcp", "application/json, text/event-stream", host_header, token, session, body).await;
+    (status, sid, body)
+}
+
+/// `(status, session id, content type, body)` of one POST.
+async fn http_at(port: u16, path: &str, accept: &str, host_header: &str, token: Option<&str>, session: Option<&str>, body: &str) -> (u16, String, String, String) {
     let mut s = tokio::net::TcpStream::connect(("127.0.0.1", port)).await.unwrap();
-    let mut req = format!("POST /mcp HTTP/1.1\r\nHost: {host_header}\r\nContent-Type: application/json\r\nAccept: application/json, text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n", body.len());
+    let mut req = format!("POST {path} HTTP/1.1\r\nHost: {host_header}\r\nContent-Type: application/json\r\nAccept: {accept}\r\nContent-Length: {}\r\nConnection: close\r\n", body.len());
     if let Some(t) = token {
         req.push_str(&format!("Authorization: Bearer {t}\r\n"));
     }
@@ -48,9 +54,10 @@ async fn http(port: u16, host_header: &str, token: Option<&str>, session: Option
     let mut out = String::new();
     s.read_to_string(&mut out).await.unwrap();
     let status: u16 = out.split_whitespace().nth(1).unwrap().parse().unwrap();
-    let sid = out.lines().find_map(|l| l.to_lowercase().strip_prefix("mcp-session-id: ").map(|_| l[16..].trim().to_string())).unwrap_or_default();
-    let body = out.split("\r\n\r\n").nth(1).unwrap_or("").to_string();
-    (status, sid, body)
+    let header = |name: &str| out.lines().find_map(|l| l.to_lowercase().strip_prefix(name).map(|_| l[name.len()..].trim().to_string())).unwrap_or_default();
+    let (sid, content_type) = (header("mcp-session-id: "), header("content-type: "));
+    let body = out.split_once("\r\n\r\n").map(|(_, b)| b.to_string()).unwrap_or_default();
+    (status, sid, content_type, body)
 }
 
 #[test]
@@ -198,4 +205,53 @@ async fn universal_prompt_and_unknown_client() {
     assert!(p["prompt"].as_str().unwrap().contains("/bin/netcatty"));
     assert!(p["prompt"].as_str().unwrap().contains("NETCATTY_MCP_HELPER"));
     assert_eq!(c.client_status("vim").await["ok"], false);
+}
+
+/// Loading a toolset changes the tool list. Over HTTP the only place that
+/// notification can travel is the response to the call that caused it.
+#[tokio::test]
+async fn http_delivers_list_changed_and_preloads_toolsets() {
+    let dir = tempfile::tempdir().unwrap();
+    let c = controller(dir.path());
+    let port = free_port();
+    c.set_enabled(true).await;
+    let s = c.set_config(&json!({ "httpEnabled": true, "httpPort": port })).await;
+    assert_eq!(s["http"]["state"], "running", "{s}");
+    let token = s["http"]["bearerToken"].as_str().unwrap().to_string();
+    let host = format!("127.0.0.1:{port}");
+    let init = r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"t","version":"1"}}}"#;
+    let load = r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"load_netcatty_tools","arguments":{"toolset":"snippets"}}}"#;
+    let list = r#"{"jsonrpc":"2.0","id":3,"method":"tools/list"}"#;
+    let stream = "application/json, text/event-stream";
+
+    let (_, sid, content_type, _) = http_at(port, "/mcp", stream, &host, Some(&token), None, init).await;
+    assert_eq!(content_type, "application/json", "a plain response stays JSON");
+    let (status, _, content_type, body) = http_at(port, "/mcp", stream, &host, Some(&token), Some(&sid), load).await;
+    assert_eq!(status, 200);
+    assert_eq!(content_type, "text/event-stream");
+    let events: Vec<Value> = body.lines().filter_map(|l| l.strip_prefix("data: ")).map(|d| serde_json::from_str(d).unwrap()).collect();
+    assert_eq!(events.len(), 2, "{body}");
+    assert_eq!(events[0]["method"], "notifications/tools/list_changed");
+    assert_eq!(events[1]["id"], 2);
+    assert!(events[1]["result"]["content"][0]["text"].as_str().unwrap().contains("snippets_list"));
+    let (_, _, _, body) = http_at(port, "/mcp", stream, &host, Some(&token), Some(&sid), list).await;
+    assert!(body.contains("\"snippets_run\""), "{body}");
+    // Loading it again changes nothing, so there is nothing to stream.
+    let (_, _, content_type, _) = http_at(port, "/mcp", stream, &host, Some(&token), Some(&sid), load).await;
+    assert_eq!(content_type, "application/json");
+
+    // A client that cannot take a stream still gets its answer as JSON.
+    let (_, sid, _, _) = http_at(port, "/mcp", "application/json", &host, Some(&token), None, init).await;
+    let (status, _, content_type, body) = http_at(port, "/mcp", "application/json", &host, Some(&token), Some(&sid), load).await;
+    assert_eq!((status, content_type.as_str()), (200, "application/json"));
+    assert_eq!(serde_json::from_str::<Value>(&body).unwrap()["id"], 2);
+
+    // …and one that never re-reads the list can ask for toolsets up front.
+    let (status, sid, _, _) = http_at(port, "/mcp?toolsets=portforward,sftp_advanced", stream, &host, Some(&token), None, init).await;
+    assert_eq!(status, 200);
+    let (_, _, _, body) = http_at(port, "/mcp", stream, &host, Some(&token), Some(&sid), list).await;
+    let names: Vec<String> = serde_json::from_str::<Value>(&body).unwrap()["result"]["tools"].as_array().unwrap().iter().map(|t| t["name"].as_str().unwrap().to_string()).collect();
+    assert!(names.contains(&"portforward_start".to_string()) && names.contains(&"sftp_stat".to_string()), "{names:?}");
+    assert!(!names.contains(&"snippets_list".to_string()));
+    c.cleanup().await;
 }

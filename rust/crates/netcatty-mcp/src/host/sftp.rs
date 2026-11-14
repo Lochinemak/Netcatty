@@ -3,12 +3,78 @@
 //! command timeout and cancellable per chat / terminal.
 
 use super::backend::SftpOp;
+use super::find::{EntryKind, FindOptions, DEFAULT_MAX_DEPTH, DEFAULT_MAX_RESULTS};
 use super::McpHost;
 use netcatty_capabilities::services::{run_guard, ExecGuard};
 use serde_json::{json, Map, Value};
 use std::time::Duration;
 
 pub const GLOBAL_TRANSFER_EVENT: &str = "netcatty:sftp:global-transfer";
+/// Most bytes one `netcatty/sftp/read` returns when the caller sets a limit.
+pub const MAX_READ_BYTES: u64 = 8 * 1024 * 1024;
+/// A limit below one UTF-8 sequence could never make progress.
+const MIN_READ_BYTES: u64 = 4;
+/// Share of the command timeout a search may use before it returns what it
+/// has, so a slow search ends as a truncated result rather than a timeout.
+const FIND_TIME_SHARE: f64 = 0.75;
+
+/// Bytes at the end of `bytes` that start a UTF-8 sequence without
+/// finishing it (0–3).
+fn incomplete_utf8_tail(bytes: &[u8]) -> usize {
+    for back in 1..=bytes.len().min(3) {
+        let byte = bytes[bytes.len() - back];
+        if byte & 0b1100_0000 == 0b1000_0000 {
+            continue; // continuation byte: keep looking for the lead byte
+        }
+        let needed = match byte {
+            b if b & 0b1110_0000 == 0b1100_0000 => 2,
+            b if b & 0b1111_0000 == 0b1110_0000 => 3,
+            b if b & 0b1111_1000 == 0b1111_0000 => 4,
+            _ => return 0,
+        };
+        return if needed > back { back } else { 0 };
+    }
+    0
+}
+
+/// The result fragment of a read that started at `offset`: the text, how
+/// much of the file it covers and where to continue. `total` is the file
+/// size when the server reported one; `max_bytes` the limit the read ran
+/// with. A chunk that stops inside a multi-byte character gives that
+/// character back, so the next read (from `nextOffset`) starts on a boundary.
+pub fn read_chunk(mut bytes: Vec<u8>, offset: u64, total: Option<u64>, max_bytes: Option<u64>) -> Value {
+    let read_end = offset + bytes.len() as u64;
+    let more = match (total, max_bytes) {
+        (Some(total), _) => read_end < total,
+        (None, Some(max)) => bytes.len() as u64 >= max,
+        (None, None) => false,
+    };
+    if more {
+        let tail = incomplete_utf8_tail(&bytes);
+        if tail < bytes.len() {
+            bytes.truncate(bytes.len() - tail);
+        }
+    }
+    let mut out = json!({
+        "content": String::from_utf8_lossy(&bytes),
+        "offset": offset,
+        "bytesRead": bytes.len(),
+        "truncated": more,
+    });
+    if let Some(total) = total {
+        out["totalBytes"] = json!(total);
+    }
+    if more {
+        out["nextOffset"] = json!(offset + bytes.len() as u64);
+    }
+    out
+}
+
+/// A non-negative integer parameter (the CLI sends numbers as floats).
+fn u(p: &Map<String, Value>, k: &str) -> Option<u64> {
+    let v = p.get(k)?;
+    v.as_u64().or_else(|| v.as_f64().filter(|f| *f >= 0.0 && f.fract() == 0.0).map(|f| f as u64))
+}
 
 fn s<'a>(p: &'a Map<String, Value>, k: &str) -> Option<&'a str> {
     p.get(k).and_then(Value::as_str).filter(|v| !v.is_empty())
@@ -45,8 +111,38 @@ impl McpHost {
             }
             "netcatty/sftp/read" => {
                 let path = s(params, "path").ok_or("path is required")?.to_string();
-                let content = self.with_session_sftp(params, SftpOp::Read { path: path.clone() }, "SFTP read", guard).await?;
-                Ok(json!({ "ok": true, "path": path, "content": content }))
+                let offset = u(params, "offset").unwrap_or(0);
+                let max_bytes = u(params, "maxBytes").map(|m| m.clamp(MIN_READ_BYTES, MAX_READ_BYTES));
+                let chunk = self.with_session_sftp(params, SftpOp::Read { path: path.clone(), offset, max_bytes }, "SFTP read", guard).await?;
+                let mut out = json!({ "ok": true, "path": path });
+                match chunk {
+                    Value::Object(fields) => out.as_object_mut().unwrap().extend(fields),
+                    content => out["content"] = content,
+                }
+                Ok(out)
+            }
+            "netcatty/sftp/find" => {
+                let pattern = s(params, "pattern").ok_or("pattern is required")?.to_string();
+                let kind = match s(params, "type") {
+                    None => None,
+                    Some(t) => Some(EntryKind::parse(t).ok_or("type must be file, directory, or symlink")?),
+                };
+                let options = FindOptions {
+                    root: s(params, "path").ok_or("path is required")?.to_string(),
+                    pattern,
+                    kind,
+                    max_depth: u(params, "maxDepth").map(|d| d.min(u32::MAX as u64) as u32).unwrap_or(DEFAULT_MAX_DEPTH),
+                    max_results: u(params, "maxResults").map(|n| n as usize).unwrap_or(DEFAULT_MAX_RESULTS),
+                    time_budget: Duration::from_millis((self.command_timeout_ms() as f64 * FIND_TIME_SHARE) as u64),
+                };
+                // Reject a bad pattern before a connection is opened for it.
+                super::find::NameGlob::new(&options.pattern)?;
+                let found = self.with_session_sftp(params, SftpOp::Find { options }, "SFTP find", guard).await?;
+                let mut out = json!({ "ok": true });
+                if let Value::Object(fields) = found {
+                    out.as_object_mut().unwrap().extend(fields);
+                }
+                Ok(out)
             }
             "netcatty/sftp/write" => {
                 let path = s(params, "path").ok_or("path is required")?.to_string();
@@ -152,5 +248,56 @@ impl McpHost {
                 Err(e)
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_whole_read_is_not_truncated() {
+        let r = read_chunk(b"hello".to_vec(), 0, Some(5), None);
+        assert_eq!(r, json!({ "content": "hello", "offset": 0, "bytesRead": 5, "truncated": false, "totalBytes": 5 }));
+        // No size from the server and no limit: everything there was.
+        let r = read_chunk(b"hello".to_vec(), 0, None, None);
+        assert_eq!(r["truncated"], false);
+        assert!(r.get("totalBytes").is_none() && r.get("nextOffset").is_none());
+    }
+
+    #[test]
+    fn a_partial_read_says_where_to_continue() {
+        let r = read_chunk(b"hel".to_vec(), 0, Some(5), Some(3));
+        assert_eq!(r, json!({ "content": "hel", "offset": 0, "bytesRead": 3, "truncated": true, "totalBytes": 5, "nextOffset": 3 }));
+        let r = read_chunk(b"lo".to_vec(), 3, Some(5), Some(3));
+        assert_eq!((r["truncated"].clone(), r["offset"].clone()), (json!(false), json!(3)));
+        // Size unknown: a full chunk may have more behind it, a short one cannot.
+        assert_eq!(read_chunk(b"abc".to_vec(), 0, None, Some(3))["nextOffset"], 3);
+        assert_eq!(read_chunk(b"ab".to_vec(), 0, None, Some(3))["truncated"], false);
+        // Reading past the end is empty, not an error.
+        let r = read_chunk(Vec::new(), 9, Some(5), Some(3));
+        assert_eq!((r["content"].clone(), r["truncated"].clone()), (json!(""), json!(false)));
+    }
+
+    #[test]
+    fn a_chunk_never_ends_inside_a_character() {
+        let text = "ab中文"; // 2 + 3 + 3 bytes
+        let bytes = text.as_bytes();
+        for cut in 1..bytes.len() {
+            let first = read_chunk(bytes[..cut].to_vec(), 0, Some(bytes.len() as u64), Some(cut as u64));
+            let next = first["nextOffset"].as_u64().unwrap() as usize;
+            assert!(text.is_char_boundary(next), "cut {cut} continues at {next}");
+            assert!(!first["content"].as_str().unwrap().contains('\u{fffd}'), "cut {cut}");
+            let rest = read_chunk(bytes[next..].to_vec(), next as u64, Some(bytes.len() as u64), None);
+            assert_eq!(format!("{}{}", first["content"].as_str().unwrap(), rest["content"].as_str().unwrap()), text, "cut {cut}");
+        }
+        // The last chunk of a file keeps whatever bytes it has.
+        assert_eq!(read_chunk(vec![b'a', 0xE4], 0, Some(2), None)["bytesRead"], 2);
+        // A chunk that is nothing but a partial character is returned as is
+        // rather than as an empty read that would never advance.
+        assert_eq!(read_chunk(vec![0xE4, 0xB8], 0, Some(9), Some(2))["nextOffset"], 2);
+        assert_eq!(incomplete_utf8_tail(b"abc"), 0);
+        assert_eq!(incomplete_utf8_tail(&[b'a', 0xF0, 0x9F, 0x98]), 3);
+        assert_eq!(incomplete_utf8_tail("😀".as_bytes()), 0);
     }
 }

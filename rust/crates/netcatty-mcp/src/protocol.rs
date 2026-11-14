@@ -4,11 +4,18 @@
 //! `normalizeMcpCallArguments.cjs` and the tool handlers of
 //! `electron/capabilities/codegen/mcpToolRegistry.cjs`; the JSON-RPC subset
 //! is what `@modelcontextprotocol/sdk`'s `McpServer` answers.
+//!
+//! Beyond the port, the tool surface is refined here and in
+//! `netcatty_capabilities::mcp_schema`: real input types, tool annotations,
+//! deferred tools that load when called, toolset preloading and a
+//! `get_environment` that sends its static guidance once. See "MCP tool
+//! surface" in `rust/docs/ipc-mcp.md`.
 
 use netcatty_capabilities::surfaces::{list_mcp_tools, McpToolDef};
 use parking_lot::Mutex;
 use serde_json::{json, Map, Value};
 use std::collections::{BTreeMap, HashSet};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 pub const SERVER_NAME: &str = "netcatty-remote-hosts";
@@ -16,14 +23,22 @@ pub const SERVER_VERSION: &str = "1.0.0";
 pub const LATEST_PROTOCOL_VERSION: &str = "2025-06-18";
 pub const SUPPORTED_PROTOCOL_VERSIONS: [&str; 4] = ["2025-06-18", "2025-03-26", "2024-11-05", "2024-10-07"];
 
-pub const NETCATTY_MCP_SERVER_INSTRUCTIONS: &str = "Use Netcatty tools for terminals, hosts, SFTP, vault, snippets/scripts, and port forwards. For terminal work, call get_environment first; select by label or hostname and pass sessionId to terminal_execute/terminal_start. Never use the local shell for Netcatty session commands. If none matches, use vault_hosts_list and host_open. 15 core tools start loaded. For attachments, advanced SFTP, vault/notes, snippets, scripts, or port forwards, call load_netcatty_tools with a toolset; use all for every tool.";
+pub const NETCATTY_MCP_SERVER_INSTRUCTIONS: &str = "Use Netcatty tools for terminals, hosts, SFTP, vault, snippets/scripts, and port forwards. Never use the local shell for Netcatty session commands. Address a session by its sessionId, or directly by its exact label or hostname: every tool with a sessionId input resolves the name and lists the candidates when it is ambiguous. Call get_environment to see the live sessions; if none matches, use vault_hosts_list and host_open. Pass booleans, arrays and objects as real JSON values, not as strings. Tools annotated read-only never change a host or the vault; every other tool follows the permission mode set in Netcatty and may wait for the user's approval. sftp_read_file returns large files in pieces (follow nextOffset) and sftp_find searches a directory tree by name. 16 tools start loaded. For attachments, advanced SFTP, vault/notes, snippets, scripts, or port forwards, call load_netcatty_tools with a toolset; use all for every tool.";
 
 pub const MCP_TOOL_LOADER_NAME: &str = "load_netcatty_tools";
 const LOADER_DESCRIPTION: &str = "Load more Netcatty tools by category. Choose sessions, attachments, sftp_advanced, vault_hosts, vault_notes, snippets, scripts, portforward, or all. Newly loaded tools appear immediately without restarting the MCP server.";
+/// `get_environment` carries a few kilobytes of static usage guidance. It is
+/// delivered once per MCP session; later calls return only the live state.
+const CONTEXT_GUIDANCE_MIN_CHARS: usize = 400;
+const CONTEXT_GUIDANCE_OMITTED: &str = "Usage guidance is unchanged since the first get_environment call of this connection and is omitted.";
+/// What `sftp_read_file` returns per call unless the caller asks for more.
+/// The RPC itself reads the whole file when no limit is given (the tool CLI
+/// relies on that); a model must not pull a multi-gigabyte log by accident.
+pub const DEFAULT_SFTP_READ_BYTES: u64 = 256 * 1024;
 const OBSERVER_MESSAGE: &str = "Operation denied: permission mode is \"observer\" (read-only). Change to \"confirm\" or \"auto\" in Settings → AI → Safety to allow this action.";
 
-pub const CORE_MCP_TOOL_NAMES: [&str; 14] = [
-    "get_environment", "session_close", "terminal_execute", "terminal_start", "terminal_poll", "terminal_stop", "sftp_list",
+pub const CORE_MCP_TOOL_NAMES: [&str; 15] = [
+    "get_environment", "session_close", "terminal_execute", "terminal_start", "terminal_poll", "terminal_stop", "sftp_list", "sftp_find",
     "sftp_read_file", "sftp_write_file", "sftp_download", "sftp_upload", "vault_hosts_list", "host_open", "terminal_read_context",
 ];
 
@@ -91,10 +106,31 @@ fn text_result(text: String, is_error: bool) -> Value {
     v
 }
 
+/// The sessions a failed call could have meant (`sessions` of a scope or
+/// ambiguity error), one per line.
+fn format_session_candidates(result: &Value) -> String {
+    let Some(sessions) = result.get("sessions").and_then(Value::as_array).filter(|s| !s.is_empty()) else {
+        return String::new();
+    };
+    let field = |s: &Value, k: &str| s.get(k).and_then(Value::as_str).unwrap_or("").to_string();
+    let mut out = String::from("\nSessions in the current scope:");
+    for s in sessions {
+        let (label, hostname, username) = (field(s, "label"), field(s, "hostname"), field(s, "username"));
+        let address = match (username.is_empty(), hostname.is_empty()) {
+            (_, true) => String::new(),
+            (true, false) => format!(", {hostname}"),
+            (false, false) => format!(", {username}@{hostname}"),
+        };
+        let state = if s.get("connected").and_then(Value::as_bool) == Some(false) { ", disconnected" } else { "" };
+        out.push_str(&format!("\n- {} (sessionId {}{address}{state})", if label.is_empty() { "(no label)" } else { &label }, field(s, "sessionId")));
+    }
+    out
+}
+
 pub fn format_rpc_error(result: &Value) -> String {
     if let Some(e) = result.get("error").filter(|e| !e.is_null()) {
         let s = e.as_str().map(str::to_string).unwrap_or_else(|| e.to_string());
-        return format!("Error: {s}");
+        return format!("Error: {s}{}", format_session_candidates(result));
     }
     if let Some(c) = result.get("code").filter(|c| !c.is_null()) {
         let s = c.as_str().map(str::to_string).unwrap_or_else(|| c.to_string());
@@ -233,38 +269,25 @@ pub async fn call_catalog_tool(tool: &McpToolDef, args: &Map<String, Value>, rpc
     }
 }
 
-/// Validate tool arguments against the catalog schema.
-pub fn validate_arguments(tool: &McpToolDef, args: &Map<String, Value>) -> Result<(), String> {
-    for (name, field) in &tool.input_fields {
-        match args.get(name) {
-            None | Some(Value::Null) => {
-                if !field.optional {
-                    return Err(format!("{name}: Required"));
-                }
-            }
-            Some(v) => {
-                if field.field_type == "number" {
-                    if !v.as_f64().is_some_and(|n| n >= 0.0 && n.fract() == 0.0) {
-                        return Err(format!("{name}: Expected a non-negative integer"));
-                    }
-                } else if !v.is_string() {
-                    return Err(format!("{name}: Expected string, received {}", type_name(v)));
-                }
-            }
-        }
+/// First sentence of a tool description (the loader's summary line).
+fn summary_line(description: &str) -> &str {
+    match description.find(". ") {
+        Some(i) => &description[..=i],
+        None => description,
     }
-    Ok(())
 }
 
-fn type_name(v: &Value) -> &'static str {
-    match v {
-        Value::Null => "null",
-        Value::Bool(_) => "boolean",
-        Value::Number(_) => "number",
-        Value::String(_) => "string",
-        Value::Array(_) => "array",
-        Value::Object(_) => "object",
+/// Later `get_environment` results without the static guidance.
+fn compact_context(mut ctx: Value) -> Value {
+    if let Some(obj) = ctx.as_object_mut() {
+        obj.remove("tools");
+        obj.insert("description".into(), json!(CONTEXT_GUIDANCE_OMITTED));
     }
+    ctx
+}
+
+fn has_context_guidance(ctx: &Value) -> bool {
+    ctx.get("description").and_then(Value::as_str).is_some_and(|d| d.len() >= CONTEXT_GUIDANCE_MIN_CHARS)
 }
 
 /// One MCP server session (one stdio process or one HTTP session).
@@ -277,6 +300,8 @@ pub struct McpSession {
     /// `None` = progressive disabled; tools visible are this allow-list.
     loaded: Mutex<Vec<String>>,
     progressive: bool,
+    /// The static `get_environment` guidance already reached this client.
+    context_guidance_sent: AtomicBool,
 }
 
 /// Outcome of handling a message: optional response + notifications to send.
@@ -295,7 +320,32 @@ impl McpSession {
             Some(list) => (list.into_iter().filter(|n| by_name.contains_key(n)).collect(), false),
             None => (CORE_MCP_TOOL_NAMES.iter().map(|s| s.to_string()).collect(), true),
         };
-        Self { rpc, scope, observer, by_name, deferred, loaded: Mutex::new(loaded), progressive }
+        Self { rpc, scope, observer, by_name, deferred, loaded: Mutex::new(loaded), progressive, context_guidance_sent: AtomicBool::new(false) }
+    }
+
+    /// Load toolsets up front, for clients that never re-read the tool list
+    /// after `notifications/tools/list_changed`. Unknown names are ignored;
+    /// a delegated (fixed) tool set is never widened.
+    pub fn with_toolsets<S: AsRef<str>>(self, toolsets: &[S]) -> Self {
+        if self.progressive {
+            for toolset in toolsets {
+                let names = self.toolset_tools(toolset.as_ref().trim());
+                let mut loaded = self.loaded.lock();
+                for name in names {
+                    if !loaded.contains(&name) {
+                        loaded.push(name);
+                    }
+                }
+            }
+        }
+        self
+    }
+
+    fn toolset_tools(&self, toolset: &str) -> Vec<String> {
+        if toolset == "all" {
+            return self.deferred.clone();
+        }
+        deferred_toolsets().into_iter().find(|(n, _)| *n == toolset).map(|(_, v)| v.iter().map(|s| s.to_string()).collect()).unwrap_or_default()
     }
 
     pub fn visible_tool_names(&self) -> Vec<String> {
@@ -312,7 +362,9 @@ impl McpSession {
         if self.progressive {
             tools.push(json!({
                 "name": MCP_TOOL_LOADER_NAME,
+                "title": "Load Netcatty tools",
                 "description": LOADER_DESCRIPTION,
+                "annotations": { "title": "Load Netcatty tools", "readOnlyHint": true, "idempotentHint": true, "openWorldHint": false },
                 "inputSchema": {
                     "type": "object",
                     "properties": { "toolset": { "type": "string", "enum": loadable_toolset_names(), "description": "Netcatty tool category to load" } },
@@ -324,18 +376,25 @@ impl McpSession {
         }
         for name in self.loaded.lock().iter() {
             if let Some(t) = self.by_name.get(name) {
-                tools.push(json!({ "name": t.mcp_tool, "description": t.description, "inputSchema": t.input_schema() }));
+                let annotations = t.annotations();
+                tools.push(json!({
+                    "name": t.mcp_tool,
+                    "title": annotations["title"],
+                    "description": t.description,
+                    "inputSchema": t.input_schema(),
+                    "annotations": annotations,
+                }));
             }
         }
         json!({ "tools": tools })
     }
 
     fn load_toolset(&self, toolset: &str) -> (Value, bool) {
-        let requested: Vec<String> = if toolset == "all" {
-            self.deferred.clone()
-        } else {
-            deferred_toolsets().into_iter().find(|(n, _)| *n == toolset).map(|(_, v)| v.iter().map(|s| s.to_string()).collect()).unwrap_or_default()
-        };
+        let requested = self.toolset_tools(toolset);
+        // What each tool is for, so the answer is usable even before (or
+        // without) the client re-reading the tool list.
+        let summaries: Map<String, Value> =
+            requested.iter().filter_map(|n| self.by_name.get(n).map(|t| (n.clone(), json!(summary_line(&t.description))))).collect();
         let mut loaded = self.loaded.lock();
         let newly: Vec<String> = requested.iter().filter(|n| !loaded.contains(n)).cloned().collect();
         let already: Vec<String> = requested.iter().filter(|n| loaded.contains(n)).cloned().collect();
@@ -345,6 +404,7 @@ impl McpSession {
             "toolset": toolset,
             "newlyLoaded": newly,
             "alreadyLoaded": already,
+            "tools": summaries,
             "availableToolsets": loadable_toolset_names(),
             "loadedCatalogToolCount": count,
             "visibleToolCount": count + 1,
@@ -361,17 +421,51 @@ impl McpSession {
             }
             return Ok(self.load_toolset(toolset));
         }
-        if !self.loaded.lock().iter().any(|n| n == name) {
-            return Err((-32602, format!("MCP error -32602: Tool {name} not found")));
+        let not_found = || (-32602, format!("MCP error -32602: Tool {name} not found"));
+        let tool = self.by_name.get(name).ok_or_else(not_found)?;
+        // A deferred tool called by name is loaded on the spot: the toolsets
+        // only keep the initial list short, they are not a permission
+        // boundary (the host enforces that). A delegated set stays fixed.
+        let mut list_changed = false;
+        {
+            let mut loaded = self.loaded.lock();
+            if !loaded.iter().any(|n| n == name) {
+                if !self.progressive {
+                    return Err(not_found());
+                }
+                loaded.push(name.to_string());
+                list_changed = true;
+            }
         }
-        let tool = self.by_name.get(name).ok_or((-32602, format!("MCP error -32602: Tool {name} not found")))?;
-        if let Err(e) = validate_arguments(tool, &args) {
-            return Ok((text_result(format!("MCP error -32602: Input validation error: Invalid arguments for tool {name}: {e}"), true), false));
+        if let Err(e) = tool.validate_arguments(&args) {
+            return Ok((text_result(format!("MCP error -32602: Input validation error: Invalid arguments for tool {name}: {e}"), true), list_changed));
+        }
+        let mut args = tool.normalize_arguments(&args);
+        if tool.capability_id == "sftp.read" && args.get("maxBytes").is_none_or(Value::is_null) {
+            args.insert("maxBytes".into(), json!(DEFAULT_SFTP_READ_BYTES));
+        }
+        if tool.capability_id == "session.environment" {
+            return Ok((self.environment().await, list_changed));
         }
         match call_catalog_tool(tool, &args, &*self.rpc, &self.scope, &self.observer).await {
-            Ok(v) => Ok((v, false)),
-            Err(e) => Ok((text_result(e, true), false)),
+            Ok(v) => Ok((v, list_changed)),
+            Err(e) => Ok((text_result(e, true), list_changed)),
         }
+    }
+
+    /// `get_environment`: the full context once, the live state afterwards.
+    async fn environment(&self) -> Value {
+        let ctx = match self.rpc.call("netcatty/getContext", Value::Object(self.scope.clone())).await {
+            Ok(ctx) => ctx,
+            Err(e) => return text_result(e, true),
+        };
+        if !has_context_guidance(&ctx) {
+            return text_result(pretty(&ctx), false);
+        }
+        if self.context_guidance_sent.swap(true, Ordering::SeqCst) {
+            return text_result(pretty(&compact_context(ctx)), false);
+        }
+        text_result(pretty(&ctx), false)
     }
 
     /// Handle one JSON-RPC message (request or notification).
@@ -465,19 +559,19 @@ mod tests {
     #[test]
     fn progressive_catalog_assigns_every_tool_once() {
         let (by_name, deferred) = build_progressive_catalog().unwrap();
-        assert_eq!(by_name.len(), 71);
-        assert_eq!(deferred.len(), 71 - 14);
+        assert_eq!(by_name.len(), 72);
+        assert_eq!(deferred.len(), 72 - 15);
     }
 
     #[tokio::test]
-    async fn initial_surface_is_fifteen_tools_and_loading_is_idempotent() {
+    async fn initial_surface_is_sixteen_tools_and_loading_is_idempotent() {
         let (s, _) = session(json!({ "ok": true }));
         let init = s.handle(json!({ "jsonrpc": "2.0", "id": 0, "method": "initialize", "params": { "protocolVersion": "2025-03-26" } })).await;
         let r = init.response.unwrap();
         assert_eq!(r["result"]["protocolVersion"], "2025-03-26");
         assert_eq!(r["result"]["instructions"], NETCATTY_MCP_SERVER_INSTRUCTIONS);
         let list = s.handle(json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/list" })).await.response.unwrap();
-        assert_eq!(list["result"]["tools"].as_array().unwrap().len(), 15);
+        assert_eq!(list["result"]["tools"].as_array().unwrap().len(), 16);
         let h = call(&s, MCP_TOOL_LOADER_NAME, json!({ "toolset": "snippets" })).await;
         assert_eq!(h.notifications.len(), 1);
         let text = h.response.unwrap()["result"]["content"][0]["text"].as_str().unwrap().to_string();
@@ -486,7 +580,7 @@ mod tests {
         assert!(h.notifications.is_empty());
         call(&s, MCP_TOOL_LOADER_NAME, json!({ "toolset": "all" })).await;
         let list = s.handle(json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/list" })).await.response.unwrap();
-        assert_eq!(list["result"]["tools"].as_array().unwrap().len(), 72);
+        assert_eq!(list["result"]["tools"].as_array().unwrap().len(), 73);
         let bad = call(&s, MCP_TOOL_LOADER_NAME, json!({ "toolset": "nope" })).await.response.unwrap();
         assert_eq!(bad["result"]["isError"], true);
     }
@@ -497,8 +591,149 @@ mod tests {
         let h = s.handle(json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": { "name": "get_environment" } })).await;
         assert!(h.response.unwrap()["result"]["content"][0]["text"].as_str().unwrap().contains("hosts"));
         assert_eq!(rpc.0.lock()[0], ("netcatty/getContext".to_string(), json!({ "chatSessionId": "chat" })));
-        let h = call(&s, "snippets_list", json!({})).await.response.unwrap();
+        let h = call(&s, "no_such_tool", json!({})).await.response.unwrap();
         assert_eq!(h["error"]["code"], -32602);
+    }
+
+    fn tool<'a>(list: &'a Value, name: &str) -> &'a Value {
+        list["result"]["tools"].as_array().unwrap().iter().find(|t| t["name"] == name).unwrap()
+    }
+
+    #[tokio::test]
+    async fn tool_list_carries_annotations_and_real_input_types() {
+        let (s, _) = session(json!({ "ok": true }));
+        let list = s.handle(json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/list" })).await.response.unwrap();
+        let read = tool(&list, "sftp_read_file");
+        assert_eq!(read["annotations"]["readOnlyHint"], true);
+        assert_eq!(read["title"], "Sftp read file");
+        let exec = tool(&list, "terminal_execute");
+        assert_eq!(exec["annotations"]["readOnlyHint"], false);
+        assert_eq!(exec["annotations"]["destructiveHint"], true);
+        assert!(exec["inputSchema"]["properties"]["sessionId"]["description"].as_str().unwrap().contains("label or hostname"));
+        let open = tool(&list, "host_open");
+        assert_eq!(open["inputSchema"]["properties"]["newTab"]["type"], "boolean");
+        assert_eq!(open["annotations"]["destructiveHint"], false);
+        assert_eq!(tool(&list, MCP_TOOL_LOADER_NAME)["annotations"]["readOnlyHint"], true);
+    }
+
+    #[tokio::test]
+    async fn typed_arguments_reach_the_backend_in_its_string_form() {
+        let (s, rpc) = session(json!({ "ok": true }));
+        let r = call(&s, "host_open", json!({ "hostId": "h1", "newTab": true })).await.response.unwrap();
+        assert!(r["result"].get("isError").is_none(), "{r}");
+        assert_eq!(rpc.0.lock()[0].1, json!({ "chatSessionId": "chat", "hostId": "h1", "newTab": "true" }));
+        // The legacy string form is still accepted and passed through.
+        call(&s, "host_open", json!({ "hostId": "h1", "newTab": "false" })).await;
+        assert_eq!(rpc.0.lock()[1].1["newTab"], "false");
+        let bad = call(&s, "host_open", json!({ "hostId": "h1", "newTab": 1 })).await.response.unwrap();
+        assert!(bad["result"]["content"][0]["text"].as_str().unwrap().contains("newTab: Expected boolean, received number"));
+        assert_eq!(rpc.0.lock().len(), 2);
+        let r = call(&s, "vault_hosts_create", json!({ "hosts": [{ "hostname": "a" }], "dryRun": true })).await.response.unwrap();
+        assert!(r["result"].get("isError").is_none(), "{r}");
+        let sent = rpc.0.lock()[2].1.clone();
+        assert_eq!(sent["hosts"], "[{\"hostname\":\"a\"}]");
+        assert_eq!(sent["dryRun"], "true");
+    }
+
+    #[tokio::test]
+    async fn a_deferred_tool_called_by_name_loads_itself_but_a_delegated_set_stays_fixed() {
+        let (s, rpc) = session(json!({ "ok": true, "snippets": [] }));
+        assert!(!s.visible_tool_names().contains(&"snippets_list".to_string()));
+        let h = call(&s, "snippets_list", json!({})).await;
+        assert_eq!(h.notifications.len(), 1);
+        assert_eq!(h.notifications[0]["method"], "notifications/tools/list_changed");
+        assert!(h.response.unwrap()["result"].get("isError").is_none());
+        assert_eq!(rpc.0.lock().len(), 1);
+        assert!(s.visible_tool_names().contains(&"snippets_list".to_string()));
+        assert!(call(&s, "snippets_list", json!({})).await.notifications.is_empty());
+
+        let rpc = Arc::new(Echo(Default::default(), json!({ "ok": true })));
+        let fixed = McpSession::new(rpc.clone(), Map::new(), Arc::new(|| false), Some(vec!["get_environment".into()])).with_toolsets(&["all"]);
+        assert_eq!(fixed.visible_tool_names(), ["get_environment"]);
+        let r = call(&fixed, "snippets_list", json!({})).await.response.unwrap();
+        assert_eq!(r["error"]["code"], -32602);
+        assert!(rpc.0.lock().is_empty());
+    }
+
+    #[tokio::test]
+    async fn toolsets_can_be_preloaded_and_the_loader_says_what_it_loaded() {
+        let rpc = Arc::new(Echo(Default::default(), json!({ "ok": true })));
+        let s = McpSession::new(rpc.clone(), Map::new(), Arc::new(|| false), None).with_toolsets(&["sftp_advanced", "nope"]);
+        let names = s.visible_tool_names();
+        assert!(names.contains(&"sftp_stat".to_string()) && !names.contains(&"snippets_list".to_string()));
+        assert_eq!(names.len(), 16 + 6);
+        let all = McpSession::new(rpc, Map::new(), Arc::new(|| false), None).with_toolsets(&["all"]);
+        assert_eq!(all.visible_tool_names().len(), 73);
+
+        let h = call(&s, MCP_TOOL_LOADER_NAME, json!({ "toolset": "portforward" })).await;
+        let text = h.response.unwrap()["result"]["content"][0]["text"].as_str().unwrap().to_string();
+        let payload: Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(payload["tools"]["portforward_start"], "Start a port forwarding tunnel for a rule.");
+        assert_eq!(payload["tools"].as_object().unwrap().len(), 8);
+    }
+
+    #[tokio::test]
+    async fn sftp_read_is_bounded_by_default_and_find_is_a_core_read_only_tool() {
+        let (s, rpc) = session(json!({ "ok": true, "content": "x", "truncated": false }));
+        call(&s, "sftp_read_file", json!({ "sessionId": "s1", "path": "/var/log/syslog" })).await;
+        assert_eq!(rpc.0.lock()[0], ("netcatty/sftp/read".to_string(), json!({ "chatSessionId": "chat", "sessionId": "s1", "path": "/var/log/syslog", "maxBytes": DEFAULT_SFTP_READ_BYTES })));
+        call(&s, "sftp_read_file", json!({ "sessionId": "s1", "path": "/x", "offset": 4096, "maxBytes": 100 })).await;
+        assert_eq!(rpc.0.lock()[1].1["maxBytes"], 100);
+        assert_eq!(rpc.0.lock()[1].1["offset"], 4096);
+
+        let list = s.handle(json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/list" })).await.response.unwrap();
+        let find = tool(&list, "sftp_find");
+        assert_eq!(find["annotations"]["readOnlyHint"], true);
+        assert_eq!(find["inputSchema"]["required"], json!(["sessionId", "path", "pattern"]));
+        assert_eq!(find["inputSchema"]["properties"]["type"]["enum"], json!(["file", "directory", "symlink"]));
+        assert_eq!(find["inputSchema"]["properties"]["maxDepth"]["type"], "integer");
+        call(&s, "sftp_find", json!({ "sessionId": "s1", "path": "/etc", "pattern": "*.conf", "maxDepth": 2 })).await;
+        assert_eq!(rpc.0.lock()[2], ("netcatty/sftp/find".to_string(), json!({ "chatSessionId": "chat", "sessionId": "s1", "path": "/etc", "pattern": "*.conf", "maxDepth": 2 })));
+        let read = tool(&list, "sftp_read_file");
+        assert!(read["description"].as_str().unwrap().contains("nextOffset"));
+    }
+
+    #[tokio::test]
+    async fn get_environment_sends_the_static_guidance_once() {
+        let guidance = "g".repeat(CONTEXT_GUIDANCE_MIN_CHARS);
+        let (s, _) = session(json!({ "description": guidance, "hosts": [{ "sessionId": "s1" }], "hostCount": 1, "tools": { "environment": "get_environment" } }));
+        let text = |h: Handled| h.response.unwrap()["result"]["content"][0]["text"].as_str().unwrap().to_string();
+        let first: Value = serde_json::from_str(&text(call(&s, "get_environment", json!({})).await)).unwrap();
+        assert_eq!(first["description"], guidance);
+        assert!(first.get("tools").is_some());
+        let second: Value = serde_json::from_str(&text(call(&s, "get_environment", json!({})).await)).unwrap();
+        assert_eq!(second["description"], CONTEXT_GUIDANCE_OMITTED);
+        assert!(second.get("tools").is_none());
+        assert_eq!(second["hosts"][0]["sessionId"], "s1");
+
+        // A short status ("No hosts are available…") is never the guidance:
+        // it is passed through and does not count as having delivered it.
+        let (s, _) = session(json!({ "description": "No hosts are available in the current scope.", "hosts": [], "hostCount": 0 }));
+        call(&s, "get_environment", json!({})).await;
+        let again: Value = serde_json::from_str(&text(call(&s, "get_environment", json!({})).await)).unwrap();
+        assert_eq!(again["description"], "No hosts are available in the current scope.");
+        assert!(!s.context_guidance_sent.load(Ordering::SeqCst));
+    }
+
+    #[tokio::test]
+    async fn scope_errors_list_the_sessions_the_caller_could_have_meant() {
+        let reply = json!({
+            "ok": false,
+            "error": "\"web\" matches 2 sessions in the current scope. Pass the sessionId of the one you mean.",
+            "sessions": [
+                { "sessionId": "s1", "label": "web", "hostname": "a.example", "username": "root", "connected": true },
+                { "sessionId": "s2", "label": "web", "hostname": "b.example", "username": "", "connected": false },
+            ],
+        });
+        let (s, _) = session(reply);
+        let r = call(&s, "terminal_execute", json!({ "sessionId": "web", "command": "uptime" })).await.response.unwrap();
+        assert_eq!(r["result"]["isError"], true);
+        assert_eq!(
+            r["result"]["content"][0]["text"],
+            "Error: \"web\" matches 2 sessions in the current scope. Pass the sessionId of the one you mean.\nSessions in the current scope:\n- web (sessionId s1, root@a.example)\n- web (sessionId s2, b.example, disconnected)"
+        );
+        let r = call(&s, "sftp_list", json!({ "sessionId": "web", "path": "/" })).await.response.unwrap();
+        assert!(r["result"]["content"][0]["text"].as_str().unwrap().ends_with("- web (sessionId s2, b.example, disconnected)"));
     }
 
     #[tokio::test]

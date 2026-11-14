@@ -145,7 +145,11 @@ async fn run_sftp_op<R: Runtime>(
     let e = |err: netcatty_sftp::SftpError| err.to_string();
     Ok(match op {
         SftpOp::List { path } => serde_json::to_value(client.list(&path, None).await.map_err(e)?).unwrap_or(Value::Null),
-        SftpOp::Read { path } => json!(String::from_utf8_lossy(&client.read(&path, None, None).await.map_err(e)?)),
+        SftpOp::Read { path, offset, max_bytes } => {
+            let (bytes, total) = client.read_range(&path, offset, max_bytes, None).await.map_err(e)?;
+            netcatty_mcp::host::sftp::read_chunk(bytes, offset, total, max_bytes)
+        }
+        SftpOp::Find { options } => netcatty_mcp::host::find::find(&ClientLister(client.clone()), &options, &cancel).await?,
         SftpOp::Write { path, content } => {
             client.write(&path, content.as_bytes(), None).await.map_err(e)?;
             Value::Null
@@ -175,6 +179,31 @@ async fn run_sftp_op<R: Runtime>(
             transfer(app, client, EndpointType::Local, EndpointType::Sftp, local_path, remote_path, transfer_id, cancel).await?
         }
     })
+}
+
+/// Directory listings for `sftp_find`, on the operation's own connection.
+struct ClientLister(Arc<netcatty_sftp::SftpClient>);
+
+#[async_trait::async_trait]
+impl netcatty_mcp::host::find::DirLister for ClientLister {
+    async fn list(&self, path: &str) -> Result<Vec<netcatty_mcp::host::find::DirEntry>, String> {
+        use netcatty_core::models::sftp::FileEntryType;
+        use netcatty_mcp::host::find::{DirEntry, EntryKind};
+        let files = self.0.list(path, None).await.map_err(|e| e.to_string())?;
+        Ok(files
+            .into_iter()
+            .map(|f| DirEntry {
+                name: f.name,
+                kind: match f.entry_type {
+                    FileEntryType::File => EntryKind::File,
+                    FileEntryType::Directory => EntryKind::Directory,
+                    FileEntryType::Symlink => EntryKind::Symlink,
+                },
+                size: f.size,
+                last_modified: f.last_modified,
+            })
+            .collect())
+    }
 }
 
 #[allow(clippy::too_many_arguments)]

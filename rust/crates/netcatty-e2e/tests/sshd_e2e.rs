@@ -444,6 +444,61 @@ async fn sftp_browse_and_edit() {
     conn.disconnect().await.unwrap();
 }
 
+/// What `sftp_read_file` and `sftp_find` rest on: a ranged read returns
+/// exactly the requested bytes across several pipelined chunks, and a
+/// symlink to a directory is listed as a symlink (so a search that does not
+/// descend into symlinks cannot loop).
+#[tokio::test]
+async fn sftp_read_range_and_symlinked_directory_listing() {
+    let t = require_target!();
+    let conn = connect_password(&t).await;
+    let sftp = SftpClient::open(conn.clone(), SftpFilenameEncoding::Auto)
+        .await
+        .expect("sftp open");
+    let home = sftp.home_dir.clone().expect("home dir");
+    let dir = format!("{home}/netcatty-e2e-range-{}", std::process::id());
+    sftp.mkdir(&dir, None).await.unwrap();
+    let file = format!("{dir}/big.bin");
+    let payload: Vec<u8> = (0..300_000u32).map(|i| (i % 251) as u8).collect();
+    sftp.write(&file, &payload, None).await.unwrap();
+    let len = payload.len() as u64;
+
+    let (all, total) = sftp.read_range(&file, 0, None, None).await.unwrap();
+    assert_eq!(total, Some(len));
+    assert!(all == payload, "whole read differs");
+    let (mid, total) = sftp.read_range(&file, 1_000, Some(200_000), None).await.unwrap();
+    assert_eq!(total, Some(len));
+    assert!(mid == payload[1_000..201_000], "ranged read differs");
+    let (tail, _) = sftp.read_range(&file, len - 10, Some(100), None).await.unwrap();
+    assert_eq!(tail, payload[payload.len() - 10..]);
+    let (to_end, _) = sftp.read_range(&file, len - 7, None, None).await.unwrap();
+    assert_eq!(to_end, payload[payload.len() - 7..]);
+    assert!(sftp.read_range(&file, len, Some(10), None).await.unwrap().0.is_empty());
+    assert!(sftp.read_range(&file, len + 5, None, None).await.unwrap().0.is_empty());
+    assert!(sftp.read_range(&format!("{dir}/missing"), 0, Some(10), None).await.is_err());
+
+    let out = conn
+        .exec(
+            &format!("mkdir '{dir}/sub' && ln -s '{dir}' '{dir}/sub/loop' && echo linked"),
+            Some(Duration::from_secs(10)),
+        )
+        .await
+        .unwrap();
+    assert_eq!(out.stdout_lossy().trim(), "linked");
+    let entries = sftp.list(&format!("{dir}/sub"), None).await.unwrap();
+    assert_eq!(entries.len(), 1, "{entries:?}");
+    assert_eq!(entries[0].name, "loop");
+    assert_eq!(entries[0].entry_type, FileEntryType::Symlink);
+    let top = sftp.list(&dir, None).await.unwrap();
+    assert!(top.iter().all(|e| e.name != "." && e.name != ".."), "{top:?}");
+
+    conn.exec(&format!("rm -rf '{dir}'"), Some(Duration::from_secs(10)))
+        .await
+        .unwrap();
+    sftp.close().await.unwrap();
+    conn.disconnect().await.unwrap();
+}
+
 #[tokio::test]
 async fn sftp_transfer_upload_download_with_progress() {
     let t = require_target!();

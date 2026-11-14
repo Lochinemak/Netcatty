@@ -90,7 +90,8 @@ pub fn parse_args(args: &[String]) -> Result<(Vec<String>, Opts), CliError> {
         ("--kind", "kind", false), ("--trigger", "trigger", false), ("--trigger-pattern", "triggerPattern", false), ("--targets", "targets", false),
         ("--targets-all-hosts", "targetsAllHosts", false), ("--description", "description", false), ("--language", "language", false),
         ("--package", "package", false), ("--shortkey", "shortkey", false), ("--no-auto-run", "noAutoRun", false), ("--wait", "wait", false),
-        ("--script-ids", "scriptIds", false),
+        ("--script-ids", "scriptIds", false), ("--max-bytes", "maxBytes", true), ("--pattern", "pattern", false), ("--type", "type", false),
+        ("--max-depth", "maxDepth", true), ("--max-results", "maxResults", true),
     ];
     let mut i = 0;
     while i < args.len() {
@@ -353,6 +354,19 @@ fn format_sftp_list_text(entries: &Value) -> String {
     format!("Type\tName\tSize\tPermissions\tModified\n{}\n", rows.join("\n"))
 }
 
+/// One path per line; a truncated search says so on the last line.
+fn format_sftp_find_text(result: &Value) -> String {
+    let matches = result["matches"].as_array().cloned().unwrap_or_default();
+    let mut out: String = matches.iter().map(|m| format!("{}\n", s(m, "path"))).collect();
+    if matches.is_empty() {
+        out.push_str("No matches.\n");
+    }
+    if result["truncated"].as_bool() == Some(true) {
+        out.push_str(&format!("(search stopped early: {})\n", or_s(result, "truncatedBy", "limit reached")));
+    }
+    out
+}
+
 pub fn sftp_capability_error(host: &Value) -> Option<String> {
     if host["connected"] == json!(false) {
         return Some(format!("Session \"{}\" is not connected. Reconnect it before using SFTP.", s(host, "sessionId")));
@@ -557,8 +571,24 @@ async fn run_inner(args: Vec<String>) -> Result<Out, CliError> {
                     need(remote.is_some(), "Missing required --remote-path <remote-path> for sftp list.")?;
                     ("netcatty/sftp/list", "SFTP_LIST_FAILED", "Failed to list remote directory", Box::new(|r| format_sftp_list_text(&r["entries"])))
                 }
+                "find" => {
+                    need(remote.is_some(), "Missing required --remote-path <remote-directory> for sftp find.")?;
+                    need(opts.s("pattern").is_some(), "Missing required --pattern <glob> for sftp find.")?;
+                    for key in ["pattern", "type", "maxDepth", "maxResults"] {
+                        if let Some(v) = opts.values.get(key).filter(|v| !v.is_null()) {
+                            p.insert(key.into(), v.clone());
+                        }
+                    }
+                    ("netcatty/sftp/find", "SFTP_FIND_FAILED", "Failed to search remote directory", Box::new(format_sftp_find_text))
+                }
                 "read" => {
                     need(remote.is_some(), "Missing required --remote-path <remote-path> for sftp read.")?;
+                    // Without --max-bytes the whole file is read, as before.
+                    for key in ["offset", "maxBytes"] {
+                        if let Some(v) = opts.values.get(key).filter(|v| !v.is_null()) {
+                            p.insert(key.into(), v.clone());
+                        }
+                    }
                     ("netcatty/sftp/read", "SFTP_READ_FAILED", "Failed to read remote file", Box::new(|r| {
                         let c = s(r, "content");
                         if c.ends_with('\n') { c } else { format!("{c}\n") }

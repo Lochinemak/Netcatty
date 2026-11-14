@@ -6,6 +6,13 @@
 //! ```sh
 //! node -e 'const fs=require("fs");const {ALL_CAPABILITIES}=require("./electron/capabilities/catalog/index.cjs");const {TOOL_INPUT_FIELDS,MODEL_DESCRIPTION_HINTS}=require("./electron/capabilities/schemas/toolInputs.cjs");fs.writeFileSync("rust/crates/netcatty-capabilities/data/catalog.json",JSON.stringify({capabilities:ALL_CAPABILITIES,toolInputFields:TOOL_INPUT_FIELDS,modelDescriptionHints:MODEL_DESCRIPTION_HINTS},null,1)+"\n")'
 //! ```
+//!
+//! Capabilities and inputs that exist only in this (Tauri) backend live in
+//! `data/catalog_tauri.json`, in the same shape, and are merged on top at
+//! load: its capabilities are appended, its input fields are appended to the
+//! capability they name, and its description hints replace or add to the
+//! exported ones. Put Rust-only additions there, never in the export, so the
+//! regeneration above stays a plain overwrite.
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -136,16 +143,24 @@ pub struct Catalog {
 
 pub static CATALOG: LazyLock<Catalog> = LazyLock::new(|| {
     let raw: RawCatalog = serde_json::from_str(include_str!("../data/catalog.json")).expect("catalog.json is valid");
-    let tool_input_fields = raw
+    let extra: RawCatalog = serde_json::from_str(include_str!("../data/catalog_tauri.json")).expect("catalog_tauri.json is valid");
+    let mut capabilities = raw.capabilities;
+    capabilities.extend(extra.capabilities);
+    let mut tool_input_fields: BTreeMap<String, InputFields> = raw
         .tool_input_fields
         .0
         .into_iter()
         .map(|(id, fields)| (id, fields.0))
         .collect();
+    for (id, fields) in extra.tool_input_fields.0 {
+        tool_input_fields.entry(id).or_default().extend(fields.0);
+    }
+    let mut model_description_hints = raw.model_description_hints;
+    model_description_hints.extend(extra.model_description_hints);
     Catalog {
-        capabilities: raw.capabilities,
+        capabilities,
         tool_input_fields,
-        model_description_hints: raw.model_description_hints,
+        model_description_hints,
     }
 });
 
@@ -165,7 +180,7 @@ mod tests {
     #[test]
     fn catalog_loads_with_unique_ids_and_bindings() {
         let caps = all_capabilities();
-        assert_eq!(caps.len(), 80);
+        assert_eq!(caps.len(), 81);
         let ids: HashSet<_> = caps.iter().map(|c| c.id.as_str()).collect();
         assert_eq!(ids.len(), caps.len());
         for cap in caps.iter().filter(|c| c.is_implemented()) {
@@ -175,6 +190,27 @@ mod tests {
         let fields = tool_input_fields("terminal.execute").unwrap();
         assert_eq!(fields[0].0, "sessionId");
         assert_eq!(fields[1].0, "command");
+    }
+
+    /// The Tauri-only supplement extends the export without colliding with
+    /// it: no duplicate capability, no input field declared twice, and every
+    /// field or hint it adds belongs to a capability that exists.
+    #[test]
+    fn tauri_supplement_merges_cleanly() {
+        let find = all_capabilities().iter().find(|c| c.id == "sftp.find").expect("sftp.find");
+        assert_eq!(find.surface(SURFACE_BUILTIN).unwrap().rpc_method.as_deref(), Some("netcatty/sftp/find"));
+        assert!(!find.policy.write);
+        let read: Vec<&str> = tool_input_fields("sftp.read").unwrap().iter().map(|(n, _)| n.as_str()).collect();
+        assert_eq!(read, ["sessionId", "path", "offset", "maxBytes"]);
+        assert!(CATALOG.model_description_hints["sftp.read"].contains("nextOffset"));
+        let ids: HashSet<_> = all_capabilities().iter().map(|c| c.id.as_str()).collect();
+        for (id, fields) in &CATALOG.tool_input_fields {
+            let names: HashSet<_> = fields.iter().map(|(n, _)| n).collect();
+            assert_eq!(names.len(), fields.len(), "{id} declares a field twice");
+        }
+        for id in CATALOG.model_description_hints.keys() {
+            assert!(ids.contains(id.as_str()), "hint for unknown capability {id}");
+        }
     }
 
     #[test]
