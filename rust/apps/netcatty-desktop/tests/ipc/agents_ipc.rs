@@ -5,13 +5,13 @@
 use netcatty_desktop_lib::{configure_with, SetupOptions};
 use netcatty_store::CredentialCipher;
 use serde_json::{json, Value};
-use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use tauri::ipc::{CallbackFn, InvokeBody};
 use tauri::test::{get_ipc_response, mock_builder, mock_context, noop_assets, MockRuntime, INVOKE_KEY};
 use tauri::webview::InvokeRequest;
-use tauri::{App, Listener, WebviewWindow};
+use tauri::{App, WebviewWindow};
 
+use crate::support::{collect, install_pump, wait_for};
 use crate::BUILD_LOCK;
 
 struct Harness {
@@ -27,6 +27,7 @@ fn build_app() -> Harness {
         std::env::set_var("NETCATTY_PORTABLE_DATA_DIR", data_dir.path());
         let options = SetupOptions { cipher: Some(CredentialCipher::with_key([0x5a; 32])) };
         let mut app = configure_with(mock_builder(), options).build(mock_context(noop_assets())).unwrap();
+        install_pump(&app);
         #[allow(deprecated)]
         app.run_iteration(|_, _| {});
         app
@@ -49,26 +50,6 @@ fn invoke(webview: &WebviewWindow<MockRuntime>, cmd: &str, args: Value) -> Value
         Ok(body) => body.deserialize::<Value>().unwrap(),
         Err(e) => panic!("{cmd} failed: {e}"),
     }
-}
-
-fn collect(app: &App<MockRuntime>, event: &str) -> Arc<Mutex<Vec<Value>>> {
-    let seen = Arc::new(Mutex::new(Vec::new()));
-    let sink = seen.clone();
-    app.listen_any(event.to_string(), move |e| {
-        sink.lock().unwrap().push(serde_json::from_str(e.payload()).unwrap_or(Value::Null));
-    });
-    seen
-}
-
-fn wait_for(seen: &Arc<Mutex<Vec<Value>>>, timeout: Duration, pred: impl Fn(&[Value]) -> bool) -> bool {
-    let start = Instant::now();
-    while start.elapsed() < timeout {
-        if pred(&seen.lock().unwrap()) {
-            return true;
-        }
-        std::thread::sleep(Duration::from_millis(50));
-    }
-    false
 }
 
 #[cfg(unix)]
@@ -124,7 +105,7 @@ done"#,
     let r = invoke(&h.webview, "ai_sdk_agent_stream", json!({ "payload": { "requestId": "req-1", "chatSessionId": "chat-1", "sdkBackend": "claude", "prompt": "ping", "agentCommand": claude, "toolIntegrationMode": "mcp" } }));
     assert_eq!(r, json!({ "ok": true }));
     assert!(wait_for(&done, Duration::from_secs(10), |d| d.iter().any(|p| p["requestId"] == "req-1")));
-    let events = events.lock().unwrap();
+    let events = events.lock();
     assert!(events.iter().any(|e| e["requestId"] == "req-1" && e["event"] == json!({ "type": "text-delta", "textDelta": "pong" })));
     let sid = events.iter().find(|e| e["event"]["type"] == "session-id").unwrap();
     assert_eq!(sid["event"]["sessionId"], "native-9");

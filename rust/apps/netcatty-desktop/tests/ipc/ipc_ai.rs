@@ -8,13 +8,13 @@ use netcatty_desktop_lib::{configure_with, SetupOptions};
 use netcatty_store::CredentialCipher;
 use serde_json::{json, Value};
 use std::io::{Read, Write};
-use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use tauri::ipc::{CallbackFn, InvokeBody};
 use tauri::test::{get_ipc_response, mock_builder, mock_context, noop_assets, MockRuntime, INVOKE_KEY};
 use tauri::webview::InvokeRequest;
-use tauri::{App, Listener, WebviewWindow};
+use tauri::{App, WebviewWindow};
 
+use crate::support::{collect, install_pump, wait_for};
 use crate::BUILD_LOCK;
 const TEST_KEY: [u8; 32] = [0x5a; 32];
 
@@ -33,6 +33,7 @@ fn build_app() -> Harness {
         let mut app = configure_with(mock_builder(), options)
             .build(mock_context(noop_assets()))
             .expect("build mock app");
+        install_pump(&app);
         #[allow(deprecated)]
         app.run_iteration(|_, _| {});
         app
@@ -56,26 +57,6 @@ fn invoke(webview: &WebviewWindow<MockRuntime>, cmd: &str, args: Value) -> Value
     get_ipc_response(webview, request)
         .map(|body| body.deserialize::<Value>().expect("json response"))
         .unwrap_or_else(|err| panic!("{cmd} rejected: {err:?}"))
-}
-
-fn collect(app: &App<MockRuntime>, event: &str) -> Arc<Mutex<Vec<Value>>> {
-    let seen = Arc::new(Mutex::new(Vec::new()));
-    let sink = seen.clone();
-    app.listen_any(event.to_string(), move |e| {
-        sink.lock().unwrap().push(serde_json::from_str(e.payload()).unwrap_or(Value::Null));
-    });
-    seen
-}
-
-fn wait_for(seen: &Arc<Mutex<Vec<Value>>>, pred: impl Fn(&[Value]) -> bool) -> bool {
-    let start = Instant::now();
-    while start.elapsed() < Duration::from_secs(5) {
-        if pred(&seen.lock().unwrap()) {
-            return true;
-        }
-        std::thread::sleep(Duration::from_millis(20));
-    }
-    false
 }
 
 /// One-connection HTTP server writing `parts` (with delays) after reading
@@ -168,8 +149,8 @@ fn chat_stream_emits_data_and_end_to_the_calling_window() {
         "headers": { "content-type": "application/json" }, "body": "{\"stream\":true}", "providerId": "p"
     } }));
     assert_eq!(result, json!({ "ok": true, "statusCode": 200, "statusText": "OK" }));
-    assert!(wait_for(&end, |e| e.iter().any(|p| p["requestId"] == "req-1")));
-    let payloads: Vec<Value> = data.lock().unwrap().iter().filter(|p| p["requestId"] == "req-1").map(|p| p["data"].clone()).collect();
+    assert!(wait_for(&end, Duration::from_secs(5), |e| e.iter().any(|p| p["requestId"] == "req-1")));
+    let payloads: Vec<Value> = data.lock().iter().filter(|p| p["requestId"] == "req-1").map(|p| p["data"].clone()).collect();
     assert_eq!(payloads, vec![json!("{\"choices\":[{\"delta\":{\"content\":\"环境\"}}]}"), json!("[DONE]")]);
 }
 
@@ -185,14 +166,14 @@ fn chat_stream_cancel_and_http_errors() {
     let started = invoke(&h.main, "ai_chat_stream", json!({ "payload": { "requestId": "req-c", "url": format!("http://127.0.0.1:{port}/x") } }));
     assert_eq!(started["ok"], true);
     assert_eq!(invoke(&h.main, "ai_chat_cancel", json!({ "payload": { "requestId": "req-c" } })), json!(true));
-    assert!(wait_for(&errors, |e| e.iter().any(|p| p["requestId"] == "req-c" && p["error"] == "Aborted")));
+    assert!(wait_for(&errors, Duration::from_secs(5), |e| e.iter().any(|p| p["requestId"] == "req-c" && p["error"] == "Aborted")));
     assert_eq!(invoke(&h.main, "ai_chat_cancel", json!({ "payload": { "requestId": "req-c" } })), json!(false));
 
     let (port, _) = serve(vec![(0, "HTTP/1.1 429 Too Many Requests\r\nConnection: close\r\n\r\n{\"error\":{\"message\":\"slow down\"}}".into())]);
     invoke(&h.main, "ai_sync_providers", json!({ "payload": { "providers": [{ "id": "p", "baseURL": format!("http://127.0.0.1:{port}") }] } }));
     let result = invoke(&h.main, "ai_chat_stream", json!({ "payload": { "requestId": "req-e", "url": format!("http://127.0.0.1:{port}/x") } }));
     assert_eq!(result, json!({ "ok": true, "statusCode": 429, "statusText": "429 slow down" }));
-    assert!(wait_for(&errors, |e| e.iter().any(|p| p["requestId"] == "req-e" && p["error"] == "HTTP 429: slow down")));
+    assert!(wait_for(&errors, Duration::from_secs(5), |e| e.iter().any(|p| p["requestId"] == "req-e" && p["error"] == "HTTP 429: slow down")));
 
     let denied = invoke(&h.main, "ai_chat_stream", json!({ "payload": { "requestId": "req-d", "url": "https://evil.example/x" } }));
     assert_eq!(denied, json!({ "ok": false, "error": "URL host is not in the allowed list" }));

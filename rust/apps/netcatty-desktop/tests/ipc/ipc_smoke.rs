@@ -13,17 +13,17 @@
 use netcatty_desktop_lib::{configure_with, SetupOptions};
 use netcatty_store::CredentialCipher;
 use serde_json::{json, Value};
-use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tauri::ipc::{CallbackFn, InvokeBody};
 use tauri::test::{
     get_ipc_response, mock_builder, mock_context, noop_assets, MockRuntime, INVOKE_KEY,
 };
 use tauri::webview::InvokeRequest;
-use tauri::{App, Listener, WebviewWindow};
+use tauri::{App, WebviewWindow};
 
 /// Serialise app construction: `NETCATTY_PORTABLE_DATA_DIR` is process
 /// global, so two tests must not build their apps at the same time.
+use crate::support::{collect, install_pump, wait_for};
 use crate::BUILD_LOCK;
 
 /// Fixed AES-256-GCM master key for the injected test cipher.
@@ -55,6 +55,7 @@ pub(crate) fn build_app() -> Harness {
         let app = configure_with(mock_builder(), options)
             .build(mock_context(noop_assets()))
             .expect("build mock app");
+        install_pump(&app);
         run_setup(app)
     };
     let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
@@ -128,35 +129,6 @@ pub(crate) fn ok(result: Result<Value, Value>) -> Value {
     }
 }
 
-/// Record every payload of `event` emitted by the app.
-fn collect(app: &App<MockRuntime>, event: &str) -> Arc<Mutex<Vec<Value>>> {
-    let seen = Arc::new(Mutex::new(Vec::new()));
-    let sink = seen.clone();
-    app.listen_any(event.to_string(), move |e| {
-        let payload: Value = serde_json::from_str(e.payload()).unwrap_or(Value::Null);
-        sink.lock().unwrap().push(payload);
-    });
-    seen
-}
-
-/// Poll `pred` over the collected payloads until it holds or `timeout` passes.
-fn wait_for(
-    seen: &Arc<Mutex<Vec<Value>>>,
-    timeout: Duration,
-    pred: impl Fn(&[Value]) -> bool,
-) -> bool {
-    let start = Instant::now();
-    loop {
-        if pred(&seen.lock().unwrap()) {
-            return true;
-        }
-        if start.elapsed() > timeout {
-            return false;
-        }
-        std::thread::sleep(Duration::from_millis(50));
-    }
-}
-
 fn session_id_of(v: &Value) -> Option<&str> {
     v.get("sessionId").and_then(Value::as_str)
 }
@@ -205,7 +177,7 @@ fn local_shell_round_trip() {
     assert!(
         got_output,
         "no netcatty:data containing the echo for {id}; got {:?}",
-        data.lock().unwrap()
+        data.lock()
     );
 
     ok(invoke(
@@ -225,13 +197,12 @@ fn local_shell_round_trip() {
     assert!(
         exited,
         "no netcatty:exit for {id}; got {:?}",
-        exits.lock().unwrap()
+        exits.lock()
     );
     // The pump task also notices the PTY ending; it must not emit a second exit.
     std::thread::sleep(Duration::from_millis(300));
     let mine: Vec<Value> = exits
         .lock()
-        .unwrap()
         .iter()
         .filter(|e| session_id_of(e) == Some(id.as_str()))
         .cloned()
@@ -1090,7 +1061,7 @@ fn telnet_session_against_fake_server() {
                 .any(|e| session_id_of(e) == Some("tel-1") && e["bootEpoch"] == 7)
         }),
         "auto-login-complete not emitted: {:?}",
-        complete.lock().unwrap()
+        complete.lock()
     );
     assert!(wait_for(&data, Duration::from_secs(10), |events| {
         let all: String = events
@@ -1152,7 +1123,6 @@ fn telnet_session_against_fake_server() {
     }));
     let exit = exits
         .lock()
-        .unwrap()
         .iter()
         .find(|e| session_id_of(e) == Some("tel-1"))
         .cloned()
@@ -1345,7 +1315,7 @@ fn mosh_handshake_swaps_to_mosh_client() {
                 .any(|e| session_id_of(e) == Some("mosh-1") && e["bootEpoch"] == 2)
         }),
         "no mosh ready; data: {:?}",
-        data.lock().unwrap()
+        data.lock()
     );
     assert!(wait_for(&data, Duration::from_secs(10), |events| {
         events.iter().any(|e| {
@@ -1357,7 +1327,7 @@ fn mosh_handshake_swaps_to_mosh_client() {
         })
     }));
     {
-        let events = data.lock().unwrap();
+        let events = data.lock();
         let mine: Vec<&Value> = events
             .iter()
             .filter(|e| session_id_of(e) == Some("mosh-1"))
@@ -1381,12 +1351,11 @@ fn mosh_handshake_swaps_to_mosh_client() {
                 .any(|e| session_id_of(e) == Some("mosh-1") && e["reason"] == "exited")
         }),
         "exits: {:?} data: {:?}",
-        exits.lock().unwrap(),
-        data.lock().unwrap()
+        exits.lock(),
+        data.lock()
     );
     let all: String = data
         .lock()
-        .unwrap()
         .iter()
         .filter(|e| session_id_of(e) == Some("mosh-1"))
         .filter_map(|e| e["data"].as_str())
@@ -1422,7 +1391,7 @@ fn mosh_handshake_failure_reports_error() {
             })
         }),
         "{:?}",
-        exits.lock().unwrap()
+        exits.lock()
     );
 }
 
@@ -1457,11 +1426,10 @@ fn et_session_runs_client_with_planned_args() {
             })
         }),
         "{:?}",
-        exits.lock().unwrap()
+        exits.lock()
     );
     let all: String = data
         .lock()
-        .unwrap()
         .iter()
         .filter(|e| session_id_of(e) == Some("et-1"))
         .filter_map(|e| e["data"].as_str())

@@ -5,15 +5,15 @@
 use netcatty_desktop_lib::{configure_with, SetupOptions};
 use netcatty_store::CredentialCipher;
 use serde_json::{json, Value};
-use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use tauri::ipc::{CallbackFn, InvokeBody};
 use tauri::test::{
     get_ipc_response, mock_builder, mock_context, noop_assets, MockRuntime, INVOKE_KEY,
 };
 use tauri::webview::InvokeRequest;
-use tauri::{App, Listener, WebviewWindow};
+use tauri::{App, WebviewWindow};
 
+use crate::support::{collect, install_pump, wait_for, Events};
 use crate::BUILD_LOCK;
 const TEST_KEY: [u8; 32] = [0x5a; 32];
 
@@ -37,6 +37,7 @@ fn build_app() -> Harness {
         let mut app = configure_with(mock_builder(), options)
             .build(mock_context(noop_assets()))
             .expect("build mock app");
+        install_pump(&app);
         #[allow(deprecated)]
         app.run_iteration(|_, _| {});
         app
@@ -77,33 +78,6 @@ fn ok(result: Result<Value, Value>) -> Value {
     }
 }
 
-fn collect(app: &App<MockRuntime>, event: &str) -> Arc<Mutex<Vec<Value>>> {
-    let seen = Arc::new(Mutex::new(Vec::new()));
-    let sink = seen.clone();
-    app.listen_any(event.to_string(), move |e| {
-        let payload: Value = serde_json::from_str(e.payload()).unwrap_or(Value::Null);
-        sink.lock().unwrap().push(payload);
-    });
-    seen
-}
-
-fn wait_for(
-    seen: &Arc<Mutex<Vec<Value>>>,
-    timeout: Duration,
-    pred: impl Fn(&[Value]) -> bool,
-) -> bool {
-    let start = Instant::now();
-    loop {
-        if pred(&seen.lock().unwrap()) {
-            return true;
-        }
-        if start.elapsed() > timeout {
-            return false;
-        }
-        std::thread::sleep(Duration::from_millis(50));
-    }
-}
-
 fn text_of(events: &[Value], id: &str) -> String {
     events
         .iter()
@@ -112,8 +86,8 @@ fn text_of(events: &[Value], id: &str) -> String {
         .collect()
 }
 
-fn session_data(data: &Arc<Mutex<Vec<Value>>>, id: &str) -> String {
-    text_of(&data.lock().unwrap(), id)
+fn session_data(data: &Events, id: &str) -> String {
+    text_of(&data.lock(), id)
 }
 
 fn start_shell(h: &Harness) -> String {
@@ -195,7 +169,7 @@ fn drag_drop_upload_detects_rz_hides_protocol_bytes_and_cancels() {
             .iter()
             .any(|e| e["sessionId"] == id && e["error"] == "Transfer cancelled")),
         "no cancel error: {:?}",
-        errors.lock().unwrap()
+        errors.lock()
     );
 
     // After the cooldown the shell is usable again.
@@ -231,9 +205,13 @@ fn paste_receipts_and_cancellation() {
         "session_write",
         json!({ "payload": { "sessionId": id, "data": "true\r", "pasteRequestId": "p1" } }),
     ));
-    assert!(wait_for(&receipts, Duration::from_secs(5), |e| e
-        .iter()
-        .any(|r| r["requestId"] == "p1" && r["index"] == 0 && r["done"] == true)));
+    assert!(
+        wait_for(&receipts, Duration::from_secs(5), |e| e
+            .iter()
+            .any(|r| r["requestId"] == "p1" && r["index"] == 0 && r["done"] == true)),
+        "no p1 receipt: {:?}",
+        receipts.lock()
+    );
 
     ok(invoke(
         &h.webview,
@@ -242,10 +220,14 @@ fn paste_receipts_and_cancellation() {
             "sessionId": id, "data": "true\rtrue\r", "pasteRequestId": "p2", "lineDelayMs": 20
         } }),
     ));
-    assert!(wait_for(&receipts, Duration::from_secs(5), |e| {
-        let p2: Vec<&Value> = e.iter().filter(|r| r["requestId"] == "p2").collect();
-        p2.len() == 2 && p2[0]["index"] == 0 && p2[1]["index"] == 1 && p2[1]["done"] == true
-    }));
+    assert!(
+        wait_for(&receipts, Duration::from_secs(5), |e| {
+            let p2: Vec<&Value> = e.iter().filter(|r| r["requestId"] == "p2").collect();
+            p2.len() == 2 && p2[0]["index"] == 0 && p2[1]["index"] == 1 && p2[1]["done"] == true
+        }),
+        "p2 receipts incomplete: {:?}",
+        receipts.lock()
+    );
 
     // A slow paced paste is cancelled after its first line.
     ok(invoke(
@@ -255,23 +237,30 @@ fn paste_receipts_and_cancellation() {
             "sessionId": id, "data": "true\rtrue\rtrue\r", "pasteRequestId": "p3", "lineDelayMs": 1500
         } }),
     ));
-    assert!(wait_for(&receipts, Duration::from_secs(5), |e| e
-        .iter()
-        .any(|r| r["requestId"] == "p3" && r["index"] == 0)));
+    assert!(
+        wait_for(&receipts, Duration::from_secs(5), |e| e
+            .iter()
+            .any(|r| r["requestId"] == "p3" && r["index"] == 0)),
+        "no first p3 line: {:?}",
+        receipts.lock()
+    );
     ok(invoke(
         &h.webview,
         "terminal_cancel_pending_writes",
         json!({ "sessionId": id }),
     ));
-    assert!(wait_for(&receipts, Duration::from_secs(5), |e| e.iter().any(|r| r
-        ["requestId"]
-        == "p3"
-        && r["done"] == true
-        && r.get("index").is_none())));
+    assert!(
+        wait_for(&receipts, Duration::from_secs(5), |e| e.iter().any(|r| r
+            ["requestId"]
+            == "p3"
+            && r["done"] == true
+            && r.get("index").is_none())),
+        "p3 was not reported cancelled: {:?}",
+        receipts.lock()
+    );
     std::thread::sleep(Duration::from_millis(1800));
     let p3: Vec<Value> = receipts
         .lock()
-        .unwrap()
         .iter()
         .filter(|r| r["requestId"] == "p3")
         .cloned()

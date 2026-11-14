@@ -8,13 +8,13 @@
 use netcatty_desktop_lib::{configure_with, SetupOptions};
 use netcatty_store::CredentialCipher;
 use serde_json::{json, Value};
-use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use tauri::ipc::{CallbackFn, InvokeBody};
 use tauri::test::{get_ipc_response, mock_builder, mock_context, noop_assets, MockRuntime, INVOKE_KEY};
 use tauri::webview::InvokeRequest;
-use tauri::{App, Listener, Manager, WebviewWindow};
+use tauri::{App, Manager, WebviewWindow};
 
+use crate::support::{collect, install_pump, wait_for};
 use crate::BUILD_LOCK;
 
 struct Harness {
@@ -38,6 +38,7 @@ fn build_app() -> Harness {
         let mut app = configure_with(mock_builder(), options)
             .build(mock_context(noop_assets()))
             .expect("build mock app");
+        install_pump(&app);
         #[allow(deprecated)]
         app.run_iteration(|_, _| {});
         app
@@ -89,29 +90,6 @@ fn err_message(result: Result<Value, Value>) -> String {
     }
 }
 
-fn collect(app: &App<MockRuntime>, event: &str) -> Arc<Mutex<Vec<Value>>> {
-    let seen = Arc::new(Mutex::new(Vec::new()));
-    let sink = seen.clone();
-    app.listen_any(event.to_string(), move |e| {
-        let payload: Value = serde_json::from_str(e.payload()).unwrap_or(Value::Null);
-        sink.lock().unwrap().push(payload);
-    });
-    seen
-}
-
-fn wait_for(seen: &Arc<Mutex<Vec<Value>>>, pred: impl Fn(&[Value]) -> bool) -> bool {
-    let start = Instant::now();
-    loop {
-        if pred(&seen.lock().unwrap()) {
-            return true;
-        }
-        if start.elapsed() > Duration::from_secs(5) {
-            return false;
-        }
-        std::thread::sleep(Duration::from_millis(20));
-    }
-}
-
 const BROWSER: &str = "tab-1:session-1";
 
 #[test]
@@ -127,7 +105,7 @@ fn bookmark_sync_commands_round_trip_and_broadcast() {
     let all = ok(invoke(&h.main, "hostbrowser_bookmarks_get_all", json!({})));
     assert_eq!(all.as_array().unwrap().len(), 2);
     assert_eq!(all[1]["url"], "https://example.com/");
-    assert!(wait_for(&changed, |seen| !seen.is_empty()));
+    assert!(wait_for(&changed, Duration::from_secs(5), |seen| !seen.is_empty()));
     let message = err_message(invoke(
         &h.main,
         "hostbrowser_bookmarks_apply",
@@ -145,7 +123,7 @@ fn panel_requests_go_to_the_main_window() {
         ok(invoke(&h.other, "hostbrowser_request_panel", json!({ "payload": request }))),
         json!(true)
     );
-    assert!(wait_for(&requests, |seen| seen.iter().any(|p| p["targetLabel"] == "main"
+    assert!(wait_for(&requests, Duration::from_secs(5), |seen| seen.iter().any(|p| p["targetLabel"] == "main"
         && p["request"]["host"]["id"] == "h1")));
     let message = err_message(invoke(&h.main, "hostbrowser_request_panel", json!({ "payload": { "host": {} } })));
     assert_eq!(message, "Browser opener is unavailable");
@@ -194,7 +172,7 @@ fn embedded_browser_lifecycle_on_a_local_route() {
     assert_eq!(tabs.len(), 1);
     assert_eq!(tabs[0]["url"], "http://localhost:3000/");
     assert_eq!(state["activeTabId"], tabs[0]["id"]);
-    assert!(wait_for(&events, |seen| seen.iter().any(|e| e["type"] == "state"
+    assert!(wait_for(&events, Duration::from_secs(5), |seen| seen.iter().any(|e| e["type"] == "state"
         && e["browserId"] == BROWSER && e["ownerLabel"] == "main")));
 
     // Reopening reuses the browser.

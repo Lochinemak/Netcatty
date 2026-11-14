@@ -6,15 +6,15 @@
 use netcatty_desktop_lib::{configure_with, SetupOptions};
 use netcatty_store::CredentialCipher;
 use serde_json::{json, Value};
-use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use tauri::ipc::{CallbackFn, InvokeBody};
 use tauri::test::{
     get_ipc_response, mock_builder, mock_context, noop_assets, MockRuntime, INVOKE_KEY,
 };
 use tauri::webview::InvokeRequest;
-use tauri::{App, Listener, WebviewWindow};
+use tauri::{App, WebviewWindow};
 
+use crate::support::{collect, install_pump, wait_for};
 use crate::BUILD_LOCK;
 const TEST_KEY: [u8; 32] = [0x5a; 32];
 
@@ -38,6 +38,7 @@ fn build_app() -> Harness {
         let mut app = configure_with(mock_builder(), options)
             .build(mock_context(noop_assets()))
             .expect("build mock app");
+        install_pump(&app);
         #[allow(deprecated)]
         app.run_iteration(|_, _| {});
         app
@@ -73,33 +74,6 @@ fn invoke(webview: &WebviewWindow<MockRuntime>, cmd: &str, args: Value) -> Resul
 
 fn ok(webview: &WebviewWindow<MockRuntime>, cmd: &str, args: Value) -> Value {
     invoke(webview, cmd, args).unwrap_or_else(|e| panic!("{cmd} failed: {e}"))
-}
-
-fn collect(app: &App<MockRuntime>, event: &str) -> Arc<Mutex<Vec<Value>>> {
-    let seen = Arc::new(Mutex::new(Vec::new()));
-    let sink = seen.clone();
-    app.listen_any(event.to_string(), move |e| {
-        let payload: Value = serde_json::from_str(e.payload()).unwrap_or(Value::Null);
-        sink.lock().unwrap().push(payload);
-    });
-    seen
-}
-
-fn wait_for(
-    seen: &Arc<Mutex<Vec<Value>>>,
-    timeout: Duration,
-    pred: impl Fn(&[Value]) -> bool,
-) -> bool {
-    let start = Instant::now();
-    loop {
-        if pred(&seen.lock().unwrap()) {
-            return true;
-        }
-        if start.elapsed() > timeout {
-            return false;
-        }
-        std::thread::sleep(Duration::from_millis(20));
-    }
 }
 
 fn has(events: &[Value], kind: &str, id: &str) -> bool {
@@ -166,7 +140,7 @@ fn local_transfer_is_queued_then_started() {
         "completed",
         "t-local"
     )));
-    let seen = events.lock().unwrap();
+    let seen = events.lock();
     let kinds: Vec<&str> = seen
         .iter()
         .filter(|e| e["transferId"] == "t-local")
@@ -230,7 +204,7 @@ fn a_cancel_that_arrives_before_the_start_still_cancels() {
         e, "cancelled", "t-early"
     )));
     // The latch fires before admission, so the transfer is never announced.
-    let seen = events.lock().unwrap();
+    let seen = events.lock();
     assert!(!has(&seen, "queued", "t-early"));
     assert!(!has(&seen, "started", "t-early"));
     drop(seen);
@@ -330,7 +304,7 @@ fn queued_transfers_can_be_prioritized_paused_and_cancelled() {
     assert!(wait_for(&events, Duration::from_secs(5), |e| {
         has(e, "queued", "q-cancel") && has(e, "queued", "q-pause")
     }));
-    assert!(!has(&events.lock().unwrap(), "started", "q-cancel"));
+    assert!(!has(&events.lock(), "started", "q-cancel"));
 
     assert_eq!(
         ok(
@@ -362,7 +336,7 @@ fn queued_transfers_can_be_prioritized_paused_and_cancelled() {
     );
     let cancelled = cancelled.join().unwrap().unwrap();
     assert_eq!(cancelled["cancelled"], true);
-    assert!(has(&events.lock().unwrap(), "cancelled", "q-cancel"));
+    assert!(has(&events.lock(), "cancelled", "q-cancel"));
 
     // Release the holder: open the FIFO for writing and close it.
     std::fs::write(&fifo, b"done").unwrap();
@@ -476,7 +450,7 @@ fn compressed_upload_control_paths() {
     );
     assert_eq!(result["compressionId"], "c2");
     assert!(result["error"].as_str().unwrap().contains("not found"));
-    let seen = events.lock().unwrap();
+    let seen = events.lock();
     let started = seen
         .iter()
         .find(|e| e["type"] == "started")
@@ -677,7 +651,7 @@ fn e2e_cwd_probe_and_compressed_upload() {
         .filter(|n| n.contains("netcatty"))
         .collect();
     assert!(leftovers.is_empty(), "{leftovers:?}");
-    let seen = transfers.lock().unwrap();
+    let seen = transfers.lock();
     let mine: Vec<&Value> = seen
         .iter()
         .filter(|e| e["transferId"] == "e2e-c1")
@@ -758,7 +732,7 @@ fn e2e_cwd_probe_and_compressed_upload() {
     assert_eq!(result["success"], true, "{result}");
     assert_eq!(std::fs::read(remote.join("big/blob.bin")).unwrap(), blob);
     {
-        let seen = transfers.lock().unwrap();
+        let seen = transfers.lock();
         let kinds: Vec<&str> = seen
             .iter()
             .filter(|e| e["transferId"] == "e2e-c2")

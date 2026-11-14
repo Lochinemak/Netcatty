@@ -9,6 +9,8 @@ use std::sync::Mutex;
 /// modules: the variable is process-wide and read while the app is built.
 pub static BUILD_LOCK: Mutex<()> = Mutex::new(());
 
+mod support;
+
 mod agents_ipc;
 mod ipc_ai;
 mod ipc_hostbrowser;
