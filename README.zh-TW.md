@@ -16,14 +16,14 @@
 </p>
 
 <p align="center">
-  以 Electron、React 與 xterm.js 打造，介面精緻、功能完整的 SSH 工作區。<br/>
+  以 Tauri 2、Rust、React 與 xterm.js 打造，介面精緻、功能完整的 SSH 工作區。<br/>
   🔥 內建 AI Agent · 分割終端 · Vault 檢視 · SFTP 工作流 · 自訂主題 —— 全部整合在一起。
 </p>
 
 <p align="center">
   <a href="https://github.com/binaricat/Netcatty/releases/latest"><img alt="GitHub Release" src="https://img.shields.io/github/v/release/binaricat/Netcatty?style=for-the-badge&logo=github&label=Release"></a>
   &nbsp;
-  <a href="#"><img alt="Platform" src="https://img.shields.io/badge/Platform-macOS%20%7C%20Windows%20%7C%20Linux-blue?style=for-the-badge&logo=electron"></a>
+  <a href="#"><img alt="Platform" src="https://img.shields.io/badge/Platform-macOS%20%7C%20Windows%20%7C%20Linux-blue?style=for-the-badge&logo=tauri"></a>
   &nbsp;
   <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/License-GPL--3.0-green?style=for-the-badge"></a>
 </p>
@@ -43,6 +43,15 @@
 <p align="center">
   <a href="./README.md">English</a> · <a href="./README.zh-CN.md">简体中文</a> · <a href="./README.zh-TW.md">繁體中文</a> · <a href="./README.ja-JP.md">日本語</a>
 </p>
+
+---
+
+> **本儲存庫建置的是 Netcatty 的 Rust / Tauri 2 版本。** 後端位於
+> [`rust/`](./rust)；React 轉譯層原樣沿用，透過
+> [`infrastructure/tauri/`](./infrastructure/tauri) 裡一層薄適配器與其溝通。
+> 原本的 Electron 後端仍保留在 [`electron/`](./electron)，作為移植工作的行為參照，
+> 而非發布版本實際使用的執行階段。crate 結構、已移植與尚未移植的能力請見
+> [`rust/README.md`](./rust/README.md)。
 
 ---
 
@@ -215,11 +224,11 @@ Netcatty 會自動辨識已連線主機的作業系統，並顯示對應圖示�
 
 到 [GitHub Releases](https://github.com/binaricat/Netcatty/releases/latest) 下載適合你平台的最新版本。
 
-| 作業系統 | 支援情況 |
+| 作業系統 | 可下載的套件 |
 | :--- | :--- |
-| **macOS** | Universal (x64 / arm64) |
-| **Windows** | x64 / arm64 |
-| **Linux** | x64 / arm64 |
+| **macOS** | arm64 與 x64 各一個 `.dmg` —— 是兩個建置，不是通用二進位檔 |
+| **Windows** | x64 —— `.msi` 與 NSIS `.exe` 安裝程式 |
+| **Linux** | x64 —— `.deb`、`.rpm`、AppImage · arm64 —— `.deb`、`.rpm` |
 
 也可以到 [GitHub Releases](https://github.com/binaricat/Netcatty/releases) 瀏覽所有版本。
 
@@ -234,7 +243,7 @@ Windows 發行檔可能仍未簽章。
 
 > **在 Windows 用 Netcatty 開啟資料夾：** 安裝版會在檔案總管的資料夾右鍵選單與資料夾空白處右鍵選單加入 **Open in Netcatty**，點了就會在該資料夾開啟本機終端。Windows 11 要先選 **顯示其他選項**。這個選單可以在 **設定 → 系統 → Windows 檔案總管** 隨時關閉或重新開啟。ZIP 版與免安裝版預設不會加入這個選單。
 
-> **macOS 使用者請注意：** 目前的發行版本應該都已完成程式碼簽章與公證。如果 Gatekeeper 仍然跳出警告，請確認你下載的是 GitHub Releases 上最新的官方建置版本。
+> **macOS 使用者請注意：** macOS 套件以本專案自己的憑證做了程式碼簽章，但**沒有**經過 Apple 公證，因此首次啟動時 Gatekeeper 會跳出警告 —— 在 Finder 裡右鍵點應用程式、選**打開**，確認一次即可。若建置時沒有設定簽章憑證，產物只有 ad-hoc 簽章，那樣每次更新後 macOS 都會再次索取 Keychain 存取權。
 
 ### Scoop（Windows x64，社群維護）
 
@@ -271,7 +280,9 @@ nix run github:binaricat/Netcatty
 若要以宣告式方式安裝，把 Netcatty flake 加為 input，並在你的 NixOS 或 Home Manager 套件清單中使用 `inputs.netcatty.packages.${pkgs.system}.default`。
 
 ### 事前需求
-- Node.js 18+ 與 npm
+- 透過 [rustup](https://rustup.rs/) 安裝的 Rust stable —— 工具鏈版本固定於 [`rust/rust-toolchain.toml`](./rust/rust-toolchain.toml)
+- Node.js 22+ 與 npm
+- [Tauri 2 的平台事前需求](https://v2.tauri.app/start/prerequisites/) —— macOS 上是 Xcode 命令列工具，Linux 上是 WebKitGTK 等
 - macOS、Windows 10+ 或 Linux
 
 ### 開發
@@ -284,9 +295,14 @@ cd Netcatty
 # 安裝相依套件
 npm install
 
-# 啟動開發模式（Vite + Electron）
-npm run dev
+# 建置轉譯層會匯入的外掛工作區套件（只需一次）
+npm run build:plugin-runtime-deps
+
+# 啟動開發模式（Vite 監聽 :5173 + Tauri 應用程式）
+npm run tauri:dev
 ```
+
+`npm run dev` 啟動的是舊的 Electron 建置。保留它是為了在移植期間比對兩套後端的行為。
 
 ---
 
@@ -294,17 +310,34 @@ npm run dev
 # 建置與打包
 
 ```bash
-# 建置正式版
+# 只建置轉譯層
 npm run build
 
-# 為目前平台打包
-npm run pack
+# 檢查並測試 Rust workspace
+npm run tauri:check
+npm run tauri:test
 
-# 為特定平台打包
+# 為目前平台打正式包
+# macOS: .app + .dmg · Windows: .msi + NSIS .exe · Linux: .deb + .rpm + AppImage
+npm run tauri:build
+```
+
+發布包都有簽章，應用內更新器以此驗證下載的內容 —— 見
+[自動更新簽章](./rust/README.md#auto-update-signing)。沒有簽章私鑰時打包器會拒絕簽章，
+可以給 `tauri:build` 傳 `--config '{"bundle":{"createUpdaterArtifacts":false}}'`
+只產生安裝程式、不產生更新器產物。
+
+<details>
+<summary>舊的 Electron 打包方式</summary>
+
+```bash
+npm run pack         # 目前平台
 npm run pack:mac     # macOS (DMG + ZIP)
 npm run pack:win     # Windows (NSIS 安裝程式)
 npm run pack:linux   # Linux (AppImage + DEB + RPM)
 ```
+
+</details>
 
 ---
 
@@ -313,13 +346,14 @@ npm run pack:linux   # Linux (AppImage + DEB + RPM)
 
 | 分類 | 技術 |
 |------|------|
-| 框架 | Electron 40 |
+| 外殼 | Tauri 2 |
+| 後端 | Rust (edition 2021), Tokio |
 | 前端 | React 19, TypeScript |
 | 建置工具 | Vite 7 |
-| 終端機 | xterm.js 5 |
+| 終端機 | xterm.js |
 | 樣式 | Tailwind CSS 4 |
-| SSH/SFTP | ssh2, ssh2-sftp-client |
-| PTY | node-pty |
+| SSH/SFTP | russh, russh-sftp |
+| PTY | portable-pty |
 | 圖示 | Lucide React |
 
 ---
