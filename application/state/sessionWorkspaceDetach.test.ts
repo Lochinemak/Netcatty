@@ -272,29 +272,101 @@ test("closing a temporary solo tab ignores a preferred tab that no longer exists
   );
 });
 
-test("closeSessionsState restores the previous tab instead of the newest remaining tab", () => {
-  const standaloneSession = (id: string): TerminalSession => ({
-    ...session(id),
-    workspaceId: undefined,
+test("closing the active tab activates its right-hand neighbour, not the previous tab", () => {
+  const result = closeSessionsState({
+    sessions: ["s1", "s2", "s3", "s4"].map((id) => ({ ...session(id), workspaceId: undefined })),
+    workspaces: [],
+    sessionIds: ["s2"],
+    currentActiveTabId: "s2",
+    // Every tab was opened from the vault, so the vault is the previous tab.
+    preferredTabId: "vault",
+    tabOrder: ["s1", "s2", "s3", "s4"],
   });
 
+  assert.equal(result.activeTabId, "s3");
+});
+
+test("closing the last tab in the strip activates its left-hand neighbour", () => {
   const result = closeSessionsState({
-    sessions: [
-      standaloneSession("s1"),
-      standaloneSession("s2"),
-      standaloneSession("s5"),
-      standaloneSession("s6"),
-      standaloneSession("s7"),
-    ],
+    sessions: ["s1", "s2", "s5", "s6", "s7"].map((id) => ({ ...session(id), workspaceId: undefined })),
     workspaces: [],
     sessionIds: ["s7"],
     currentActiveTabId: "s7",
-    preferredTabId: "s5",
+    preferredTabId: "s2",
     tabOrder: ["s1", "s2", "s5", "s6", "s7"],
   });
 
-  assert.equal(result.activeTabId, "s5");
+  assert.equal(result.activeTabId, "s6");
   assert.deepEqual(result.sessions.map((candidate) => candidate.id), ["s1", "s2", "s5", "s6"]);
+});
+
+test("the neighbour follows the dragged tab order and skips hidden sessions", () => {
+  const result = closeSessionsState({
+    sessions: [
+      { ...session("s1"), workspaceId: undefined },
+      { ...session("s2"), workspaceId: undefined },
+      { ...session("hidden"), workspaceId: undefined, hiddenFromTabs: true },
+      { ...session("s3"), workspaceId: undefined },
+    ],
+    workspaces: [],
+    sessionIds: ["s3"],
+    currentActiveTabId: "s3",
+    tabOrder: ["s2", "s3", "hidden", "s1"],
+  });
+
+  assert.equal(result.activeTabId, "s1");
+});
+
+test("a workspace or log view next to the closed tab is a valid neighbour", () => {
+  const sessions = [
+    { ...session("s1"), workspaceId: undefined },
+    session("a"),
+    session("b"),
+  ];
+  const withWorkspace = closeSessionsState({
+    sessions,
+    workspaces: [workspace(["a", "b"])],
+    sessionIds: ["s1"],
+    currentActiveTabId: "s1",
+    tabOrder: ["s1", "ws-1"],
+  });
+  assert.equal(withWorkspace.activeTabId, "ws-1");
+
+  const withLogView = closeSessionsState({
+    sessions,
+    workspaces: [workspace(["a", "b"])],
+    sessionIds: ["s1"],
+    currentActiveTabId: "s1",
+    tabOrder: ["ws-1", "s1", "log-1"],
+    otherWorkTabIds: ["log-1"],
+  });
+  assert.equal(withLogView.activeTabId, "log-1");
+});
+
+test("closing the only work tab returns to the previous root page", () => {
+  const result = closeSessionsState({
+    sessions: [{ ...session("s1"), workspaceId: undefined }],
+    workspaces: [],
+    sessionIds: ["s1"],
+    currentActiveTabId: "s1",
+    preferredTabId: "sftp",
+    tabOrder: ["s1"],
+  });
+
+  assert.equal(result.activeTabId, "sftp");
+});
+
+test("closing a run of tabs lands on the tab after the run", () => {
+  const result = closeSessionsState({
+    sessions: ["s1", "s2", "s3", "s4"].map((id) => ({ ...session(id), workspaceId: undefined })),
+    workspaces: [],
+    sessionIds: ["s2", "s3"],
+    currentActiveTabId: "s2",
+    preferredTabId: "vault",
+    tabOrder: ["s1", "s2", "s3", "s4"],
+  });
+
+  assert.equal(result.activeTabId, "s4");
 });
 
 test("closing several standalone sessions removes the whole batch", () => {

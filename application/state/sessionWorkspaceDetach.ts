@@ -176,6 +176,36 @@ export function isPreferredTabAvailableAfterClose(
   ));
 }
 
+/**
+ * The tab next to the one being closed, in tab-strip order: the right-hand
+ * neighbour, or the left-hand one when the closed tab was last. This is what
+ * terminals and browsers do, and it never leaves the work tabs for a root page
+ * while another work tab is still open.
+ */
+export function resolveAdjacentTabAfterClose(
+  orderedTabIdsBeforeClose: readonly string[],
+  closedTabId: string,
+  layoutResult: Pick<CloseSessionWorkspaceLayoutResult, "removedWorkspaceId" | "dissolvedWorkspaceId">,
+): string | undefined {
+  const closedIndex = orderedTabIdsBeforeClose.indexOf(closedTabId);
+  if (closedIndex === -1) return undefined;
+
+  const survives = (tabId: string) => (
+    tabId !== closedTabId
+    && tabId !== layoutResult.removedWorkspaceId
+    && tabId !== layoutResult.dissolvedWorkspaceId
+  );
+  return orderedTabIdsBeforeClose.slice(closedIndex + 1).find(survives)
+    ?? orderedTabIdsBeforeClose.slice(0, closedIndex).reverse().find(survives);
+}
+
+function orderWorkTabIds(tabOrder: readonly string[], workTabIds: readonly string[]): string[] {
+  const known = new Set(workTabIds);
+  const ordered = [...new Set(tabOrder.filter((tabId) => known.has(tabId)))];
+  const placed = new Set(ordered);
+  return [...ordered, ...workTabIds.filter((tabId) => !placed.has(tabId))];
+}
+
 export function resolveActiveTabAfterCloseSession({
   currentActiveTabId,
   closedSessionId,
@@ -183,6 +213,7 @@ export function resolveActiveTabAfterCloseSession({
   layoutResult,
   remainingSessions,
   preferredTabId,
+  orderedTabIdsBeforeClose,
 }: {
   currentActiveTabId: string | null;
   closedSessionId: string;
@@ -190,7 +221,12 @@ export function resolveActiveTabAfterCloseSession({
   layoutResult: CloseSessionWorkspaceLayoutResult;
   remainingSessions: readonly TerminalSession[];
   preferredTabId?: string | null;
+  /** Tab-strip order before the close. When given, the neighbour wins over `preferredTabId`. */
+  orderedTabIdsBeforeClose?: readonly string[];
 }): string | null {
+  const adjacentFallback = orderedTabIdsBeforeClose
+    ? resolveAdjacentTabAfterClose(orderedTabIdsBeforeClose, workspaceId ?? closedSessionId, layoutResult)
+    : undefined;
   const fallbackWorkspace = layoutResult.workspaces[layoutResult.workspaces.length - 1];
   const fallbackSolo = remainingSessions.filter((session) => !session.workspaceId && !session.hiddenFromTabs).slice(-1)[0];
   const preferredInput = {
@@ -203,6 +239,7 @@ export function resolveActiveTabAfterCloseSession({
     ? preferredInput.preferredTabId
     : undefined;
   const fallback = layoutResult.lastRemainingSessionId
+    ?? adjacentFallback
     ?? preferredFallback
     ?? fallbackWorkspace?.id
     ?? fallbackSolo?.id
@@ -227,6 +264,7 @@ export function closeSessionsState({
   currentActiveTabId,
   preferredTabId,
   tabOrder,
+  otherWorkTabIds = [],
 }: {
   sessions: readonly TerminalSession[];
   workspaces: readonly Workspace[];
@@ -234,6 +272,8 @@ export function closeSessionsState({
   currentActiveTabId: string | null;
   preferredTabId?: string | null;
   tabOrder: readonly string[];
+  /** Work tabs that are neither sessions nor workspaces (log views), so they count as neighbours. */
+  otherWorkTabIds?: readonly string[];
 }): CloseSessionsStateResult {
   let nextSessions = [...sessions];
   let nextWorkspaces = [...workspaces];
@@ -246,6 +286,13 @@ export function closeSessionsState({
     if (!targetSession) continue;
 
     const workspaceId = targetSession.workspaceId;
+    const orderedTabIdsBeforeClose = orderWorkTabIds(nextTabOrder, [
+      ...nextSessions
+        .filter((session) => !session.workspaceId && !session.hiddenFromTabs)
+        .map((session) => session.id),
+      ...nextWorkspaces.map((workspace) => workspace.id),
+      ...otherWorkTabIds,
+    ]);
     const layoutResult = closeSessionWorkspaceLayoutState(
       nextWorkspaces,
       workspaceId,
@@ -269,6 +316,7 @@ export function closeSessionsState({
       layoutResult,
       remainingSessions: nextSessions,
       preferredTabId,
+      orderedTabIdsBeforeClose,
     });
     if (activeTabAfterClose) {
       nextActiveTabId = activeTabAfterClose;
