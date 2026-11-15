@@ -265,6 +265,8 @@ export const useSessionState = ({
   const [logViews, setLogViews] = useState<LogView[]>([]);
   const [restorePreviousSessionRevision, setRestorePreviousSessionRevision] = useState(0);
   const sessionsRef = useRef(sessions);
+  const logViewsRef = useRef(logViews);
+  logViewsRef.current = logViews;
   const tabOrderRef = useRef(tabOrder);
   const scheduleSessionRestorePersistRef = useRef<() => void>(() => {});
   const sessionRestoreCwdByIdRef = useRef(
@@ -626,6 +628,7 @@ export const useSessionState = ({
       currentActiveTabId: activeTabStore.getActiveTabId(),
       preferredTabId: activeTabStore.getPreviousActiveTabId(),
       tabOrder: tabOrderRef.current,
+      otherWorkTabIds: logViewsRef.current.map((logView) => logView.id),
     });
 
     setWorkspaces(result.workspaces);
