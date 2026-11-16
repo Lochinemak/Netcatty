@@ -417,6 +417,11 @@ export const RemoteDesktopPane: React.FC<RemoteDesktopPaneProps> = ({
           className={cn(
             'absolute inset-0 h-full w-full object-contain outline-none',
             state.status !== 'connected' && 'opacity-30',
+            // RDP composites the remote pointer into the framebuffer and
+            // moves it locally on every input event, so the local cursor
+            // would only show up as a second pointer. VNC keeps it: the
+            // server draws its cursor a network round trip late, if at all.
+            protocol === 'rdp' && state.status === 'connected' && 'cursor-none',
           )}
           onPointerDown={handlePointerDown}
           onPointerMove={handlePointer}
