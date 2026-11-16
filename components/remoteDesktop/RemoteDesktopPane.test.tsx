@@ -356,3 +356,30 @@ test('StrictMode double mounting dials the server exactly once', async (t) => {
   await act(async () => env.backend.starts[0].emit({ type: 'connected', width: 800, height: 600 }));
   assert.equal(env.pane().dataset.remoteDesktopStatus, 'connected');
 });
+
+test('an RDP pane hides the local cursor once connected, a VNC pane keeps it', async (t) => {
+  // RDP draws the remote pointer into the framebuffer; showing the local
+  // cursor too leaves two pointers on screen.
+  for (const [host, protocol] of [[rdpHost, 'rdp'], [vncHost, 'vnc']] as const) {
+    const env = mountEnvironment(t);
+    await act(async () => {
+      env.root.render(
+        <RemoteDesktopPane
+          host={host}
+          protocol={protocol}
+          sessionId={`session-cursor-${protocol}`}
+          keys={[]}
+          identities={[]}
+          isVisible
+          isFocused
+          inWorkspace={false}
+        />,
+      );
+    });
+    assert.equal(env.canvas().classList.contains('cursor-none'), false, `${protocol} while connecting`);
+
+    await act(async () => env.backend.starts[0].emit({ type: 'connected', width: 800, height: 600 }));
+    assert.equal(env.canvas().classList.contains('cursor-none'), protocol === 'rdp', `${protocol} once connected`);
+    await env.unmount();
+  }
+});
