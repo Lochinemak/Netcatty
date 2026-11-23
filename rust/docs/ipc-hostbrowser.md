@@ -3,8 +3,9 @@
 The in-app "Host Browser" (Electron: `electron/hostBrowser/hostBrowserManager.cjs`,
 the stores next to it and the `netcatty:host-browser:*` preload methods). Rust:
 `crates/netcatty-hostbrowser` (stores, URL / PDF / theme policy, download file
-reservation; pure) and `apps/netcatty-desktop/src/commands/hostbrowser.rs`
-(commands, page windows, SOCKS route). Renderer adapter:
+reservation; pure), `apps/netcatty-desktop/src/commands/hostbrowser.rs`
+(commands, page windows, SOCKS route) and `commands/hostbrowser/native.rs`
+(the engine's download objects). Renderer adapter:
 `infrastructure/tauri/bridge/hostBrowser.ts`. Conventions are those of
 [ipc-contract.md](ipc-contract.md).
 
@@ -147,21 +148,53 @@ removes the empty placeholder just before the engine writes (WebKit refuses
 an existing destination), records `progressing` and opens the standalone
 downloads panel; `Finished` records `completed` (size from disk) or
 `interrupted`. The store logic is Electron's (per-host history, 500 entries,
-active → interrupted after restart, deferred progress writes).
-
-Gaps: the engines report no byte progress (`received`/`total` are 0 until the
-end) and cannot cancel a transfer; `cancel` marks the download, which is
-removed and recorded as `cancelled` when the engine finishes. Downloads are
+active → interrupted after restart, deferred progress writes). Downloads are
 accepted only while the route is connected.
+
+### Byte progress and cancel
+
+wry reports a download when it starts and when it ends, and keeps the
+engine's download object to itself. `commands/hostbrowser/native.rs` gets at
+that object where the engine's public API allows it (Electron:
+`DownloadItem.getReceivedBytes` / `getTotalBytes` / `cancel`).
+
+* **macOS (11.3+)**: each page's `WKWebView` gets a navigation delegate that
+  stands in front of wry's and forwards every message to it
+  (`forwardingTargetForSelector:`). In the two `…didBecomeDownload:` messages
+  WebKit hands over the `WKDownload`; it is remembered and, when Tauri
+  reports the download as `Requested`, tied to the download id
+  (`native::claim`). Nothing depends on wry's class names or layout.
+  * Progress: every 500 ms the `WKDownload`'s `NSProgress` is copied into the
+    store (`received` / `total`, deferred writes) and the list is sent again.
+  * Cancel: `WKDownload.cancel` stops the transfer. WebKit confirms through
+    the completion handler and reports nothing more (wry sees no failure, so
+    no `Finished` follows); the completion handler is therefore where the
+    download is recorded as `cancelled` and the partial file removed. Should
+    it never come, the same happens after 5 s. Closing a browser, or losing
+    its route, cancels its running downloads the same way.
+* **Windows / Linux**: not hooked. WebView2 (`DownloadStarting`) and
+  WebKitGTK (`download-started`) expose what is needed. Until then
+  `received` / `total` stay 0 to the end, and `cancel` only marks the
+  download: the transfer runs out, then the file is removed and the download
+  is recorded as `cancelled`.
 
 ## Policy differences from Electron
 
 * **PDF**: Electron rewrote `Content-Disposition` of PDF navigations to
-  `attachment` because Chromium's PDF viewer was blocked. wry cannot touch
-  response headers of external pages; WebKit / WebView2 render PDFs inline
-  with their built-in viewer, so PDFs are shown, not downloaded. The policy is
-  kept as `netcatty_hostbrowser::pdf_download_headers` (with Electron's tests)
-  for a runtime that can apply it.
+  `attachment` because Chromium's PDF viewer was blocked. The policy is kept
+  as `netcatty_hostbrowser::pdf_download_headers` (with Electron's tests).
+  * macOS: WebKit decides per response, not by headers, so the navigation
+    delegate described under "Byte progress and cancel" answers
+    `webView:decidePolicyForNavigationResponse:` with `Download` for the same
+    responses (`navigation_response_downloads`: a 2xx frame navigation of
+    type `application/pdf`). A PDF is saved, as in Electron.
+  * Windows / Linux: wry cannot touch the response of an external page;
+    WebView2 / WebKitGTK show PDFs with their built-in viewer.
+* **`attachment` responses** (macOS): wry allows every response WebKit can
+  render, so a text, image or HTML response the site marked
+  `Content-Disposition: attachment` was shown in the page. The same delegate
+  now saves it, as Chromium does. Types WebKit cannot render were always
+  downloads.
 * **Invalid TLS certificates**: accepted on Windows (WebView2 switch); WebKit
   (macOS / Linux) shows its error page, wry offers no certificate hook.
 * **Covered pages**: Electron returned pictures of the page while a menu
@@ -176,12 +209,21 @@ accepted only while the route is connected.
 
 * `cargo test -p netcatty-hostbrowser`: stores (Electron's store / download /
   icon tests), address normalisation, page scheme allowlist, loopback
-  detection, PDF policy, theme tokens.
+  detection, PDF policy and the response policy built on it, theme tokens.
 * `cargo test -p netcatty-desktop --test ipc ipc_hostbrowser::`: command dispatch on
   `MockRuntime` (bookmark sync, panel requests, embedded lifecycle on a local
   route, tab commands, ownership checks, download commands).
 * `node --test --import tsx infrastructure/tauri/bridge/hostBrowser.test.ts`:
   adapter argument shapes, owner filtering, panel request backlog.
+* `cargo run -p netcatty-desktop --example hostbrowser_native_probe` (macOS;
+  a real WebKit, which the headless tests do not have). It serves a slow
+  file, a PDF and a text attachment locally and checks, first with the
+  engine hook alone and then through the host browser commands on a local
+  route: byte progress, cancel (transfer stopped, partial file removed), PDF
+  and attachment saved instead of shown, a running download stopped when its
+  browser closes, and wry's own behaviour back once a page is unhooked. Run
+  on macOS 15 on 2026-11-23: all checks pass. `HOME` and the data directory
+  point at a temporary directory for the run.
 * Manual / real runtime (macOS, 2026-11-08): an example binary drove the
   commands in the real app against `rust/scripts/e2e-sshd`: route connects,
   pages load by the container's hostname through the SOCKS forward, loopback
