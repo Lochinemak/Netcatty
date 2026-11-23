@@ -136,7 +136,6 @@ export function AppSideEffects() {
     | { mode: 'create' }
     | null
   >(null);
-  const [quickSearch, setQuickSearch] = useState('');
   // Protocol selection dialog state for QuickSwitcher
   const [protocolSelectHost, setProtocolSelectHost] = useState<Host | null>(null);
   // Navigation state for VaultView sections
@@ -1985,7 +1984,7 @@ export function AppSideEffects() {
   const hasMultipleProtocols = useCallback((host: Host) => { return hasMultipleProtocolsImpl(() => ({ host, resolveEffectiveHost }), host); }, [resolveEffectiveHost]);
 
   // Handle host connect with protocol selection (used by QuickSwitcher)
-  const handleHostConnectWithProtocolCheck = useCallback((host: Host) => { return handleHostConnectWithProtocolCheckImpl(() => ({ handleConnectToHost, hasMultipleProtocols, host, resolveEffectiveHost, setIsQuickSwitcherOpen, setProtocolSelectHost, setQuickSearch }), host); }, [hasMultipleProtocols, handleConnectToHost, resolveEffectiveHost]);
+  const handleHostConnectWithProtocolCheck = useCallback((host: Host) => { return handleHostConnectWithProtocolCheckImpl(() => ({ handleConnectToHost, hasMultipleProtocols, host, resolveEffectiveHost, setIsQuickSwitcherOpen, setProtocolSelectHost }), host); }, [hasMultipleProtocols, handleConnectToHost, resolveEffectiveHost]);
 
   // Handle protocol selection from dialog
   const handleProtocolSelect = useCallback((protocol: HostProtocol, port: number) => { return handleProtocolSelectImpl(() => ({ handleConnectToHost, port, protocol, protocolSelectHost, setProtocolSelectHost }), protocol, port); }, [protocolSelectHost, handleConnectToHost]);
@@ -2117,7 +2116,6 @@ export function AppSideEffects() {
       setIsCreateWorkspaceOpen,
       setIsQuickSwitcherOpen,
       setProtocolSelectHost,
-      setQuickSearch,
       handleCancelDeleteHost,
       handleConfirmDeleteHost,
     });
@@ -2125,7 +2123,6 @@ export function AppSideEffects() {
       isQuickSwitcherOpen,
       isCreateWorkspaceOpen,
       addToWorkspaceDialog,
-      quickSearch,
       protocolSelectHost,
       navigateToSection,
       deepLinkHostDraft,
@@ -2192,7 +2189,6 @@ export function AppSideEffects() {
     isQuickSwitcherOpen,
     isCreateWorkspaceOpen,
     addToWorkspaceDialog,
-    quickSearch,
     protocolSelectHost,
     navigateToSection,
     deepLinkHostDraft,
