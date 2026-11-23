@@ -71,6 +71,7 @@ test('local logging controls default off, disclose verbose risk, and call host-o
     assert.ok(document.activeElement === configure, 'closing the dialog returns focus to Configure');
   } finally {
     await act(async () => root.unmount());
+    await new Promise((resolve) => setTimeout(resolve, 0));
     dom.window.close();
     for (const [key, descriptor] of previous) {
       if (descriptor) Object.defineProperty(globalThis, key, descriptor);
