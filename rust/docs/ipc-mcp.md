@@ -185,11 +185,16 @@ from the catalog; the points below are layered on top in
 
 * Tool-output manifests are signed with an HMAC key stored in a 0600 file
   (`<data_dir>/tool-output-signing.key`) instead of `safeStorage`.
-* The External MCP HTTP endpoint answers in JSON response mode, except for
-  a request that produced a notification (`tools/list_changed` after a
-  toolset load): that one is answered as a short `text/event-stream` with
-  the notification followed by the response, when the client accepts it.
-  The optional standalone SSE stream (`GET /mcp`) returns 405.
+* The External MCP HTTP endpoint answers in JSON response mode. `GET /mcp`
+  with a session opens its standalone SSE stream, as the SDK transport does
+  in Electron: one per session (`409` for a second, `406` unless the client
+  accepts `text/event-stream`, `400` / `404` without a known session), ended
+  by `DELETE`, by idle expiry or when the listener stops; it does not keep
+  an idle session alive. A notification (`tools/list_changed` after a
+  toolset load) goes to that stream. Electron drops it when the client has
+  no stream open; here the request that produced it is then answered as a
+  short `text/event-stream` with the notification followed by the response,
+  when the client accepts that.
 * The MCP tool surface is no longer byte-identical to Electron's: see
   "MCP tool surface" above (typed inputs, annotations, sessions by name,
   toolset preloading). Existing tool names and RPC methods are unchanged;
@@ -200,6 +205,12 @@ from the catalog; the points below are layered on top in
   policy the External MCP controller rejected, or `null`, invalidates the
   service instead; a failure there is logged and does not change the
   command's answer.
+* Client setup (`external_mcp_client_status` / `_add`) looks `codex`,
+  `claude` and `grok` up, and runs them, in the login-shell environment
+  (Electron: `getShellEnv`), so a CLI installed through nvm, Homebrew or a
+  shell profile is found by a GUI-launched app. The environment comes from
+  the agents runtime's cache (`ShellEnvProvider`, wired in
+  `commands::agents::wire_mcp`), so both features share one login-shell
+  probe; without a provider the process environment is used.
 * Not ported (Electron-only): plugin agent delegation tags, terminal
-  worker paths, login-shell PATH resolution for CLI setup (the SDK-agent
-  module owns shell-env prewarming).
+  worker paths.

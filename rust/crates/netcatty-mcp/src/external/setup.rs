@@ -72,10 +72,13 @@ pub async fn run_bounded_cli(command: &Path, args: &[String], env: &HashMap<Stri
     }
 }
 
-/// Process env plus common user CLI dirs on PATH (login-shell PATH is not
-/// resolved here; the SDK-agent module owns shell-env prewarming).
-pub fn shell_env() -> HashMap<String, String> {
-    let mut env: HashMap<String, String> = std::env::vars().collect();
+/// `base` plus common user CLI dirs on PATH. `base` is the login-shell env
+/// when the application provides one (Electron: `getShellEnv`), so a CLI
+/// installed by nvm, Homebrew or a shell profile is found even though a
+/// GUI-launched process inherits a stripped PATH; without a provider it is
+/// the process env.
+pub fn with_user_cli_dirs(base: HashMap<String, String>) -> HashMap<String, String> {
+    let mut env = base;
     if let Some(home) = dirs::home_dir() {
         let extra = [home.join(".local/bin"), home.join(".npm-global/bin"), home.join(".bun/bin"), PathBuf::from("/opt/homebrew/bin"), PathBuf::from("/usr/local/bin")];
         let sep = if cfg!(windows) { ";" } else { ":" };
@@ -194,6 +197,9 @@ pub struct ClientSetup {
     pub launcher: String,
     pub discovery_env: Vec<(String, String)>,
     pub skill_source: Option<PathBuf>,
+    /// Environment the CLI is looked up in and run with (see
+    /// [`with_user_cli_dirs`]).
+    pub env: HashMap<String, String>,
 }
 
 impl ClientSetup {
@@ -245,20 +251,20 @@ impl ClientSetup {
     /// Classify the registered entry: `configured` / `not_configured` /
     /// `conflict` / `error` / `<client>_not_found`.
     pub async fn status(&self) -> Value {
-        let env = shell_env();
-        let (cli, exe) = self.resolve(&env);
+        let env = &self.env;
+        let (cli, exe) = self.resolve(env);
         let Some(cli) = cli else {
             let mut v = self.base(None, &exe);
             v["state"] = json!(self.not_found_key());
             return v;
         };
         let mut status = match self.client {
-            "codex" => self.classify_codex(&cli, &exe, &env).await,
-            "claude" => self.classify_claude(&cli, &exe, &env).await,
-            _ => self.classify_grok(&cli, &exe, &env).await,
+            "codex" => self.classify_codex(&cli, &exe, env).await,
+            "claude" => self.classify_claude(&cli, &exe, env).await,
+            _ => self.classify_grok(&cli, &exe, env).await,
         };
         if status["state"] == "configured" {
-            let s = self.skill_status(&env).await;
+            let s = self.skill_status(env).await;
             status["mcpConfigured"] = json!(true);
             status["skillInstalled"] = json!(s.installed);
             status["skillPath"] = json!(s.skill_path.to_string_lossy());
@@ -420,8 +426,8 @@ impl ClientSetup {
         if state == self.not_found_key() || matches!(state, "conflict" | "configured" | "error") {
             return status;
         }
-        let env = shell_env();
-        let (Some(cli), exe) = self.resolve(&env) else {
+        let env = &self.env;
+        let (Some(cli), exe) = self.resolve(env) else {
             return status;
         };
         let mut mcp_configured = status["mcpConfigured"] == json!(true);
@@ -446,10 +452,10 @@ impl ClientSetup {
                         args.extend(["-s".to_string(), scope]);
                     }
                     args.push(EXTERNAL_MCP_NAME.into());
-                    let _ = run_bounded_cli(&cli, &args, &env).await;
+                    let _ = run_bounded_cli(&cli, &args, env).await;
                 }
             }
-            match run_bounded_cli(&cli, &self.add_args(), &env).await {
+            match run_bounded_cli(&cli, &self.add_args(), env).await {
                 Ok(r) if r.exit_code == Some(0) => mcp_configured = true,
                 Ok(r) => {
                     let mut v = self.base(Some(&cli), &exe);
@@ -460,7 +466,7 @@ impl ClientSetup {
                 Err(e) => return fail(e, false, false),
             }
         }
-        if let Err(e) = skill::install(self.client, &skill::client_homes(&env), self.skill_source.as_deref()) {
+        if let Err(e) = skill::install(self.client, &skill::client_homes(env), self.skill_source.as_deref()) {
             return fail(e, true, mcp_configured);
         }
         self.status().await
@@ -551,7 +557,41 @@ mod tests {
             launcher: "/Applications/Netcatty.app/Contents/MacOS/Netcatty".into(),
             discovery_env: vec![("NETCATTY_EXTERNAL_MCP_DISCOVERY_FILE".into(), "/d.json".into()), ("NETCATTY_MCP_HELPER".into(), "external".into())],
             skill_source: None,
+            env: HashMap::new(),
         }
+    }
+
+    /// The CLI is found on the PATH it was given (the login shell's), not
+    /// on the PATH of this process, and is run with that environment.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn cli_is_resolved_and_run_with_the_provided_env() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let cli = dir.path().join("grok");
+        std::fs::write(&cli, "#!/bin/sh\necho \"{\\\"mcpServers\\\":{\\\"netcatty-external\\\":{\\\"command\\\":\\\"$FROM_LOGIN_SHELL\\\"}}}\"\n").unwrap();
+        std::fs::set_permissions(&cli, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        let mut s = setup("grok");
+        assert_eq!(s.status().await["state"], "grok_not_found", "nothing on an empty PATH");
+
+        s.env = with_user_cli_dirs(HashMap::from([
+            ("PATH".to_string(), format!("/nonexistent:{}", dir.path().display())),
+            ("HOME".to_string(), dir.path().display().to_string()),
+            ("FROM_LOGIN_SHELL".to_string(), "/elsewhere/netcatty".to_string()),
+        ]));
+        let v = s.status().await;
+        assert_eq!(v["grokPath"], cli.display().to_string(), "{v}");
+        assert_eq!(v["state"], "conflict", "{v}");
+        assert_eq!(v["existingCommand"], "/elsewhere/netcatty", "the CLI ran with the provided env: {v}");
+    }
+
+    #[test]
+    fn user_cli_dirs_are_appended_once() {
+        let env = with_user_cli_dirs(HashMap::from([("PATH".to_string(), "/usr/local/bin:/x".to_string())]));
+        let path = &env["PATH"];
+        assert!(path.starts_with("/usr/local/bin:/x"), "the given PATH keeps its order: {path}");
+        assert_eq!(path.split(':').filter(|p| *p == "/usr/local/bin").count(), 1, "{path}");
     }
 
     #[test]

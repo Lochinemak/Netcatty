@@ -255,3 +255,90 @@ async fn http_delivers_list_changed_and_preloads_toolsets() {
     assert!(!names.contains(&"snippets_list".to_string()));
     c.cleanup().await;
 }
+
+/// Send a body-less request and read the response head. The socket stays
+/// open, so a streaming body can be read from it afterwards.
+async fn request_head(port: u16, method: &str, accept: &str, token: &str, session: &str) -> (u16, String, tokio::net::TcpStream) {
+    let mut s = tokio::net::TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+    let session = if session.is_empty() { String::new() } else { format!("Mcp-Session-Id: {session}\r\n") };
+    let req = format!("{method} /mcp HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nAccept: {accept}\r\nAuthorization: Bearer {token}\r\n{session}\r\n");
+    s.write_all(req.as_bytes()).await.unwrap();
+    let head = read_until(&mut s, "\r\n\r\n").await;
+    let status: u16 = head.split_whitespace().nth(1).unwrap().parse().unwrap();
+    (status, head.to_lowercase(), s)
+}
+
+/// Read until `needle` shows up (or fail after five seconds).
+async fn read_until(s: &mut tokio::net::TcpStream, needle: &str) -> String {
+    let mut out = String::new();
+    let mut buf = [0u8; 1024];
+    let read = async {
+        while !out.contains(needle) {
+            let n = s.read(&mut buf).await.unwrap();
+            assert!(n > 0, "connection closed before {needle:?}: {out}");
+            out.push_str(&String::from_utf8_lossy(&buf[..n]));
+        }
+    };
+    tokio::time::timeout(std::time::Duration::from_secs(5), read).await.unwrap_or_else(|_| panic!("timed out waiting for {needle:?}"));
+    out
+}
+
+/// `GET /mcp` is the standalone stream of a session: notifications travel
+/// there instead of inside the answer to the call that caused them.
+#[tokio::test]
+async fn http_standalone_stream_carries_notifications() {
+    let dir = tempfile::tempdir().unwrap();
+    let c = controller(dir.path());
+    let port = free_port();
+    c.set_enabled(true).await;
+    let s = c.set_config(&json!({ "httpEnabled": true, "httpPort": port })).await;
+    assert_eq!(s["http"]["state"], "running", "{s}");
+    let token = s["http"]["bearerToken"].as_str().unwrap().to_string();
+    let host = format!("127.0.0.1:{port}");
+    let init = r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"t","version":"1"}}}"#;
+    let load = |toolset: &str| format!(r#"{{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{{"name":"load_netcatty_tools","arguments":{{"toolset":"{toolset}"}}}}}}"#);
+    let accept = "application/json, text/event-stream";
+    let (_, sid, _, _) = http_at(port, "/mcp", accept, &host, Some(&token), None, init).await;
+
+    // Refused without a session, for an unknown one, and without the type.
+    assert_eq!(request_head(port, "GET", "text/event-stream", &token, "").await.0, 400);
+    assert_eq!(request_head(port, "GET", "text/event-stream", &token, "unknown").await.0, 404);
+    assert_eq!(request_head(port, "GET", "application/json", &token, &sid).await.0, 406);
+
+    let (status, head, mut stream) = request_head(port, "GET", "text/event-stream", &token, &sid).await;
+    assert_eq!(status, 200, "{head}");
+    assert!(head.contains("content-type: text/event-stream"), "{head}");
+    assert!(head.contains(&format!("mcp-session-id: {sid}")), "{head}");
+    assert_eq!(request_head(port, "GET", "text/event-stream", &token, &sid).await.0, 409, "one stream per session");
+
+    // The call is answered as JSON; its notification arrives on the stream.
+    let (status, _, content_type, body) = http_at(port, "/mcp", accept, &host, Some(&token), Some(&sid), &load("snippets")).await;
+    assert_eq!((status, content_type.as_str()), (200, "application/json"), "{body}");
+    assert_eq!(serde_json::from_str::<Value>(&body).unwrap()["id"], 2);
+    let events = read_until(&mut stream, "\n\n").await;
+    assert!(events.contains("event: message\ndata: {\"jsonrpc\":\"2.0\",\"method\":\"notifications/tools/list_changed\"}"), "{events}");
+
+    // Once the client hangs up the slot is free, and until a new stream is
+    // open the notification travels inside the answer again.
+    drop(stream);
+    let mut reopened = None;
+    for _ in 0..50 {
+        let (status, _, s) = request_head(port, "GET", "text/event-stream", &token, &sid).await;
+        if status == 200 {
+            reopened = Some(s);
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    let mut stream = reopened.expect("the stream can be reopened after a disconnect");
+    let (_, _, content_type, _) = http_at(port, "/mcp", accept, &host, Some(&token), Some(&sid), &load("scripts")).await;
+    assert_eq!(content_type, "application/json");
+    assert!(read_until(&mut stream, "\n\n").await.contains("notifications/tools/list_changed"));
+
+    // Ending the session ends its stream.
+    assert_eq!(request_head(port, "DELETE", accept, &token, &sid).await.0, 200);
+    // (the response finishes with the last chunk; the connection is kept alive)
+    read_until(&mut stream, "0\r\n\r\n").await;
+    assert_eq!(request_head(port, "GET", "text/event-stream", &token, &sid).await.0, 404);
+    c.cleanup().await;
+}

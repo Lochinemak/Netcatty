@@ -51,6 +51,20 @@ pub fn wire_mcp<R: Runtime>(app: &AppHandle<R>) {
     let bridge = Arc::new(McpBridge { host: mcp.host.clone(), discovery });
     agents.runtime.set_mcp_provider(bridge.clone());
     agents.runtime.set_approval_provider(bridge);
+    // External MCP client setup looks `codex` / `claude` / `grok` up in the
+    // same login-shell environment the managed agents run in.
+    mcp.external.set_shell_env_provider(Arc::new(AgentsShellEnv(agents.runtime.clone())));
+}
+
+/// The agents runtime's cached login-shell environment (Electron: both
+/// callers share `shellUtils.getShellEnv`).
+struct AgentsShellEnv(Arc<AgentsRuntime>);
+
+#[async_trait::async_trait]
+impl netcatty_mcp::external::ShellEnvProvider for AgentsShellEnv {
+    async fn shell_env(&self) -> std::collections::HashMap<String, String> {
+        self.0.shell_env.get().await.iter().map(|(k, v)| (k.clone(), v.clone())).collect()
+    }
 }
 
 /// Adapter from `netcatty_mcp::McpHost` to the agents runtime hooks
