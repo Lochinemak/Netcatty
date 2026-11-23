@@ -20,6 +20,14 @@ pub struct Source {
     pub kind: String,
     pub name: String,
     pub origin: Option<String>,
+    /// GitHub release pin (`kind: "github"` only): tag, its commit and the
+    /// release asset the package came from.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tag: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub commit: Option<String>,
+    #[serde(default, rename = "assetId", skip_serializing_if = "Option::is_none")]
+    pub asset_id: Option<u64>,
 }
 
 pub fn sha256_hex(value: &str) -> String {
@@ -33,6 +41,9 @@ impl Source {
             kind: "official".into(),
             name: "Netcatty marketplace".into(),
             origin: Some(OFFICIAL_ORIGIN.into()),
+            tag: None,
+            commit: None,
+            asset_id: None,
         }
     }
     pub fn local() -> Self {
@@ -41,6 +52,9 @@ impl Source {
             kind: "local".into(),
             name: "Local import".into(),
             origin: None,
+            tag: None,
+            commit: None,
+            asset_id: None,
         }
     }
 }
@@ -96,15 +110,67 @@ pub fn third_party_source(name: &str, address: &str) -> PluginResult<Source> {
         kind: "third-party".into(),
         name: trimmed.to_string(),
         origin: Some(origin),
+        tag: None,
+        commit: None,
+        asset_id: None,
     })
+}
+
+/// A GitHub release a package was installed from.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GitHubReleasePin {
+    pub tag: String,
+    pub commit: String,
+    pub asset_id: u64,
+}
+
+/// `githubSource`: the host-owned identity of a public GitHub repository,
+/// optionally pinned to the release a package came from. The ID depends on
+/// the repository only, so reinstalling a newer release keeps the binding.
+pub fn github_source(address: &str, pin: Option<GitHubReleasePin>) -> PluginResult<Source> {
+    let repository = crate::github::parse_github_repository(address)?;
+    let mut source = Source {
+        id: format!("github:{}", sha256_hex(&repository.origin)),
+        kind: "github".into(),
+        name: repository.repository,
+        origin: Some(repository.origin),
+        tag: None,
+        commit: None,
+        asset_id: None,
+    };
+    if let Some(pin) = pin {
+        let commit_ok = pin.commit.len() == 40 && pin.commit.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b));
+        if pin.tag.is_empty()
+            || pin.tag.encode_utf16().count() > 256
+            || pin.tag.chars().any(|c| (c as u32) < 0x20 || c as u32 == 0x7f)
+            || !commit_ok
+            || pin.asset_id < 1
+            || pin.asset_id > crate::github::MAX_SAFE_INTEGER
+        {
+            return Err(PluginError::host("Invalid GitHub release identity"));
+        }
+        source.tag = Some(pin.tag);
+        source.commit = Some(pin.commit);
+        source.asset_id = Some(pin.asset_id);
+    }
+    Ok(source)
 }
 
 /// `assertSource`: rebuild the trusted identity and compare.
 pub fn assert_source(source: &Source) -> PluginResult<Source> {
-    let trusted = match source.id.as_str() {
-        "official" => Source::official(),
-        "local" => Source::local(),
-        _ => third_party_source(&source.name, source.origin.as_deref().unwrap_or(""))?,
+    let trusted = if source.kind == "github" {
+        let pin = match (&source.tag, &source.commit, source.asset_id) {
+            (None, None, None) => None,
+            (Some(tag), Some(commit), Some(asset_id)) => Some(GitHubReleasePin { tag: tag.clone(), commit: commit.clone(), asset_id }),
+            _ => return Err(PluginError::host("Invalid GitHub release identity")),
+        };
+        github_source(source.origin.as_deref().unwrap_or(""), pin)?
+    } else {
+        match source.id.as_str() {
+            "official" => Source::official(),
+            "local" => Source::local(),
+            _ => third_party_source(&source.name, source.origin.as_deref().unwrap_or(""))?,
+        }
     };
     if trusted.id != source.id || trusted.kind != source.kind || trusted.origin != source.origin {
         return Err(PluginError::host("Invalid host source identity"));
@@ -233,5 +299,39 @@ mod tests {
         let src = third_party_source("Mine", "https://plugins.example.com/v1/snapshot.json").unwrap();
         assert_eq!(src.origin.as_deref(), Some("https://plugins.example.com"));
         assert!(assert_source(&src).is_ok());
+    }
+
+    #[test]
+    fn github_sources_share_one_identity_per_repository() {
+        let a = github_source("https://github.com/Owner/Repo.git", None).unwrap();
+        let b = github_source("owner/repo", None).unwrap();
+        assert_eq!(a, b);
+        assert_eq!(a.kind, "github");
+        assert_eq!(a.name, "owner/repo");
+        assert_eq!(a.origin.as_deref(), Some("https://github.com/owner/repo"));
+        assert_eq!(a.id, format!("github:{}", sha256_hex("https://github.com/owner/repo")));
+
+        let pin = GitHubReleasePin { tag: "v1.0.0".into(), commit: "a".repeat(40), asset_id: 7 };
+        let pinned = github_source("owner/repo", Some(pin.clone())).unwrap();
+        assert_eq!(pinned.id, a.id, "the release pin does not change the binding");
+        assert_eq!(assert_source(&pinned).unwrap(), pinned);
+        let json = serde_json::to_value(&pinned).unwrap();
+        assert_eq!(json["assetId"], 7);
+        assert_eq!(serde_json::from_value::<Source>(json).unwrap(), pinned);
+        assert!(serde_json::to_value(Source::local()).unwrap().get("tag").is_none());
+
+        for bad in [
+            GitHubReleasePin { commit: "A".repeat(40), ..pin.clone() },
+            GitHubReleasePin { commit: "a".repeat(39), ..pin.clone() },
+            GitHubReleasePin { tag: String::new(), ..pin.clone() },
+            GitHubReleasePin { tag: "v1\n".into(), ..pin.clone() },
+            GitHubReleasePin { asset_id: 0, ..pin.clone() },
+        ] {
+            assert!(github_source("owner/repo", Some(bad)).is_err());
+        }
+        // Forged or partial identities are rejected.
+        assert!(assert_source(&Source { id: "official".into(), ..a.clone() }).is_err());
+        assert!(assert_source(&Source { tag: Some("v1".into()), ..a.clone() }).is_err());
+        assert!(assert_source(&Source { origin: Some("https://github.com/other/repo".into()), ..a }).is_err());
     }
 }

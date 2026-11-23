@@ -21,6 +21,7 @@ pub mod contract;
 pub mod contributions;
 pub mod database;
 pub mod error;
+pub mod github;
 pub mod host;
 pub mod interactions;
 pub mod logs;

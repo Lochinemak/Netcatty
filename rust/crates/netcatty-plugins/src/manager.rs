@@ -9,7 +9,7 @@ use crate::error::{PluginError, PluginResult};
 use crate::permissions::PermissionEngine;
 use crate::secrets::PluginSecretStore;
 use crate::source::Source;
-use crate::store::{BeforeActivate, CatalogExpectation, InstallOptions, PackageStore};
+use crate::store::{BeforeActivate, CatalogExpectation, ExpectedPackage, InstallOptions, PackageStore};
 use crate::supervisor::RuntimeSupervisor;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -33,6 +33,7 @@ pub struct InstallRequest {
     pub enable: Option<bool>,
     pub source: Source,
     pub catalog: Option<CatalogExpectation>,
+    pub expected: Option<ExpectedPackage>,
 }
 
 impl PluginManager {
@@ -102,7 +103,7 @@ impl PluginManager {
         let supervisor = self.supervisor.clone();
         let stopped: Arc<parking_lot::Mutex<Option<(String, String)>>> = Arc::new(parking_lot::Mutex::new(None));
         let stopped_inner = stopped.clone();
-        let InstallRequest { archive_path, enable, source, catalog } = request;
+        let InstallRequest { archive_path, enable, source, catalog, expected } = request;
         let installed = tokio::task::spawn_blocking(move || {
             let mut before = |event: &BeforeActivate| -> PluginResult<()> {
                 let Some(previous) = event.previous.as_ref().filter(|p| p.enabled) else { return Ok(()) };
@@ -111,7 +112,7 @@ impl PluginManager {
                 *stopped_inner.lock() = Some((event.plugin_id.clone(), previous.active_version.clone().unwrap_or_default()));
                 handle.block_on(supervisor.stop(&event.plugin_id))
             };
-            store.install(&archive_path, InstallOptions { source, enable, catalog, before_activate: Some(&mut before) })
+            store.install(&archive_path, InstallOptions { source, enable, catalog, expected, before_activate: Some(&mut before) })
         })
         .await
         .map_err(|e| PluginError::host(e.to_string()))?;

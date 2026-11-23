@@ -40,6 +40,20 @@ test('management calls map onto plugin_call with Electron payloads', async () =>
   ]);
 });
 
+test('GitHub install passes only the repository text and the preview token', async () => {
+  const preview = { token: 't1', assetName: 'p.ncpkg' };
+  const { bridge, calls } = setup({ 'github-prepare': preview, 'github-install': { id: 'p.id', enabled: false } });
+  assert.deepEqual(await bridge.prepareGitHubPlugin('owner/repo'), preview);
+  assert.deepEqual(await bridge.installGitHubPlugin('t1'), { id: 'p.id', enabled: false });
+  await bridge.discardGitHubPlugin('t1');
+  const methods = calls.filter((c) => c.cmd === 'plugin_call').map((c) => [c.args?.method, c.args?.payload]);
+  assert.deepEqual(methods.slice(-3), [
+    ['github-prepare', { repository: 'owner/repo' }],
+    ['github-install', { token: 't1' }],
+    ['github-discard', { token: 't1' }],
+  ]);
+});
+
 test('binary fields cross IPC as base64', async () => {
   const { bridge, calls } = setup({ 'importer-select-file': { selectionToken: 't', fileName: 'a', sampleBase64: toBase64(new Uint8Array([1, 2, 3])) } });
   await bridge.writePluginConnection('s1', new Uint8Array([104, 105]));

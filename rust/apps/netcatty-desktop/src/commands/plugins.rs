@@ -18,6 +18,7 @@ use super::CmdResult;
 use crate::state::AppState;
 use netcatty_core::CoreError;
 use netcatty_plugins::browser::{BrowserLauncher, BrowserResources, BrowserRuntimeHost, RendererRuntimeHost};
+use netcatty_plugins::github::{GitHubInstallService, ReqwestGitHubHttp};
 use netcatty_plugins::host::{channels, HostConfig, HostEvents, PluginHost};
 use netcatty_plugins::interactions::InteractionSurface;
 use netcatty_plugins::manager::InstallRequest;
@@ -29,7 +30,7 @@ use netcatty_plugins::{PluginError, PluginResult};
 use parking_lot::Mutex;
 use serde_json::{json, Value};
 use std::borrow::Cow;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 use tauri::ipc::Channel;
@@ -45,6 +46,10 @@ pub struct PluginsState {
     pub browser: Arc<BrowserRuntimeHost>,
     decisions: OnceLock<Arc<PermissionDecisionHost>>,
     scope_catalogs: Mutex<HashMap<String, Value>>,
+    /// Install from GitHub: one reviewed package per window.
+    github: OnceLock<Result<Arc<GitHubInstallService>, String>>,
+    /// Windows whose close already discards their GitHub preview.
+    github_owners: Mutex<HashSet<String>>,
     pub app_root: PathBuf,
 }
 
@@ -55,6 +60,28 @@ impl PluginsState {
             Some(Err(err)) => Err(CoreError::unsupported(format!("Plugin runtime is disabled or unavailable: {err}"))),
             None => Err(CoreError::unsupported("Plugin runtime is disabled or unavailable")),
         }
+    }
+
+    /// The GitHub install service, with the window's close hooked up to
+    /// discard its preview (Electron: `githubFor`).
+    fn github_for<R: Runtime>(&self, window: &tauri::Window<R>) -> PluginResult<Arc<GitHubInstallService>> {
+        let service = self
+            .github
+            .get_or_init(|| ReqwestGitHubHttp::new().map(|http| GitHubInstallService::new(Arc::new(http))).map_err(|e| e.to_string()))
+            .clone()
+            .map_err(PluginError::host)?;
+        let owner = window.label().to_string();
+        if self.github_owners.lock().insert(owner.clone()) {
+            let weak = Arc::downgrade(&service);
+            window.on_window_event(move |event| {
+                if matches!(event, tauri::WindowEvent::Destroyed) {
+                    if let Some(service) = weak.upgrade() {
+                        service.discard(&owner, None);
+                    }
+                }
+            });
+        }
+        Ok(service)
     }
 }
 
@@ -165,6 +192,8 @@ pub fn setup<R: Runtime>(app: &tauri::App<R>) {
         browser: browser.clone(),
         decisions: OnceLock::new(),
         scope_catalogs: Mutex::new(HashMap::new()),
+        github: OnceLock::new(),
+        github_owners: Mutex::new(HashSet::new()),
         app_root: app_root.clone(),
     };
     let paths = netcatty_store::AppPaths::resolve();
@@ -363,8 +392,42 @@ pub async fn plugin_call<R: Runtime>(
     if let Err(err) = host.manager.initialize().await {
         return passive_fallback(&method, &state).ok_or_else(|| CoreError::unsupported(format!("Plugin runtime is disabled or unavailable: {err}")));
     }
-    let result = dispatch(&app, &state, &host, &owner, &method, payload).await;
+    let result = match method.as_str() {
+        "github-prepare" | "github-install" | "github-discard" => github(&app, &window, &state, &host, &method, &payload).await,
+        _ => dispatch(&app, &state, &host, &owner, &method, payload).await,
+    };
     result.map_err(CoreError::from)
+}
+
+/// Install from GitHub (`githubPrepare` / `githubInstall` / `githubDiscard`).
+/// The renderer supplies only the repository text and the preview token; the
+/// URLs, transport and download directory are the host's.
+async fn github<R: Runtime>(
+    app: &AppHandle<R>,
+    window: &tauri::Window<R>,
+    state: &PluginsState,
+    host: &Arc<PluginHost>,
+    method: &str,
+    payload: &Value,
+) -> PluginResult<Value> {
+    let service = state.github_for(window)?;
+    let owner = window.label();
+    match method {
+        "github-prepare" => {
+            let repository = s(payload, "repository").unwrap_or("");
+            let temp_root = super::tempdir::current(app);
+            let preview = service.prepare(owner, repository, &temp_root, &host.store, &host.database).await?;
+            serde_json::to_value(preview).map_err(|e| PluginError::host(e.to_string()))
+        }
+        "github-install" => {
+            let plugin = service.install(owner, s(payload, "token").unwrap_or(""), &host.manager).await?;
+            serde_json::to_value(plugin).map_err(|e| PluginError::host(e.to_string()))
+        }
+        _ => {
+            service.discard(owner, s(payload, "token"));
+            Ok(Value::Null)
+        }
+    }
 }
 
 async fn dispatch<R: Runtime>(
@@ -387,6 +450,7 @@ async fn dispatch<R: Runtime>(
                     enable: payload.get("enable").and_then(Value::as_bool),
                     source: Source::local(),
                     catalog: None,
+                    expected: None,
                 })
                 .await?;
             ser(to_value(plugin))

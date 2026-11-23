@@ -96,7 +96,7 @@ async fn hello_and_starter_examples_run_against_the_rust_host() {
     build_package(&root.join("examples/plugins/hello-netcatty"), &hello).unwrap();
     let installed = host
         .manager
-        .install(InstallRequest { archive_path: hello, enable: Some(true), source: Source::local(), catalog: None })
+        .install(InstallRequest { archive_path: hello, enable: Some(true), source: Source::local(), catalog: None, expected: None })
         .await
         .unwrap()
         .unwrap();
@@ -166,7 +166,7 @@ async fn hello_and_starter_examples_run_against_the_rust_host() {
     let starter = out.path().join("starter.ncpkg");
     build_package(&root.join("examples/plugins/starter-netcatty"), &starter).unwrap();
     host.manager
-        .install(InstallRequest { archive_path: starter, enable: Some(true), source: Source::local(), catalog: None })
+        .install(InstallRequest { archive_path: starter, enable: Some(true), source: Source::local(), catalog: None, expected: None })
         .await
         .unwrap();
     let posted: Arc<Mutex<Vec<Value>>> = Arc::default();
