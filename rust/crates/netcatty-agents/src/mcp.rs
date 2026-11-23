@@ -2,9 +2,9 @@
 //! `sdk/injectMcp.cjs`). Each driver converts it into its SDK's config format.
 //!
 //! The real provider lives in the `netcatty_mcp` crate
-//! (`netcatty_mcp::build_injected_mcp_servers`); until it is merged the
-//! runtime is wired with [`NoopMcpInjectionProvider`]. See
-//! `TODO(mcp-injection)` in `runtime.rs`.
+//! (`netcatty_mcp::build_injected_mcp_servers`) and is installed by the host
+//! through `AgentsRuntime::set_mcp_provider`; until then the runtime uses
+//! [`NoopMcpInjectionProvider`].
 
 use crate::EnvMap;
 use serde::{Deserialize, Serialize};

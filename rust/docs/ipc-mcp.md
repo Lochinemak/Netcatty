@@ -194,9 +194,12 @@ from the catalog; the points below are layered on top in
   "MCP tool surface" above (typed inputs, annotations, sessions by name,
   toolset preloading). Existing tool names and RPC methods are unchanged;
   `sftp_find` and ranged `sftp_read_file` are additions Electron lacks.
-* `TODO(ai-privacy)`: `external_mcp_set_config` must forward the
-  normalised redaction policy to `commands::ai::configure_privacy` once
-  the AI core module is merged.
+* `external_mcp_set_config` forwards a `redaction` it was given to
+  `commands::ai::configure_privacy`, so the AI core privacy service follows
+  Settings (Electron: `externalMcpController` → `aiPrivacyService`). A
+  policy the External MCP controller rejected, or `null`, invalidates the
+  service instead; a failure there is logged and does not change the
+  command's answer.
 * Not ported (Electron-only): plugin agent delegation tags, terminal
   worker paths, login-shell PATH resolution for CLI setup (the SDK-agent
   module owns shell-env prewarming).

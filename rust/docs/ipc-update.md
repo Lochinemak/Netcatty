@@ -116,8 +116,11 @@ panel windows do not own editor tabs):
    reply settles it. On timeout the guard fails open, unless transfers were
    acknowledged as pending — then it blocks, like Electron.
 
-`DirtyEditorGuard` is reusable for a before-quit guard (Electron
-`main.cjs` `before-quit`), which is not ported yet.
+The before-quit guard (Electron `main.cjs` `before-quit`) asks the same
+question on every explicit quit: `commands::windows::on_run_event` holds
+`RunEvent::ExitRequested` while the windows that own editors answer — see
+[ipc-windows.md](ipc-windows.md). The update restart (`RESTART_EXIT_CODE`) is
+let through, because `update_install` has already run the check above.
 
 ## Build, signing and publishing
 

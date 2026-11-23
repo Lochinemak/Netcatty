@@ -106,9 +106,9 @@ export function createAiBridge(deps: AiBridgeDeps): Partial<NetcattyBridge> & Ai
   };
 
   // Electron's main process receives the persisted privacy policy through
-  // `externalMcpSetConfig` at startup. Until that command exists in the Tauri
-  // build (and before the startup sync runs), push the stored policy once;
-  // the backend applies it only while it is still waiting for a policy.
+  // `externalMcpSetConfig` at startup, and so does the Tauri backend. To cover
+  // the time before that startup sync runs, push the stored policy once; the
+  // backend applies it only while it is still waiting for a policy.
   let privacyInitialized: Promise<void> | null = null;
   const ensurePrivacyInitialized = () => {
     privacyInitialized ??= (async () => {

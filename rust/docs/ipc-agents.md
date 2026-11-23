@@ -91,11 +91,15 @@ ask vs agent never resume each other's sessions.
 each driver converts (Claude / CodeBuddy `--mcp-config`, Codex
 `mcp_servers.*` overrides, Copilot `mcpServers`, Grok ACP `mcpServers` /
 `.grok/config.toml`, OpenCode / MiMo `mcp`, Cursor `.cursor/mcp.json`). The
-app currently installs `NoopMcpInjectionProvider` and
-`NoopApprovalProvider` (`TODO(mcp-injection)` in `commands/agents.rs`):
-until the netcatty MCP server port lands, agents get no Netcatty tools and
+app installs `McpBridge` for both hooks (`commands::agents::wire_mcp`, called
+from `lib.rs` setup once the agents and MCP states are managed). It serves the
+server list from `netcatty_mcp::build_injected_mcp_servers` and sends
 confirm-mode native permission prompts (CodeBuddy `can_use_tool`, MiMo
-`permission.*`) are denied.
+`permission.*`) to the renderer through `McpHost::request_approval`.
+
+`AgentsRuntime::new` starts with `NoopMcpInjectionProvider` and
+`NoopApprovalProvider`, and a host that never calls `wire_mcp` keeps them:
+agents then get no Netcatty tools and those permission prompts are denied.
 
 ## Not ported
 

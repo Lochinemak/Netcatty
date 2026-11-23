@@ -119,7 +119,8 @@ Rolling generations of the renderer's `netcatty_ai_sessions_v1` store under
 * Delegated plugin-agent model requests (`agent-model_…` ids) and the
   plugin byte budget of `plugin-model_…` streams: they need the plugin
   runtime / MCP bridge.
-* `externalMcpSetConfig` (privacy policy changes from Settings): External MCP
-  port; it must call `configure_privacy`.
+* `externalMcpSetConfig` (privacy policy changes from Settings): owned by the
+  External MCP port ([ipc-mcp.md](ipc-mcp.md)), which calls
+  `configure_privacy`.
 * SDK agents, agent discovery, `aiExec`, `aiCattyCancelExec`, `aiCapability`,
   MCP session metadata and approvals: other ports.
