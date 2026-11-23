@@ -17,6 +17,9 @@ import App from './App';
 import { installAutoCorrectionGuard } from './infrastructure/textInputAutoCorrection';
 import { AppLockGate } from './components/AppLockGate';
 
+// Startup timeline marks (see electron/perfTrace.cjs); visible in DevTools too.
+performance.mark('netcatty:renderer:entry-evaluated');
+
 const LazySettingsPage = lazy(() => import('./components/SettingsPage'));
 const LazyTrayPanel = lazy(() => import('./components/TrayPanel'));
 const LazyTerminalPopupPage = lazy(() => import('./components/TerminalPopupPage'));
