@@ -291,8 +291,6 @@ export const useSessionState = ({
   logViewsRef.current = logViews;
   const [restorePreviousSessionRevision, setRestorePreviousSessionRevision] = useState(0);
   const sessionsRef = useRef(sessions);
-  const logViewsRef = useRef(logViews);
-  logViewsRef.current = logViews;
   const tabOrderRef = useRef(tabOrder);
   const scheduleSessionRestorePersistRef = useRef<() => void>(() => {});
   const sessionRestoreCwdByIdRef = useRef(

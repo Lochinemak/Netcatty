@@ -5,10 +5,7 @@ import {
   createWorkspaceFromSessions,
 } from "../../domain/workspace";
 import { buildMergedWorkspaceTitle, getSessionConnectionLabel } from "../../domain/sessionTabTitle";
-import {
-  detachSessionFromWorkspaceState,
-  replaceDissolvedWorkspaceTabOrder,
-} from "./sessionWorkspaceDetach";
+import { detachSessionFromWorkspaceState } from "./sessionWorkspaceDetach";
 
 export type MoveWorkspaceSessionToTabResult = {
   changed: boolean;
@@ -16,9 +13,6 @@ export type MoveWorkspaceSessionToTabResult = {
   workspaces: Workspace[];
   /** Tab that owns the moved pane afterwards (an existing or a new workspace). */
   activeTabId?: string;
-  /** Source workspace that fell back to plain tabs because one pane was left. */
-  dissolvedWorkspaceId?: string;
-  replacementTabIds?: string[];
   /** Standalone tab whose slot the newly created workspace takes over. */
   replacedSessionTabId?: string;
   movedSessionId?: string;
@@ -67,8 +61,6 @@ export function moveWorkspaceSessionToTabState(
 
   const base = {
     changed: true,
-    dissolvedWorkspaceId: detached.dissolvedWorkspaceId,
-    replacementTabIds: detached.replacementTabIds,
     movedSessionId: sessionId,
   };
 
@@ -134,9 +126,9 @@ export function moveWorkspaceSessionToTabState(
 }
 
 /**
- * Tab order after a pane move: restore the tabs of a dissolved source
- * workspace, drop the moved pane's own slot, and let a newly created
- * workspace take the slot of the standalone tab it absorbed.
+ * Tab order after a pane move: drop the moved pane's own slot and let a newly
+ * created workspace take the slot of the standalone tab it absorbed. The source
+ * workspace keeps its slot: workspaces survive member loss (#4098 phase 2).
  */
 export function applyMovedWorkspaceSessionTabOrder(
   tabOrder: readonly string[],
@@ -144,11 +136,7 @@ export function applyMovedWorkspaceSessionTabOrder(
 ): string[] {
   if (!result.changed || !result.movedSessionId) return [...tabOrder];
 
-  const restored = replaceDissolvedWorkspaceTabOrder(
-    tabOrder,
-    result.dissolvedWorkspaceId,
-    result.replacementTabIds,
-  ).filter((tabId) => tabId !== result.movedSessionId);
+  const restored = tabOrder.filter((tabId) => tabId !== result.movedSessionId);
 
   const { replacedSessionTabId, activeTabId } = result;
   if (!replacedSessionTabId || !activeTabId) return restored;
