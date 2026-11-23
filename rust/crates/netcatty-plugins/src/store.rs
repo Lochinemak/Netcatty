@@ -181,17 +181,26 @@ pub struct BeforeActivate {
     pub reason: &'static str,
 }
 
+/// The package a user reviewed before installing (GitHub install): the
+/// installed snapshot must still have this digest and manifest.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ExpectedPackage {
+    pub sha256: String,
+    pub manifest: Value,
+}
+
 pub struct InstallOptions<'a> {
     pub source: Source,
     /// `Some(true)` enable, `Some(false)` force disabled, `None` keep.
     pub enable: Option<bool>,
     pub catalog: Option<CatalogExpectation>,
+    pub expected: Option<ExpectedPackage>,
     pub before_activate: Option<&'a mut dyn FnMut(&BeforeActivate) -> PluginResult<()>>,
 }
 
 impl Default for InstallOptions<'_> {
     fn default() -> Self {
-        Self { source: Source::local(), enable: None, catalog: None, before_activate: None }
+        Self { source: Source::local(), enable: None, catalog: None, expected: None, before_activate: None }
     }
 }
 
@@ -307,6 +316,11 @@ impl PackageStore {
         let validation = archive::extract_package(&snapshot_path, &extracted)?;
         sync_directory_tree(&extracted)?;
         let manifest = validation.manifest.clone();
+        if let Some(expected) = &options.expected {
+            if archive_sha != expected.sha256 || manifest != expected.manifest {
+                return Err(host("Plugin package changed after preview; download and review it again"));
+            }
+        }
         if !self.allow_advanced_plugins {
             assert_browser_only(&manifest)?;
         }

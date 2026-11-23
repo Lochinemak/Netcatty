@@ -513,3 +513,67 @@ fn window_chrome_commands() {
     ));
     assert_eq!(accepted, false);
 }
+
+/// `onFinalizeSessionLogs`: before a window closes or the app quits, Rust
+/// asks the window to commit its ConnectionLog replays and waits for its own
+/// answer (Electron: `sessionLogShutdown.cjs`).
+#[test]
+fn session_log_finalization_waits_for_the_asked_window() {
+    let h = build_app();
+    let handle = h.app.handle().clone();
+    assert_eq!(
+        netcatty_desktop_lib::commands::windows::app_content_windows(&handle),
+        vec!["main".to_owned()]
+    );
+    let other = tauri::WebviewWindowBuilder::new(&h.app, "popup-1", Default::default())
+        .build()
+        .expect("second window");
+
+    for (answer, expected) in [(json!(true), true), (json!(false), false)] {
+        let requests: Arc<Mutex<Vec<Value>>> = Arc::default();
+        let listener = {
+            let requests = requests.clone();
+            h.main.listen("app:finalize-session-logs", move |event| {
+                requests
+                    .lock()
+                    .unwrap()
+                    .push(serde_json::from_str(event.payload()).unwrap());
+            })
+        };
+        let main = h.main.clone();
+        let other = other.clone();
+        let responder_handle = handle.clone();
+        let responder = std::thread::spawn(move || {
+            assert!(wait_until(
+                &responder_handle,
+                Duration::from_secs(5),
+                || !requests.lock().unwrap().is_empty()
+            ));
+            let request_id = requests.lock().unwrap()[0]["requestId"]
+                .as_str()
+                .unwrap()
+                .to_owned();
+            let reply = json!({
+                "channel": "app:session-logs-finalized",
+                "payload": { "requestId": request_id, "success": answer },
+            });
+            // Only the asked window can settle the request.
+            assert_eq!(
+                ok(invoke(&other, "windows_report", reply.clone())),
+                json!(false)
+            );
+            assert_eq!(ok(invoke(&main, "windows_report", reply)), json!(true));
+        });
+        let finalized = tauri::async_runtime::block_on(
+            netcatty_desktop_lib::commands::windows::finalize_session_logs(&handle, "main"),
+        );
+        responder.join().unwrap();
+        h.main.unlisten(listener);
+        assert_eq!(finalized, expected);
+    }
+
+    // A window that is gone does not hold a close or a quit.
+    assert!(!tauri::async_runtime::block_on(
+        netcatty_desktop_lib::commands::windows::finalize_session_logs(&handle, "nope"),
+    ));
+}

@@ -34,6 +34,7 @@ export const WINDOWS_EVENTS = {
   windowFocusRequested: 'netcatty:window:focus-requested',
   windowCommandClose: 'netcatty:window:command-close',
   sessionOutputRoute: 'netcatty:window:session-output-route',
+  finalizeSessionLogs: 'app:finalize-session-logs',
 } as const;
 
 /** Reply channels accepted by `windows_report`. */
@@ -44,6 +45,7 @@ export const WINDOWS_REPLY_CHANNELS = {
   editorDockResult: 'netcatty:window:editorDockResult',
   snapshotResponse: 'netcatty:terminal:snapshot-response',
   applySnapshotResponse: 'netcatty:terminal:apply-snapshot-response',
+  sessionLogsFinalized: 'app:session-logs-finalized',
 } as const;
 
 type WindowsBridgeKeys =
@@ -85,7 +87,8 @@ type WindowsBridgeKeys =
   | 'onWindowCommandCloseRequested'
   | 'setWindowOpacity'
   | 'setWindowBackgroundBlur'
-  | 'setTerminalKeyboardFocus';
+  | 'setTerminalKeyboardFocus'
+  | 'onFinalizeSessionLogs';
 
 export type WindowsBridge = Required<Pick<NetcattyBridge, WindowsBridgeKeys>>;
 
@@ -297,6 +300,27 @@ export function createWindowsBridge(deps: WindowsBridgeDeps): WindowsBridge {
     }
     for (const cb of Array.from(openSession.listeners)) cb(payload);
   };
+
+  // Session logs: before this window closes or the app quits, Rust asks for
+  // the ConnectionLog replays to be committed and waits for the answer
+  // (Electron preload `sessionLogFinalizers`). Listen from the start so a
+  // window without terminals answers at once instead of timing out.
+  const sessionLogFinalizers = new Set<() => Promise<void>>();
+  let pendingSessionLogFinalization: Promise<PromiseSettledResult<void>[]> | null = null;
+  hub.subscribe<unknown>(WINDOWS_EVENTS.finalizeSessionLogs, (payload) => {
+    const requestId = isRecord(payload) && typeof payload.requestId === 'string' ? payload.requestId : '';
+    if (!requestId) return;
+    const pending = pendingSessionLogFinalization ??= Promise.allSettled(
+      [...sessionLogFinalizers].map((finalize) => Promise.resolve().then(finalize)),
+    );
+    void pending.then((results) => {
+      if (pendingSessionLogFinalization === pending) pendingSessionLogFinalization = null;
+      report(WINDOWS_REPLY_CHANNELS.sessionLogsFinalized, {
+        requestId,
+        success: results.every((result) => result.status === 'fulfilled'),
+      });
+    });
+  });
 
   return {
     // -------------------------------------------------------------------
@@ -531,6 +555,13 @@ export function createWindowsBridge(deps: WindowsBridgeDeps): WindowsBridge {
         'windows_set_terminal_keyboard_focus',
         invoke<void>('windows_set_terminal_keyboard_focus', { focused: focused === true }),
       );
+    },
+
+    onFinalizeSessionLogs: (finalize) => {
+      sessionLogFinalizers.add(finalize);
+      return () => {
+        sessionLogFinalizers.delete(finalize);
+      };
     },
   };
 }

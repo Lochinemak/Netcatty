@@ -1,6 +1,8 @@
 import type { Messages } from '../types';
 
 export const ruAiMessages: Messages = {
+  'ai.chat.iterationLimitReached': 'Достигнут лимит цикла инструментов ({limit} итераций). Можно продолжить в этом чате. Запущенные задачи терминала не останавливаются.',
+  'ai.chat.continue': 'Продолжить',
   'ai.chat.attachmentContentUnavailable': 'Содержимое недоступно на этом устройстве',
   'ai.chat.contextUsage': 'Контекст: {used} / {max} токенов',
   // AI Settings
@@ -71,6 +73,7 @@ export const ruAiMessages: Messages = {
   'ai.providers.advancedParams.hint': 'Оставьте пустым, чтобы использовать настройки провайдера по умолчанию.',
   'ai.providers.advancedParams.maxTokens.placeholder': 'например, 4096',
   'ai.providers.advancedParams.default': 'По умолчанию у провайдера',
+  'ai.providers.advancedParams.reasoningEffort.help': 'xhigh и max отправляются только если выбранная модель их поддерживает; иначе значение понижается до максимального поддерживаемого уровня.',
 
   // AI Codex
   'ai.codex': 'Codex',
@@ -272,6 +275,7 @@ export const ruAiMessages: Messages = {
   'ai.defaultAgent': 'Агент по умолчанию',
   'ai.defaultAgent.description': 'Агент, который будет использоваться при запуске новой AI-сессии',
   'ai.defaultAgent.catty': 'Catty (встроенный)',
+  'ai.defaultAgent.unavailable': 'Недоступен',
   'ai.toolAccess.title': 'Доступ к инструментам',
   'ai.toolAccess.mode': 'Режим доступа Netcatty',
   'ai.toolAccess.description': 'Выберите, как внешние агенты получают доступ к сессиям Netcatty. MCP предоставляет встроенный сервер, а Skills + CLI указывает агентам на локальный skill Netcatty и команды CLI.',
@@ -550,6 +554,22 @@ export const ruAiMessages: Messages = {
   'ai.chat.rebindUsage': 'Использование: /rebind <номер из /chats>',
   'ai.chat.rebindDone': 'Чат «{title}» привязан к этой панели.',
   'ai.chat.rebindUnavailable': 'В области этой панели нет цели для привязки.',
+  'ai.chat.managerScopeTab': 'Эта область',
+  'ai.chat.managerAllChatsTab': 'Все чаты',
+  'ai.chat.managerSearchPlaceholder': 'Поиск по названиям чатов…',
+  'ai.chat.managerFilterAllAgents': 'Все агенты',
+  'ai.chat.managerOpen': 'Открыть в этой панели',
+  'ai.chat.managerOpenDisabled': 'Привязан к другому рабочему пространству или терминалу — используйте повторную привязку',
+  'ai.chat.managerRebind': 'Повторная привязка',
+  'ai.chat.managerRebindPick': 'Привязать к…',
+  'ai.chat.managerRebindHere': 'Эта панель',
+  'ai.chat.managerRebindDone': 'Чат «{title}» привязан к {target}.',
+  'ai.chat.managerExportOne': 'Экспортировать этот чат',
+  'ai.chat.managerBadgeActive': 'Активен',
+  'ai.chat.managerBadgeIdle': 'Простой',
+  'ai.chat.managerMessagesCount': '{n} сообщений',
+  'ai.chat.managerDeleteTitle': 'Удалить этот чат?',
+  'ai.chat.managerDeleteMessage': '«{title}» и его сообщения будут удалены из всех панелей. Это действие нельзя отменить.',
   'ai.chat.justNow': 'Только что',
   'ai.chat.minutesAgo': '{n}м назад',
   'ai.chat.hoursAgo': '{n}ч назад',
@@ -599,6 +619,10 @@ export const ruAiMessages: Messages = {
   'ai.chatShortcuts.title': 'Быстрые действия чата',
   'ai.chatShortcuts.selectionAction': 'Показывать «Добавить в чат» при выделении в терминале',
   'ai.chatShortcuts.selectionAction.description': 'Показывать небольшую кнопку AI рядом с выделенным текстом терминала.',
+  'ai.chatHistory.title': 'История чата',
+  'ai.chatHistory.messageCap': 'Сообщений, сохраняемых в чате',
+  'ai.chatHistory.messageCap.description': 'Максимальное число сообщений, хранимых для одного чата (50–2000). При уменьшении самые старые сообщения удаляются из хранилища при следующей записи. Большие значения увеличивают объём хранилища и синхронизации с облаком.',
+  'ai.chatHistory.messageCap.unit': 'сообщений',
 
   // AI Error
   'ai.codex.bridgeError': 'Обработчики главного процесса Codex ещё не загружены. Полностью перезапустите Netcatty или dev-процесс Electron и попробуйте снова.',
@@ -654,6 +678,8 @@ export const ruAiMessages: Messages = {
 
   // Unified tooltips for terminal workspace and top tabs (issue #954)
   'terminal.layer.addTerminal': 'Добавить терминал',
+  'terminal.layer.emptyWorkspace': 'В этом рабочем пространстве пока нет терминалов',
+  'terminal.layer.emptyWorkspaceHint': 'Добавьте локальный терминал или подключитесь к хосту, чтобы начать.',
   'terminal.layer.switchToSplitView': 'Переключить в режим разделения',
   'terminal.layer.sftp': 'SFTP',
   'terminal.layer.scripts': 'Скрипты',

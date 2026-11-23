@@ -204,6 +204,7 @@ All `sftp_*` commands take `sftpId` first. `encoding?` is
 | `sftp_lstat` | `sftpId, path, encoding?` | `StatResult \| null` |
 | `sftp_chmod` | `sftpId, path, mode, encoding?` | `void` |
 | `sftp_extract` | `sftpId, path, encoding?` | `{ success }` |
+| `sftp_create_archive` | `sftpId, options: { directory, paths, archiveName, format: "tar.gz" \| "zip", overwrite? }, encoding?` | `{ success, error?, code? }` — remote `tar`/`zip` over SSH exec, written to a private staging dir and published with `ln` (no replace) or `mv -f` (`overwrite`); a taken name answers `code: "EEXIST"` |
 | `sftp_home_dir` | `sftpId, encoding?` | `{ success, homeDir?, error? }` |
 | `sftp_close` | `sftpId` | `{ success }` — idempotent; the SSH connection is disconnected only when no terminal session or other browser uses it |
 | `sftp_retain_transfer_session` | `sftpId` | `{ success, reason? }` — whether the browser is still open, for the renderer's transfer channel pool. There is no lease table: a transfer holds the client, so `sftp_close` cannot close it underneath, and the pool's `leaseId` has no counterpart here |

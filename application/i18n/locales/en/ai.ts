@@ -1,6 +1,8 @@
 import type { Messages } from '../types';
 
 export const enAiMessages: Messages = {
+  'ai.chat.iterationLimitReached': 'Tool-loop limit ({limit} iterations) reached. You can continue in this chat. Running terminal jobs are not stopped.',
+  'ai.chat.continue': 'Continue',
   'ai.chat.attachmentContentUnavailable': 'Content not available on this device',
   // AI Settings
   'ai.agentSettings': 'Agent Settings',
@@ -99,6 +101,7 @@ export const enAiMessages: Messages = {
   'ai.providers.advancedParams.hint': 'Leave blank to use provider defaults.',
   'ai.providers.advancedParams.maxTokens.placeholder': 'e.g. 4096',
   'ai.providers.advancedParams.default': 'Provider default',
+  'ai.providers.advancedParams.reasoningEffort.help': 'xhigh and max are only sent when the selected model supports them; otherwise they are clamped to the deepest supported level.',
 
   // AI Codex
   'ai.codex': 'Codex',
@@ -332,6 +335,7 @@ export const enAiMessages: Messages = {
   'ai.defaultAgent': 'Default Agent',
   'ai.defaultAgent.description': 'Agent to use when starting a new AI session',
   'ai.defaultAgent.catty': 'Catty (Built-in)',
+  'ai.defaultAgent.unavailable': 'Unavailable',
   'ai.toolAccess.title': 'Tool Access',
   'ai.toolAccess.mode': 'Netcatty Access Mode',
   'ai.toolAccess.description': 'Choose how external agents access Netcatty sessions. MCP exposes the built-in server, while Skills + CLI points agents to the local Netcatty skill and CLI commands.',
@@ -611,6 +615,22 @@ export const enAiMessages: Messages = {
   'ai.chat.rebindUsage': 'Usage: /rebind <number from /chats>',
   'ai.chat.rebindDone': 'Chat "{title}" rebound to this panel.',
   'ai.chat.rebindUnavailable': 'No rebind target in this panel scope.',
+  'ai.chat.managerScopeTab': 'This scope',
+  'ai.chat.managerAllChatsTab': 'All chats',
+  'ai.chat.managerSearchPlaceholder': 'Search chat titles…',
+  'ai.chat.managerFilterAllAgents': 'All agents',
+  'ai.chat.managerOpen': 'Open in this panel',
+  'ai.chat.managerOpenDisabled': 'Bound to another workspace or terminal — use rebind to move it',
+  'ai.chat.managerRebind': 'Rebind',
+  'ai.chat.managerRebindPick': 'Rebind to…',
+  'ai.chat.managerRebindHere': 'This panel',
+  'ai.chat.managerRebindDone': 'Chat "{title}" rebound to {target}.',
+  'ai.chat.managerExportOne': 'Export this chat',
+  'ai.chat.managerBadgeActive': 'Active',
+  'ai.chat.managerBadgeIdle': 'Idle',
+  'ai.chat.managerMessagesCount': '{n} messages',
+  'ai.chat.managerDeleteTitle': 'Delete this chat?',
+  'ai.chat.managerDeleteMessage': '"{title}" and its messages will be removed from every panel. This cannot be undone.',
   'ai.chat.justNow': 'Just now',
   'ai.chat.minutesAgo': '{n}m ago',
   'ai.chat.hoursAgo': '{n}h ago',
@@ -660,6 +680,10 @@ export const enAiMessages: Messages = {
   'ai.chatShortcuts.title': 'Chat Shortcuts',
   'ai.chatShortcuts.selectionAction': 'Show Add to Conversation when selecting terminal text',
   'ai.chatShortcuts.selectionAction.description': 'Show a small AI button next to selected terminal text.',
+  'ai.chatHistory.title': 'Chat History',
+  'ai.chatHistory.messageCap': 'Messages kept per chat',
+  'ai.chatHistory.messageCap.description': 'Maximum number of messages stored per chat (50–2000). Lowering it drops the oldest messages from storage on the next write. Larger values increase storage and cloud-sync size.',
+  'ai.chatHistory.messageCap.unit': 'messages',
 
   // AI Error
   'ai.codex.bridgeError': 'Codex main-process handlers are not loaded yet. Fully restart Netcatty, or restart the Electron dev process, then try again.',
@@ -715,6 +739,8 @@ export const enAiMessages: Messages = {
 
   // Unified tooltips for terminal workspace and top tabs (issue #954)
   'terminal.layer.addTerminal': 'Add Terminal',
+  'terminal.layer.emptyWorkspace': 'No terminals in this workspace',
+  'terminal.layer.emptyWorkspaceHint': 'Add a local terminal or connect to a host to get started.',
   'terminal.layer.switchToSplitView': 'Switch to Split View',
   'terminal.layer.sftp': 'SFTP',
   'terminal.layer.scripts': 'Scripts',

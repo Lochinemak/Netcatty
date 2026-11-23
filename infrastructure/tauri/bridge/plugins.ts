@@ -127,6 +127,9 @@ export function createPluginsBridge(deps: PluginsBridgeDeps): Partial<Bridge> {
     revokePluginPermissions: (pluginId: string) => call('revoke-permissions', { pluginId }),
     installPluginPackage: (archivePath: string, options?: { enable?: boolean }) =>
       call('install', { archivePath, enable: options?.enable === true }),
+    prepareGitHubPlugin: (repository: string) => call('github-prepare', { repository }),
+    installGitHubPlugin: (token: string) => call('github-install', { token }),
+    discardGitHubPlugin: (token?: string) => call('github-discard', { token }),
     setPluginEnabled: (pluginId: string, enabled: boolean) => call('set-enabled', { pluginId, enabled: enabled === true }),
     restartPlugin: (pluginId: string) => call('restart', { pluginId }),
     uninstallPlugin: (pluginId: string) => call('uninstall', { pluginId }),

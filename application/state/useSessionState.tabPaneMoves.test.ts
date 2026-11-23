@@ -145,15 +145,18 @@ test('a workspace pane can be moved into another tab', async (t) => {
   // The new workspace takes over the standalone tab's slot.
   assert.deepEqual(ref.state.orderedTabs, [created.id, workspaceId]);
 
-  // Moving the last-but-one pane dissolves the source workspace.
+  // Moving the last-but-one pane keeps the source workspace with one member:
+  // workspaces survive member loss (#4098 phase 2).
   await act(async () => { moved = ref.state.moveSessionToTab(bId, created.id); });
 
   assert.equal(moved, true);
-  assert.deepEqual(ref.state.workspaces.map((ws) => ws.id), [created.id]);
-  assert.deepEqual(collectSessionIds(ref.state.workspaces[0].root), [soloId, cId, bId]);
-  assert.equal(ref.state.sessions.find((s) => s.id === aId)?.workspaceId, undefined);
-  // The dissolved workspace's slot goes to its one remaining pane.
-  assert.deepEqual(ref.state.orderedTabs, [created.id, aId]);
+  assert.deepEqual(ref.state.workspaces.map((ws) => ws.id), [workspaceId, created.id]);
+  const target = ref.state.workspaces.find((ws) => ws.id === created.id)!;
+  assert.deepEqual(collectSessionIds(target.root), [soloId, cId, bId]);
+  const remaining = ref.state.workspaces.find((ws) => ws.id === workspaceId)!;
+  assert.deepEqual(collectSessionIds(remaining.root), [aId]);
+  assert.equal(ref.state.sessions.find((s) => s.id === aId)?.workspaceId, workspaceId);
+  assert.deepEqual(ref.state.orderedTabs, [created.id, workspaceId]);
   assert.equal(ref.state.sessions.length, 4, 'no session is lost or duplicated');
 
   // A pane cannot be dropped onto its own tab.

@@ -42,7 +42,7 @@ export interface ProviderAdvancedParams {
   frequencyPenalty?: number;  // -2–2
   presencePenalty?: number;   // -2–2
   /** Provider-level default thinking depth; omitted = API default (not sent). */
-  reasoningEffort?: string;   // 'low' | 'medium' | 'high'
+  reasoningEffort?: string;   // 'low' | 'medium' | 'high' | 'xhigh' | 'max'
 }
 
 export interface ProviderConfig {
@@ -171,6 +171,8 @@ export interface ChatMessage {
   timestamp: number;
   model?: string;
   providerId?: AIProviderId;
+  /** Catty stopped at its tool-loop cap; rendered as a non-error notice. */
+  iterationLimit?: number;
   errorInfo?: {
     type: 'network' | 'auth' | 'timeout' | 'provider' | 'agent' | 'unknown';
     message: string;

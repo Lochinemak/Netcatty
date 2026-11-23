@@ -46,6 +46,11 @@ pub const SESSION_LABEL_PREFIX: &str = "session-";
 
 /// Electron: `QUIT_GUARD_TIMEOUT_MS` and the 5 s window-close dirty query.
 const DIRTY_QUERY_TIMEOUT: Duration = Duration::from_secs(5);
+/// Ask a window to commit its ConnectionLog replay before it closes
+/// (Electron: `sessionLogShutdown.cjs`).
+const FINALIZE_SESSION_LOGS: &str = "app:finalize-session-logs";
+const SESSION_LOGS_FINALIZED: &str = "app:session-logs-finalized";
+const FINALIZE_SESSION_LOGS_TIMEOUT: Duration = Duration::from_secs(5);
 /// Electron: `TERMINAL_SNAPSHOT_TIMEOUT_MS`.
 const SNAPSHOT_TIMEOUT: Duration = Duration::from_secs(2);
 /// Electron: `ATTACH_CLOSE_PREPARE_TIMEOUT_MS`.
@@ -411,6 +416,61 @@ async fn query_dirty<R: Runtime>(app: &AppHandle<R>, label: &str) -> super::upda
     }
 }
 
+/// Windows whose terminals own ConnectionLog replays: the main window and
+/// session windows (Electron: `getAppContentWindows`). Popups attach to
+/// sessions another window owns.
+pub fn app_content_windows<R: Runtime>(app: &AppHandle<R>) -> Vec<String> {
+    let mut labels: Vec<String> = app
+        .webview_windows()
+        .keys()
+        .filter(|l| l.as_str() == MAIN_LABEL || is_session_window(l))
+        .cloned()
+        .collect();
+    labels.sort();
+    labels
+}
+
+/// Keep `label` open until its renderer has committed the ConnectionLog
+/// replays of its terminals (`onFinalizeSessionLogs`), at most
+/// [`FINALIZE_SESSION_LOGS_TIMEOUT`]. A missing, failed or silent renderer
+/// does not hold the close (Electron: `finalizeSessionLogs`).
+pub async fn finalize_session_logs<R: Runtime>(app: &AppHandle<R>, label: &str) -> bool {
+    let outcome = state(app)
+        .replies
+        .request(
+            app,
+            label,
+            FINALIZE_SESSION_LOGS,
+            SESSION_LOGS_FINALIZED,
+            serde_json::Map::new(),
+            FINALIZE_SESSION_LOGS_TIMEOUT,
+        )
+        .await;
+    let finalized =
+        matches!(&outcome, Ok(reply) if reply.get("success") == Some(&Value::Bool(true)));
+    if !finalized {
+        tracing::warn!(label, outcome = ?outcome.err(), "renderer did not finalize session logs before close");
+    }
+    finalized
+}
+
+/// Before an explicit quit: every app window commits its ConnectionLog
+/// replays, then the Rust session log streams are stopped and flushed.
+async fn finalize_all_session_logs<R: Runtime>(app: &AppHandle<R>) {
+    let labels = app_content_windows(app);
+    futures::future::join_all(labels.iter().map(|label| finalize_session_logs(app, label))).await;
+    let handle = app.clone();
+    let stopped = tauri::async_runtime::spawn_blocking(move || {
+        if let Some(logs) = handle.try_state::<super::sessionlog::SessionLogState>() {
+            logs.stop_all();
+        }
+    })
+    .await;
+    if let Err(err) = stopped {
+        tracing::warn!(%err, "stopping session log streams failed; continuing quit");
+    }
+}
+
 /// Main / session window close: run the Save / Discard / Cancel flow of the
 /// editor tabs it owns, then the unsaved-editor query; close only when both
 /// pass (Electron: `queryDirtyEditorsBeforeClose`). Returns `true` when the
@@ -437,6 +497,9 @@ fn guard_app_window_close<R: Runtime>(window: &tauri::Window<R>) -> bool {
         let tabs_closed = result.get("success") == Some(&Value::Bool(true))
             && result.get("cancelled") != Some(&Value::Bool(true));
         let clean = tabs_closed && !query_dirty(&app, &label).await.blocks();
+        if clean {
+            finalize_session_logs(&app, &label).await;
+        }
         state(&app).close_pending.lock().remove(&label);
         if clean {
             state(&app).close_confirmed.lock().insert(label.clone());
@@ -520,9 +583,12 @@ fn on_destroyed<R: Runtime>(app: &AppHandle<R>, label: &str) {
 /// guard (Electron: `before-quit` → `handleBeforeQuit`).
 ///
 /// Every explicit quit (`app.exit`: menu, tray, `quitApp`) is held while the
-/// main / session / editor windows are asked about unsaved work. The update
-/// restart (`RESTART_EXIT_CODE`) already ran its own check, and the implicit
-/// exit after the last window closed (`code: None`) has nothing left to ask.
+/// main / session / editor windows are asked about unsaved work, and then
+/// while the app windows commit their session logs (`onFinalizeSessionLogs`)
+/// and the log streams are stopped. The update restart (`RESTART_EXIT_CODE`)
+/// already ran its own check, and the implicit exit after the last window
+/// closed (`code: None`) has nothing left to ask; both still stop the log
+/// streams at `RunEvent::Exit` (`sessionlog::on_run_event`).
 pub fn on_run_event<R: Runtime>(app: &AppHandle<R>, event: &RunEvent) {
     let RunEvent::ExitRequested {
         code: Some(code),
@@ -545,11 +611,6 @@ pub fn on_run_event<R: Runtime>(app: &AppHandle<R>, event: &RunEvent) {
         return;
     }
     let labels = dirty_editor_windows(app);
-    if labels.is_empty() {
-        st.quit_confirmed.store(true, Ordering::SeqCst);
-        st.quitting.store(true, Ordering::SeqCst);
-        return;
-    }
     api.prevent_exit();
     st.quit_busy.store(true, Ordering::SeqCst);
     let app = app.clone();
@@ -559,18 +620,20 @@ pub fn on_run_event<R: Runtime>(app: &AppHandle<R>, event: &RunEvent) {
             async move { (label.clone(), query_dirty(&app, label).await) }
         });
         let results = futures::future::join_all(checks).await;
-        let st = state(&app);
-        st.quit_busy.store(false, Ordering::SeqCst);
         let dirty: Vec<&(String, super::update::DirtyOutcome)> = results
             .iter()
             .filter(|(_, outcome)| outcome.blocks())
             .collect();
         if dirty.is_empty() {
+            finalize_all_session_logs(&app).await;
+            let st = state(&app);
+            st.quit_busy.store(false, Ordering::SeqCst);
             st.quit_confirmed.store(true, Ordering::SeqCst);
             st.quitting.store(true, Ordering::SeqCst);
             app.exit(code);
             return;
         }
+        state(&app).quit_busy.store(false, Ordering::SeqCst);
         // The renderer shows the warning in its own window: bring every
         // dirty owner forward (it may be hidden to the tray).
         for (label, _) in &dirty {

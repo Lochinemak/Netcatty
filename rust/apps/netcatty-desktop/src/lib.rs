@@ -131,6 +131,7 @@ pub fn run() {
         .run(|app, event| {
             // Unsaved-editor quit guard first; it may hold the exit.
             commands::windows::on_run_event(app, &event);
+            commands::sessionlog::on_run_event(app, &event);
             commands::tray::on_run_event(app, event);
         });
 }

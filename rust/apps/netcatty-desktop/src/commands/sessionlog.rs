@@ -46,6 +46,19 @@ struct PendingChoice {
     window: Option<String>,
 }
 
+/// App run-loop events (wired in `lib.rs::run`): whatever way the app ends,
+/// stop the log streams so buffered output reaches the files. An explicit
+/// quit already did this after the renderers finalized their logs
+/// (`windows::on_run_event`); stopping again is a no-op.
+pub fn on_run_event<R: tauri::Runtime>(app: &tauri::AppHandle<R>, event: &tauri::RunEvent) {
+    use tauri::Manager;
+    if matches!(event, tauri::RunEvent::Exit) {
+        if let Some(logs) = app.try_state::<SessionLogState>() {
+            logs.stop_all();
+        }
+    }
+}
+
 /// Managed state of the session log commands.
 #[derive(Default)]
 pub struct SessionLogState {
@@ -59,6 +72,15 @@ pub struct SessionLogState {
 }
 
 impl SessionLogState {
+    /// Stop every manual and automatic log stream, flushing what is buffered
+    /// (Electron: `sessionLogStreamManager.cleanupAll()` on quit).
+    pub fn stop_all(&self) {
+        self.manual.cleanup_all();
+        self.auto.cleanup_all();
+        self.manual_tokens.lock().clear();
+        self.auto_tokens.lock().clear();
+    }
+
     /// Store a chosen manual log path and return its one-time selection
     /// token. Only the latest choice per session can be redeemed. Public so
     /// headless tests can stand in for the save dialog.

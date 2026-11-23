@@ -50,7 +50,9 @@ import { decryptField, encryptField } from '../infrastructure/persistence/secure
 import { sanitizeQuickMessages } from '../infrastructure/ai/quickMessages';
 import { emitAIStateChanged } from './state/aiStateEvents';
 import {
+  isAiSessionsHydrationComplete,
   latestAISessionsSnapshot,
+  getPersistedAiSessionsSnapshot,
   setLatestAISessionsSnapshot,
   writeSessionsForStorage,
   cleanupSdkAgentSessions,
@@ -1064,6 +1066,12 @@ function pruneOrphanPerAgentBindings(): void {
 export function collectAiSessionsForSync(): SyncPayload['aiSessions'] {
   const enabled = localStorageAdapter.read<{ enabled?: boolean }>(STORAGE_KEY_CLOUD_SYNC_AI_SESSIONS);
   if (enabled?.enabled !== true) return undefined;
+  // Issue #4125 review P1①: never collect before the boot hydration has
+  // settled. A pre-hydration collect falls back to the stale legacy
+  // localStorage store and the writeSessionsForStorage() call below would
+  // overwrite newer IndexedDB records with pre-migration data. Skip this
+  // sync round; the next auto-sync picks up the hydrated store.
+  if (!isAiSessionsHydrationComplete()) return undefined;
   const sessions = collectLocalAiSessions();
   if (!writeSessionsForStorage(sessions)) {
     throw new Error('Unable to persist chat history for cloud sync');
@@ -1073,8 +1081,7 @@ export function collectAiSessionsForSync(): SyncPayload['aiSessions'] {
 
 function collectLocalAiSessions(): NonNullable<SyncPayload['aiSessions']> {
   return latestAISessionsSnapshot
-    ?? localStorageAdapter.read<SyncPayload['aiSessions']>(STORAGE_KEY_AI_SESSIONS)
-    ?? [];
+    ?? getPersistedAiSessionsSnapshot();
 }
 
 /** Build the portable payload; device-local data is added by the backup builder. */

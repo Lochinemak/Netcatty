@@ -10,6 +10,11 @@ import type { FileOpenerType, SystemAppInfo } from "../../../lib/sftpFileUtils";
 import { formatFileSize, formatDate } from '../../../application/state/sftp/utils';
 import { isSessionError } from "../../../application/state/sftp/errors";
 import { filterHiddenFiles } from "../utils";
+import { netcattyBridge } from "../../../infrastructure/services/netcattyBridge";
+
+// A backend without remote archive creation gets no "Create archive" entry
+// rather than one that always fails.
+const supportsSftpArchiveCreation = () => typeof netcattyBridge.get()?.createSftpArchive === "function";
 
 interface UseSftpViewPaneCallbacksParams {
   sftpRef: MutableRefObject<SftpStateApi>;
@@ -151,6 +156,7 @@ export const useSftpViewPaneCallbacks = ({
       onRenameFileAtPath: paneActions.onRenameFileAtPathLeft,
       onMoveEntriesToPath: paneActions.onMoveEntriesToPathLeft,
       onCopyToOtherPane: paneActions.onCopyToOtherPaneLeft,
+      onDuplicateEntries: paneActions.onDuplicateEntriesLeft,
       onReceiveFromOtherPane: paneActions.onReceiveFromOtherPaneLeft,
       onEditPermissions: fileOps.onEditPermissionsLeft,
       onEditFile: fileOps.onEditFileLeft,
@@ -160,6 +166,7 @@ export const useSftpViewPaneCallbacks = ({
       onDownloadFile: fileOps.onDownloadFileLeft,
       onDownloadFiles: fileOps.onDownloadFilesLeft,
       onExtractArchive: fileOps.onExtractArchiveLeft,
+      onCreateArchive: supportsSftpArchiveCreation() ? fileOps.onCreateArchiveLeft : undefined,
       onUploadExternalFiles: fileOps.onUploadExternalFilesLeft,
       onUploadExternalFileList: fileOps.onUploadExternalFileListLeft,
       onUploadExternalFolder: fileOps.onUploadExternalFolderLeft,
@@ -194,6 +201,7 @@ export const useSftpViewPaneCallbacks = ({
       onRenameFileAtPath: paneActions.onRenameFileAtPathRight,
       onMoveEntriesToPath: paneActions.onMoveEntriesToPathRight,
       onCopyToOtherPane: paneActions.onCopyToOtherPaneRight,
+      onDuplicateEntries: paneActions.onDuplicateEntriesRight,
       onReceiveFromOtherPane: paneActions.onReceiveFromOtherPaneRight,
       onEditPermissions: fileOps.onEditPermissionsRight,
       onEditFile: fileOps.onEditFileRight,
@@ -203,6 +211,7 @@ export const useSftpViewPaneCallbacks = ({
       onDownloadFile: fileOps.onDownloadFileRight,
       onDownloadFiles: fileOps.onDownloadFilesRight,
       onExtractArchive: fileOps.onExtractArchiveRight,
+      onCreateArchive: supportsSftpArchiveCreation() ? fileOps.onCreateArchiveRight : undefined,
       onUploadExternalFiles: fileOps.onUploadExternalFilesRight,
       onUploadExternalFileList: fileOps.onUploadExternalFileListRight,
       onUploadExternalFolder: fileOps.onUploadExternalFolderRight,

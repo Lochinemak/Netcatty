@@ -40,6 +40,19 @@ While the host is unavailable, `terminal-providers`, `terminal-session-event`,
   `host-available-sync` (cached by `pluginHostReady()`), `list`, `install`
   (`{ archivePath, enable }`), `set-enabled`, `restart`, `uninstall`,
   `source-binding`, `reset-source`.
+* Install from GitHub (`docs/plugin-platform/github-install.md`;
+  `netcatty_plugins::github`): `github-prepare` (`{ repository }` →
+  `{ token, source, manifest, archiveSha256, assetName, size }`),
+  `github-install` (`{ token }` → the installed plugin, disabled),
+  `github-discard` (`{ token? }`). The renderer supplies only the repository
+  text and the token. Prepare reads the GitHub API and downloads the single
+  `.ncpkg` of the latest stable release from GitHub hosts only, then runs the
+  package validator, runtime admission, compatibility and source-binding
+  checks; the package waits in Netcatty's temp directory for ten minutes, one
+  per window, and is discarded when the window closes. Install fails if the
+  snapshot's SHA-256 or manifest differs from the reviewed one. The source is
+  `{ id: "github:<sha256(origin)>", kind: "github", name, origin, tag,
+  commit, assetId }`; the id depends on the repository only.
 * Logs: `log-status`, `log-configure`, `log-open` (opens the folder),
   `log-export` (save dialog), `log-clear` (confirmation dialog).
 * Permissions: `permissions`, `set-permission-mode` (optimistic

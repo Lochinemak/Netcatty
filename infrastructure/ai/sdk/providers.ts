@@ -1,12 +1,15 @@
 import { createOpenAI } from '@ai-sdk/openai';
 import { createAnthropic } from '@ai-sdk/anthropic';
 import { createGoogle } from '@ai-sdk/google';
+import { wrapLanguageModel, type LanguageModelMiddleware } from 'ai';
 import type { ProviderConfig, ProviderStyle } from '../types';
 import { resolveOpenAIApi, resolveProviderStyle } from '../types';
 import { normalizeAnthropicSdkBaseURL } from '../anthropicCompatBaseUrl';
+import { isCustomAnthropicBaseURL } from '../modelDiscoveryHeaders';
 import { buildSdkRequestHeaders } from '../providerRequestHeaders';
 import { normalizeOllamaSdkBaseURL } from '../ollamaCompatBaseUrl';
 import { normalizeOpenAIChatCacheUsage } from '../openAIChatCacheUsage';
+import { toWellFormedValue } from '../textBoundaries';
 
 export { normalizeOllamaSdkBaseURL };
 import {
@@ -721,7 +724,31 @@ export function resolveProviderEndpoint(
   return { baseURL, apiKey };
 }
 
+/**
+ * Last line of defence before serialization: a lone UTF-16 surrogate left by
+ * any upstream cut becomes `\udXXX` in the JSON body, which strict providers
+ * reject as an unparseable request. Replace it so one bad character cannot
+ * wedge every later turn of the conversation.
+ */
+const wellFormedPromptMiddleware: LanguageModelMiddleware = {
+  specificationVersion: 'v4',
+  transformParams: async ({ params }) => {
+    const prompt = toWellFormedValue(params.prompt);
+    return prompt === params.prompt ? params : { ...params, prompt };
+  },
+};
+
 export function createModelFromConfig(
+  config: ProviderConfig,
+  requestContext?: ProviderRequestContext,
+) {
+  return wrapLanguageModel({
+    model: createProviderModel(config, requestContext),
+    middleware: wellFormedPromptMiddleware,
+  });
+}
+
+function createProviderModel(
   config: ProviderConfig,
   requestContext?: ProviderRequestContext,
 ) {
@@ -748,13 +775,25 @@ export function createModelFromConfig(
         : openai.chat(modelId);
     }
 
-    case 'anthropic':
+    case 'anthropic': {
+      // Official api.anthropic.com keeps x-api-key only. Custom Anthropic-compat
+      // gateways (e.g. Volcengine Ark Agent Plan, Claude Code proxies) may require
+      // Authorization: Bearer (ANTHROPIC_AUTH_TOKEN) or x-api-key, so send both.
+      // @ai-sdk/anthropic rejects passing apiKey and authToken together, so pass
+      // authToken for Bearer and retain x-api-key in headers unless overridden.
+      const useCustomBearer = Boolean(apiKey && isCustomAnthropicBaseURL(baseURL));
+      const hasCustomXApiKey = Object.keys(sdkHeaders).some(
+        (key) => key.toLowerCase() === 'x-api-key',
+      );
       return createAnthropic({
-        apiKey,
+        ...(useCustomBearer ? { authToken: apiKey } : { apiKey }),
         baseURL,
         fetch: customFetch,
-        headers: sdkHeaders,
+        headers: useCustomBearer && !hasCustomXApiKey
+          ? { 'x-api-key': apiKey!, ...sdkHeaders }
+          : sdkHeaders,
       })(modelId);
+    }
 
     case 'google':
       return createGoogle({

@@ -368,21 +368,12 @@ export function handleEscapeKeyDownImpl(getCtx: AppContextGetter, e: KeyboardEve
   const {
     isQuickSwitcherOpen,
     setIsQuickSwitcherOpen,
-    sftpPaneMagnificationRef,
-    terminalPaneMagnificationRef,
   } = getCtx();
 {
     if (e.key !== 'Escape' || e.defaultPrevented) return;
     if (isQuickSwitcherOpen) {
       setIsQuickSwitcherOpen(false);
       return;
-    }
-    if (getAvailablePaneMagnificationController([
-      sftpPaneMagnificationRef?.current,
-      terminalPaneMagnificationRef?.current,
-    ])?.restore()) {
-      e.preventDefault();
-      e.stopPropagation();
     }
   }
 }
@@ -1234,6 +1225,23 @@ export function handleConnectToHostImpl(getCtx: AppContextGetter, host: Host, hi
   }
 }
 
+export function startRestoredSessionConnectionLogImpl(getCtx: AppContextGetter, session: TerminalSession) {
+  const { addConnectionLog, systemInfoRef } = getCtx();
+  const { username, hostname } = systemInfoRef.current;
+  addConnectionLog({
+    sessionId: session.id,
+    hostId: session.hostId,
+    hostLabel: session.hostLabel,
+    hostname: session.hostname,
+    username: session.username,
+    protocol: session.protocol || 'ssh',
+    startTime: Date.now(),
+    localUsername: username,
+    localHostname: hostname,
+    saved: false,
+  });
+}
+
 export async function handleTerminalDataCaptureImpl(getCtx: AppContextGetter, sessionId: string, data: string) {
   const { IS_DEV, connectionLogs, selectConnectionLogForTerminalDataCapture, sessions, updateConnectionLog } = getCtx();
 {
@@ -1284,16 +1292,14 @@ export function hasMultipleProtocolsImpl(getCtx: AppContextGetter, host: Host) {
 }
 
 export function handleHostConnectWithProtocolCheckImpl(getCtx: AppContextGetter, host: Host) {
-  const { handleConnectToHost, hasMultipleProtocols, resolveEffectiveHost, setIsQuickSwitcherOpen, setProtocolSelectHost, setQuickSearch } = getCtx();
+  const { handleConnectToHost, hasMultipleProtocols, resolveEffectiveHost, setIsQuickSwitcherOpen, setProtocolSelectHost } = getCtx();
 {
     if (hasMultipleProtocols(host)) {
       setProtocolSelectHost(resolveEffectiveHost(host));
       setIsQuickSwitcherOpen(false);
-      setQuickSearch('');
     } else {
       handleConnectToHost(host);
       setIsQuickSwitcherOpen(false);
-      setQuickSearch('');
     }
   }
 }

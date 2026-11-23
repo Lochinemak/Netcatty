@@ -135,6 +135,7 @@ declare global {
     // Cross-window settings sync
     notifySettingsChanged?(payload: { key: string; value: unknown }): void;
     onSettingsChanged?(cb: (payload: { key: string; value: unknown }) => void): () => void;
+    onSystemThemeChanged?(cb: (payload: { isDark: boolean }) => void): () => void;
     getAppLockRuntimeState?(): Promise<AppLockRuntimeState>;
     getAppLockSettings?(): Promise<AppLockSettings>;
     setAppLockTimeoutMinutes?(timeoutMinutes: number): Promise<AppLockSettings>;
@@ -301,6 +302,7 @@ declare global {
     // Quit guard: subscribe to main-process quit requests that query for dirty editors.
     // Each response must echo the request ID, including pending-transfer acknowledgements.
     onCheckDirtyEditors?(listener: (request: { requestId: string; deadline: number }) => void): () => void;
+    onFinalizeSessionLogs?(listener: () => Promise<void>): () => void;
     // Report the dirty-check result back to the main process.
     reportDirtyEditorsResult?(hasDirty: boolean, reason?: "editors" | "transfers", options?: { requestId?: string; pending?: boolean }): void;
 

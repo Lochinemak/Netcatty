@@ -1,6 +1,8 @@
 import type { Messages } from '../types';
 
 export const esAiMessages: Messages = {
+  'ai.chat.iterationLimitReached': 'Se alcanzó el límite del bucle de herramientas ({limit} iteraciones). Puedes continuar en este chat. Las tareas de terminal en ejecución no se detienen.',
+  'ai.chat.continue': 'Continuar',
   'ai.chat.attachmentContentUnavailable': 'Contenido no disponible en este dispositivo',
   // AI Settings
   'ai.agentSettings': 'Configuración del agente',
@@ -90,6 +92,7 @@ export const esAiMessages: Messages = {
   'ai.providers.advancedParams.hint': 'Déjalo en blanco para usar los valores predeterminados del proveedor.',
   'ai.providers.advancedParams.maxTokens.placeholder': 'p. ej. 4096',
   'ai.providers.advancedParams.default': 'Predeterminado del proveedor',
+  'ai.providers.advancedParams.reasoningEffort.help': 'xhigh y max solo se envían cuando el modelo elegido los admite; de lo contrario se ajustan al nivel más profundo compatible.',
   'ai.providers.headers': 'Cabeceras HTTP personalizadas',
   'ai.providers.headers.help': 'Cabeceras opcionales para este proveedor. Los valores se ocultan y se cifran al guardarlos.',
   'ai.providers.headers.name': 'Nombre de la cabecera',
@@ -332,6 +335,7 @@ export const esAiMessages: Messages = {
   'ai.defaultAgent': 'Agente predeterminado',
   'ai.defaultAgent.description': 'Agente que se usará al iniciar una nueva sesión de IA',
   'ai.defaultAgent.catty': 'Catty (Integrado)',
+  'ai.defaultAgent.unavailable': 'No disponible',
   'ai.toolAccess.title': 'Acceso a herramientas',
   'ai.toolAccess.mode': 'Modo de acceso de Netcatty',
   'ai.toolAccess.description': 'Elige cómo acceden los agentes externos a las sesiones de Netcatty. MCP expone el servidor integrado, mientras que Habilidades + CLI apunta a los agentes hacia las habilidades locales de Netcatty y los comandos de CLI.',
@@ -611,6 +615,22 @@ export const esAiMessages: Messages = {
   'ai.chat.rebindUsage': 'Uso: /rebind <número de /chats>',
   'ai.chat.rebindDone': 'Chat «{title}» reasociado a este panel.',
   'ai.chat.rebindUnavailable': 'No hay destino de reasociación en el ámbito de este panel.',
+  'ai.chat.managerScopeTab': 'Este ámbito',
+  'ai.chat.managerAllChatsTab': 'Todos los chats',
+  'ai.chat.managerSearchPlaceholder': 'Buscar títulos de chats…',
+  'ai.chat.managerFilterAllAgents': 'Todos los agentes',
+  'ai.chat.managerOpen': 'Abrir en este panel',
+  'ai.chat.managerOpenDisabled': 'Vinculado a otro espacio de trabajo o terminal: usa reasociar para moverlo',
+  'ai.chat.managerRebind': 'Reasociar',
+  'ai.chat.managerRebindPick': 'Reasociar a…',
+  'ai.chat.managerRebindHere': 'Este panel',
+  'ai.chat.managerRebindDone': 'El chat «{title}» fue reasociado a {target}.',
+  'ai.chat.managerExportOne': 'Exportar este chat',
+  'ai.chat.managerBadgeActive': 'Activo',
+  'ai.chat.managerBadgeIdle': 'Inactivo',
+  'ai.chat.managerMessagesCount': '{n} mensajes',
+  'ai.chat.managerDeleteTitle': '¿Eliminar este chat?',
+  'ai.chat.managerDeleteMessage': '«{title}» y sus mensajes se eliminarán de todos los paneles. Esta acción no se puede deshacer.',
   'ai.chat.justNow': 'Ahora mismo',
   'ai.chat.minutesAgo': 'hace {n} min',
   'ai.chat.hoursAgo': 'hace {n} h',
@@ -660,6 +680,10 @@ export const esAiMessages: Messages = {
   'ai.chatShortcuts.title': 'Atajos de chat',
   'ai.chatShortcuts.selectionAction': 'Mostrar "Agregar a la conversación" al seleccionar texto de la terminal',
   'ai.chatShortcuts.selectionAction.description': 'Muestra un pequeño botón de IA junto al texto seleccionado de la terminal.',
+  'ai.chatHistory.title': 'Historial de chat',
+  'ai.chatHistory.messageCap': 'Mensajes conservados por chat',
+  'ai.chatHistory.messageCap.description': 'Número máximo de mensajes almacenados por chat (50–2000). Al reducirlo, los mensajes más antiguos se descartan del almacenamiento en la siguiente escritura. Los valores más altos aumentan el almacenamiento y el tamaño de la sincronización en la nube.',
+  'ai.chatHistory.messageCap.unit': 'mensajes',
 
   // AI Error
   'ai.codex.bridgeError': 'Los controladores del proceso principal de Codex aún no están cargados. Reinicia Netcatty por completo o reinicia el proceso de desarrollo de Electron y vuelve a intentarlo.',
@@ -715,6 +739,8 @@ export const esAiMessages: Messages = {
 
   // Unified tooltips for terminal workspace and top tabs (issue #954)
   'terminal.layer.addTerminal': 'Agregar terminal',
+  'terminal.layer.emptyWorkspace': 'No hay terminales en este espacio de trabajo',
+  'terminal.layer.emptyWorkspaceHint': 'Agrega un terminal local o conecta un host para comenzar.',
   'terminal.layer.switchToSplitView': 'Cambiar a vista dividida',
   'terminal.layer.sftp': 'SFTP',
   'terminal.layer.scripts': 'Scripts',

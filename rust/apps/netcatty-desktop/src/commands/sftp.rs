@@ -6,15 +6,16 @@ use crate::connect;
 use crate::events;
 use crate::state::{AppState, Ctx};
 use netcatty_core::ipc::{
-    events as ev, EndpointType, OpenSftpResult, SftpConnectionProgress, SshSessionOptions,
-    StreamTransferOptions, StreamTransferResult, TransferEvent, TransferEventType,
+    events as ev, EndpointType, OpenSftpResult, SftpArchiveCreateOptions, SftpArchiveCreateResult,
+    SftpConnectionProgress, SshSessionOptions, StreamTransferOptions, StreamTransferResult,
+    TransferEvent, TransferEventType,
 };
 use netcatty_core::models::{
     FileEntryType, RemoteFile, SftpFilenameEncoding, StatResult, TransferDirection, TransferPhase,
 };
 use netcatty_core::CoreError;
 use netcatty_sftp::transfer::{start_transfer, TransferEndpoints, TransferOutcome};
-use netcatty_sftp::{SftpClient, TransferProgress, TransferRequest};
+use netcatty_sftp::{ArchiveCreateOutcome, SftpClient, TransferProgress, TransferRequest};
 use netcatty_ssh::SshConnection;
 use serde::Serialize;
 use std::sync::Arc;
@@ -363,6 +364,35 @@ pub async fn sftp_extract<R: tauri::Runtime>(
     Ok(match client.extract_archive(&path, encoding).await {
         Ok(()) => SuccessResult::ok(),
         Err(err) => SuccessResult::fail(err.to_string()),
+    })
+}
+
+/// Archive files of one remote directory into a `.tar.gz` / `.zip` next to
+/// them (remote `tar` / `zip` over SSH exec). A taken name answers
+/// `{ success: false, code: "EEXIST" }` unless `overwrite` is set.
+#[tauri::command]
+pub async fn sftp_create_archive<R: tauri::Runtime>(
+    state: Ctx<'_, R>,
+    sftp_id: String,
+    options: SftpArchiveCreateOptions,
+    encoding: Option<SftpFilenameEncoding>,
+) -> CmdResult<SftpArchiveCreateResult> {
+    let client = state.sftp_client(&sftp_id)?;
+    Ok(match client.create_archive(&options, encoding).await {
+        Ok(ArchiveCreateOutcome::Created) => SftpArchiveCreateResult {
+            success: true,
+            ..Default::default()
+        },
+        Ok(ArchiveCreateOutcome::AlreadyExists) => SftpArchiveCreateResult {
+            success: false,
+            error: Some("An archive with this name already exists".into()),
+            code: Some("EEXIST".into()),
+        },
+        Err(err) => SftpArchiveCreateResult {
+            success: false,
+            error: Some(err.to_string()),
+            code: None,
+        },
     })
 }
 

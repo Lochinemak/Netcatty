@@ -444,6 +444,104 @@ async fn sftp_browse_and_edit() {
     conn.disconnect().await.unwrap();
 }
 
+/// `createSftpArchive`: remote tar/zip of a selection, a taken name reported
+/// as `AlreadyExists` without touching the file, and `overwrite` replacing it.
+#[tokio::test]
+async fn sftp_create_archive_tar_and_zip() {
+    use netcatty_core::ipc::{SftpArchiveCreateOptions, SftpArchiveFormat};
+    use netcatty_sftp::ArchiveCreateOutcome;
+
+    let t = require_target!();
+    let conn = connect_password(&t).await;
+    let sftp = SftpClient::open(conn.clone(), SftpFilenameEncoding::Auto)
+        .await
+        .expect("sftp open");
+    let home = sftp.home_dir.clone().expect("home dir");
+    let dir = format!("{home}/netcatty-e2e-archive-{}", std::process::id());
+    sftp.mkdir(&dir, None).await.unwrap();
+    sftp.mkdir(&format!("{dir}/logs"), None).await.unwrap();
+    sftp.write(&format!("{dir}/logs/app.log"), b"log\n", None)
+        .await
+        .unwrap();
+    sftp.write(&format!("{dir}/中文 name.txt"), b"hi\n", None)
+        .await
+        .unwrap();
+
+    let tar = SftpArchiveCreateOptions {
+        directory: dir.clone(),
+        paths: vec!["logs".into(), "logs/app.log".into(), "中文 name.txt".into()],
+        archive_name: "out.tar.gz".into(),
+        format: SftpArchiveFormat::TarGz,
+        overwrite: None,
+    };
+    assert_eq!(
+        sftp.create_archive(&tar, None).await.unwrap(),
+        ArchiveCreateOutcome::Created
+    );
+    let listing = conn
+        .exec(&format!("tar -tzf '{dir}/out.tar.gz'"), None)
+        .await
+        .unwrap()
+        .stdout_lossy();
+    assert!(listing.contains("./logs/app.log"), "{listing}");
+    assert!(listing.contains("./中文 name.txt"), "{listing}");
+
+    let size = sftp
+        .stat(&format!("{dir}/out.tar.gz"), None)
+        .await
+        .unwrap()
+        .size;
+    assert_eq!(
+        sftp.create_archive(
+            &SftpArchiveCreateOptions {
+                paths: vec!["logs".into()],
+                ..tar.clone()
+            },
+            None
+        )
+        .await
+        .unwrap(),
+        ArchiveCreateOutcome::AlreadyExists
+    );
+    assert_eq!(
+        sftp.stat(&format!("{dir}/out.tar.gz"), None)
+            .await
+            .unwrap()
+            .size,
+        size
+    );
+
+    let zip = SftpArchiveCreateOptions {
+        archive_name: "out.zip".into(),
+        format: SftpArchiveFormat::Zip,
+        overwrite: Some(true),
+        ..tar.clone()
+    };
+    for _ in 0..2 {
+        assert_eq!(
+            sftp.create_archive(&zip, None).await.unwrap(),
+            ArchiveCreateOutcome::Created
+        );
+    }
+    assert!(
+        sftp.stat(&format!("{dir}/out.zip"), None)
+            .await
+            .unwrap()
+            .size
+            > 0
+    );
+    let leftovers = conn
+        .exec(&format!("ls -A '{dir}'"), None)
+        .await
+        .unwrap()
+        .stdout_lossy();
+    assert!(!leftovers.contains(".netcatty-archive."), "{leftovers}");
+
+    conn.exec(&format!("rm -rf '{dir}'"), None).await.unwrap();
+    sftp.close().await.unwrap();
+    conn.disconnect().await.unwrap();
+}
+
 /// What `sftp_read_file` and `sftp_find` rest on: a ranged read returns
 /// exactly the requested bytes across several pipelined chunks, and a
 /// symlink to a directory is listed as a symlink (so a search that does not

@@ -150,7 +150,10 @@ impl SftpClient {
     /// The encoding to use for this call: explicit per-call value, else the
     /// client default. An explicit non-`Auto` value also pins the `Auto`
     /// resolution (as the Electron bridge does).
-    fn effective(&self, requested: Option<SftpFilenameEncoding>) -> SftpFilenameEncoding {
+    pub(crate) fn effective(
+        &self,
+        requested: Option<SftpFilenameEncoding>,
+    ) -> SftpFilenameEncoding {
         let encoding = requested.unwrap_or(self.encoding);
         match encoding {
             SftpFilenameEncoding::Utf8 => self.resolved.store(RESOLVED_UTF8, Ordering::Relaxed),
@@ -163,7 +166,7 @@ impl SftpClient {
     }
 
     /// Concrete encoding used to *encode* outgoing paths.
-    fn concrete(&self, encoding: SftpFilenameEncoding) -> SftpFilenameEncoding {
+    pub(crate) fn concrete(&self, encoding: SftpFilenameEncoding) -> SftpFilenameEncoding {
         match encoding {
             SftpFilenameEncoding::Auto => {
                 if self.resolved.load(Ordering::Relaxed) == RESOLVED_GB18030 {

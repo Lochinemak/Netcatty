@@ -92,19 +92,21 @@ test('a pane dropped on a standalone tab pairs with it in a new workspace', () =
   );
 });
 
-test('moving a pane out of a two-pane workspace leaves its sibling as a plain tab', () => {
+test('moving a pane out of a two-pane workspace keeps the source workspace with its sibling', () => {
   const sessions = [session('a', 'ws-1'), session('b', 'ws-1'), session('d', 'ws-2'), session('e', 'ws-2')];
   const workspaces = [workspace('ws-1', ['a', 'b']), workspace('ws-2', ['d', 'e'])];
 
   const result = moveWorkspaceSessionToTabState({ sessions, workspaces, sessionId: 'a', targetTabId: 'ws-2' });
 
-  assert.equal(result.dissolvedWorkspaceId, 'ws-1');
-  assert.deepEqual(result.workspaces.map((ws) => ws.id), ['ws-2']);
-  assert.equal(result.sessions.find((s) => s.id === 'b')?.workspaceId, undefined);
+  // Workspaces survive member loss (#4098 phase 2): ws-1 stays, with b only.
+  assert.deepEqual(result.workspaces.map((ws) => ws.id), ['ws-1', 'ws-2']);
+  const source = result.workspaces.find((ws) => ws.id === 'ws-1');
+  assert.ok(source);
+  assert.deepEqual(collectSessionIds(source.root), ['b']);
+  assert.equal(result.sessions.find((s) => s.id === 'b')?.workspaceId, 'ws-1');
   assert.equal(result.sessions.find((s) => s.id === 'a')?.workspaceId, 'ws-2');
-  // The dissolved workspace's slot goes to the remaining pane only: the moved
-  // pane lives in the target tab and must not get a tab of its own.
-  assert.deepEqual(applyMovedWorkspaceSessionTabOrder(['ws-1', 'ws-2'], result), ['b', 'ws-2']);
+  // The moved pane lives in the target tab and must not get a tab of its own.
+  assert.deepEqual(applyMovedWorkspaceSessionTabOrder(['ws-1', 'ws-2'], result), ['ws-1', 'ws-2']);
 });
 
 test('a pane cannot be merged into its own tab, a hidden session, or a non-terminal tab', () => {

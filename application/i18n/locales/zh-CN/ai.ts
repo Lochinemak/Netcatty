@@ -1,6 +1,8 @@
 import type { Messages } from '../types';
 
 export const zhCNAiMessages: Messages = {
+  'ai.chat.iterationLimitReached': '已达到工具循环上限（{limit} 次迭代）。你可以在此对话中继续，正在运行的终端任务不会停止。',
+  'ai.chat.continue': '继续',
   'ai.chat.attachmentContentUnavailable': '附件内容未保留在此设备',
   // AI Settings
   'ai.agentSettings': 'Agent 设置',
@@ -99,6 +101,7 @@ export const zhCNAiMessages: Messages = {
   'ai.providers.advancedParams.hint': '留空则使用提供商默认值。',
   'ai.providers.advancedParams.maxTokens.placeholder': '例如 4096',
   'ai.providers.advancedParams.default': '提供商默认',
+  'ai.providers.advancedParams.reasoningEffort.help': '仅当所选模型支持时才会发送 xhigh 和 max，否则自动收敛到该模型支持的最高档位。',
 
   // AI Codex
   'ai.codex': 'Codex',
@@ -332,6 +335,7 @@ export const zhCNAiMessages: Messages = {
   'ai.defaultAgent': '默认 Agent',
   'ai.defaultAgent.description': '创建新 AI 会话时使用的 Agent',
   'ai.defaultAgent.catty': 'Catty（内置）',
+  'ai.defaultAgent.unavailable': '暂不可用',
   'ai.toolAccess.title': '工具接入',
   'ai.toolAccess.mode': 'Netcatty 接入模式',
   'ai.toolAccess.description': '选择外部 Agent 访问 Netcatty 会话的方式。MCP 会暴露内置服务器，Skills + CLI 会引导 Agent 读取本地 Skill 并调用 Netcatty CLI。',
@@ -611,6 +615,22 @@ export const zhCNAiMessages: Messages = {
   'ai.chat.rebindUsage': '用法：/rebind <序号>',
   'ai.chat.rebindDone': '聊天“{title}”已重绑到此面板。',
   'ai.chat.rebindUnavailable': '当前面板范围内没有可用的重绑目标。',
+  'ai.chat.managerScopeTab': '当前范围',
+  'ai.chat.managerAllChatsTab': '全部会话',
+  'ai.chat.managerSearchPlaceholder': '搜索会话标题…',
+  'ai.chat.managerFilterAllAgents': '全部 Agent',
+  'ai.chat.managerOpen': '在本面板打开',
+  'ai.chat.managerOpenDisabled': '绑定在其他工作区或终端——请使用重绑定移动',
+  'ai.chat.managerRebind': '重绑定',
+  'ai.chat.managerRebindPick': '重绑定到…',
+  'ai.chat.managerRebindHere': '本面板',
+  'ai.chat.managerRebindDone': '会话“{title}”已重绑定到{target}。',
+  'ai.chat.managerExportOne': '导出此会话',
+  'ai.chat.managerBadgeActive': '使用中',
+  'ai.chat.managerBadgeIdle': '空闲',
+  'ai.chat.managerMessagesCount': '{n} 条消息',
+  'ai.chat.managerDeleteTitle': '删除此会话？',
+  'ai.chat.managerDeleteMessage': '“{title}”及其消息将从所有面板中移除，且无法撤销。',
   'ai.chat.justNow': '刚刚',
   'ai.chat.minutesAgo': '{n}分钟前',
   'ai.chat.hoursAgo': '{n}小时前',
@@ -660,6 +680,10 @@ export const zhCNAiMessages: Messages = {
   'ai.chatShortcuts.title': '聊天快捷入口',
   'ai.chatShortcuts.selectionAction': '选中终端内容时显示“添加到对话”',
   'ai.chatShortcuts.selectionAction.description': '在终端里选中文本后显示 AI 快捷按钮。',
+  'ai.chatHistory.title': '聊天历史',
+  'ai.chatHistory.messageCap': '每个会话保留的消息数',
+  'ai.chatHistory.messageCap.description': '每个会话最多存储的消息条数（50–2000）。调低后会在下一次写入时从存储中丢弃最旧的消息。数值越大，存储占用和云同步体积也越大。',
+  'ai.chatHistory.messageCap.unit': '条消息',
 
   // AI Error
   'ai.codex.bridgeError': 'Codex 主进程处理器尚未加载。请完全重启 Netcatty 或重启 Electron 开发进程，然后重试。',
@@ -715,6 +739,8 @@ export const zhCNAiMessages: Messages = {
 
   // 统一终端工作区和顶部标签的 tooltip 文案 (issue #954)
   'terminal.layer.addTerminal': '添加终端',
+  'terminal.layer.emptyWorkspace': '工作区中还没有终端',
+  'terminal.layer.emptyWorkspaceHint': '添加本地终端或连接主机，开始使用这个工作区。',
   'terminal.layer.switchToSplitView': '切换到分屏视图',
   'terminal.layer.sftp': '文件传输',
   'terminal.layer.scripts': '脚本',

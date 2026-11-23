@@ -183,6 +183,8 @@ declare global {
     sourceSessionId?: string;
     /** Require openSftpForSession to use exactly the requested live session. */
     requireExactSourceSession?: boolean;
+    /** Use the named live terminal only; never open a dedicated/fresh login. */
+    reuseExactSessionOnly?: boolean;
     // Skip POSIX process discovery when copying a network-device session.
     skipShellPidDiscovery?: boolean;
     /**
@@ -385,10 +387,21 @@ declare global {
 
   interface NetcattyPluginSource {
     id: string;
-    kind: 'official' | 'third-party' | 'local';
+    kind: 'official' | 'third-party' | 'local' | 'github';
     name: string;
     origin: string | null;
     enabled?: boolean;
+    tag?: string;
+    commit?: string;
+    assetId?: number;
+  }
+  interface NetcattyGitHubPluginPreview {
+    token: string;
+    source: NetcattyPluginSource;
+    manifest: import("@netcatty/plugin-contract").PluginManifest;
+    archiveSha256: string;
+    assetName: string;
+    size: number;
   }
   interface NetcattyInstalledPlugin {
     source?: NetcattyPluginSource;
@@ -512,6 +525,9 @@ declare global {
     getPluginPermissions?(pluginId: string): Promise<NetcattyPluginPermissionSnapshot>;
     revokePluginPermissions?(pluginId: string): Promise<NetcattyInstalledPlugin>;
     installPluginPackage?(archivePath: string, options?: { enable?: boolean }): Promise<NetcattyInstalledPlugin>;
+    prepareGitHubPlugin?(repository: string): Promise<NetcattyGitHubPluginPreview>;
+    installGitHubPlugin?(token: string): Promise<NetcattyInstalledPlugin>;
+    discardGitHubPlugin?(token: string): Promise<void>;
     setPluginEnabled?(pluginId: string, enabled: boolean): Promise<NetcattyInstalledPlugin>;
     restartPlugin?(pluginId: string): Promise<NetcattyInstalledPlugin>;
     uninstallPlugin?(pluginId: string): Promise<boolean>;
