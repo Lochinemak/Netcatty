@@ -160,6 +160,23 @@ from `ipc-update.md`, 5 s, fail open):
   tabs the window is the source of go through the editor's close flow, then
   the window is asked; it closes only when both pass.
 
+Session-log finalization (Electron: `sessionLogShutdown.cjs`): Rust emits
+`app:finalize-session-logs` `{ requestId }` to a window and waits up to 5 s
+for `windows_report("app:session-logs-finalized", { requestId, success })`
+from that window. The adapter answers once every `onFinalizeSessionLogs`
+callback has settled (`success` only if all fulfilled; concurrent requests
+share one pass), and answers at once when none is registered. A missing,
+failed or silent window does not hold anything.
+
+* **Main / session window close**: after the unsaved-editor check passes,
+  before the window closes.
+* **Quit**: after the unsaved-editor check passes, every main and session
+  window (`windows::app_content_windows`) is asked, then all manual and
+  automatic session log streams are stopped and flushed, then the exit is
+  re-issued. `RunEvent::Exit` stops the streams again as a backstop, which
+  also covers the update restart and the implicit exit after the last
+  window closed.
+
 ## Not ported / limitations
 
 * `displayRecovery.cjs` (moving a window back to a reconnected display),

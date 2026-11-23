@@ -280,3 +280,48 @@ test('window chrome commands coerce their inputs', async () => {
   assert.equal(closes, 1);
   assert.deepEqual(ctx.warnings, []);
 });
+
+test('session-log finalization answers with every finalizer settled, even with none registered', async () => {
+  const ctx = setup('main');
+  await ctx.flush();
+  const replies = () => ctx.calls('windows_report').map((entry) => entry.args);
+
+  // No terminals: answer at once so Rust does not wait for its timeout.
+  ctx.emit(WINDOWS_EVENTS.finalizeSessionLogs, { requestId: 'r0' });
+  await ctx.flush();
+  assert.deepEqual(replies(), [
+    { channel: WINDOWS_REPLY_CHANNELS.sessionLogsFinalized, payload: { requestId: 'r0', success: true } },
+  ]);
+
+  let release: () => void = () => {};
+  const runs: string[] = [];
+  const unsubscribe = ctx.bridge.onFinalizeSessionLogs(() => new Promise<void>((resolve) => {
+    runs.push('slow');
+    release = resolve;
+  }));
+  ctx.bridge.onFinalizeSessionLogs(async () => {
+    runs.push('failing');
+    throw new Error('not drained');
+  });
+
+  // Two requests while one is running share a single finalization pass.
+  ctx.emit(WINDOWS_EVENTS.finalizeSessionLogs, { requestId: 'r1' });
+  ctx.emit(WINDOWS_EVENTS.finalizeSessionLogs, { requestId: 'r2' });
+  await ctx.flush();
+  assert.equal(replies().length, 1, 'no answer before the finalizers settle');
+  release();
+  await ctx.flush();
+  assert.deepEqual(runs, ['slow', 'failing']);
+  assert.deepEqual(replies().slice(1), [
+    { channel: WINDOWS_REPLY_CHANNELS.sessionLogsFinalized, payload: { requestId: 'r1', success: false } },
+    { channel: WINDOWS_REPLY_CHANNELS.sessionLogsFinalized, payload: { requestId: 'r2', success: false } },
+  ]);
+
+  // Unsubscribed finalizers no longer run; malformed requests are ignored.
+  unsubscribe();
+  ctx.emit(WINDOWS_EVENTS.finalizeSessionLogs, {});
+  ctx.emit(WINDOWS_EVENTS.finalizeSessionLogs, { requestId: 'r3' });
+  await ctx.flush();
+  assert.deepEqual(runs, ['slow', 'failing', 'failing']);
+  assert.equal(replies().length, 4);
+});
