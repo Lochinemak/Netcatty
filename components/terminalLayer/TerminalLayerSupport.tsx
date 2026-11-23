@@ -54,6 +54,7 @@ import type { ResolvedAppearance, TerminalAppearanceHostScope } from '../../doma
 import type { TerminalSidePanelAutoOpenTab } from '../../domain/terminalSidePanelAutoOpen';
 import type { SidePanelTool } from '../../domain/sidePanelLayout';
 import {
+  resolveMagnifiedChromeBorderWidth,
   resolvePaneMagnificationStyle,
   type PaneMagnificationController,
   type PaneMagnificationTarget,
@@ -1499,10 +1500,12 @@ const TerminalPane: React.FC<TerminalPaneProps> = memo(({
     observer.observe(surface);
     return () => observer.disconnect();
   }, [isMagnified]);
+  const magnifiedDevicePixelRatio = typeof window === 'undefined' ? 1 : (window.devicePixelRatio || 1);
   const style: React.CSSProperties = resolvePaneMagnificationStyle(
     layoutStyle,
     isMagnified && !!magnifiedSurfaceBounds,
     magnifiedSurfaceBounds,
+    magnifiedDevicePixelRatio,
   );
 
   useLayoutEffect(() => {
@@ -1666,6 +1669,9 @@ const TerminalPane: React.FC<TerminalPaneProps> = memo(({
       style={{
         ...style,
         borderColor: isMagnified && magnifiedSurfaceBounds ? sessionAppearanceTheme.colors.cursor : undefined,
+        borderWidth: isMagnified && magnifiedSurfaceBounds
+          ? resolveMagnifiedChromeBorderWidth(magnifiedDevicePixelRatio)
+          : undefined,
       }}
       tabIndex={-1}
       onClick={handlePaneClick}
