@@ -1,5 +1,5 @@
 FROM alpine:3.21
-RUN apk add --no-cache openssh openssh-sftp-server bash tar && \
+RUN apk add --no-cache openssh openssh-sftp-server bash tar zip && \
     ssh-keygen -A && \
     adduser -D -s /bin/bash tester && echo "tester:testpass" | chpasswd && \
     mkdir -p /home/tester/.ssh && chmod 700 /home/tester/.ssh && \

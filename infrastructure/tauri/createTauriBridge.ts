@@ -890,6 +890,8 @@ export function createTauriBridge(options: CreateTauriBridgeOptions = {}): Netca
     chmodSftp: (sftpId, path, mode, encoding) => invoke<void>('sftp_chmod', { sftpId, path, mode, encoding }),
     extractSftpArchive: (sftpId, path, encoding) =>
       invoke<{ success: boolean }>('sftp_extract', { sftpId, path, encoding }),
+    createSftpArchive: (sftpId, options, encoding) =>
+      invoke<BridgeResult<'createSftpArchive'>>('sftp_create_archive', { sftpId, options, encoding }),
     getSftpHomeDir: (sftpId, encoding) =>
       invoke<BridgeResult<'getSftpHomeDir'>>('sftp_home_dir', { sftpId, encoding }),
     onSftpConnectionProgress: (cb) =>

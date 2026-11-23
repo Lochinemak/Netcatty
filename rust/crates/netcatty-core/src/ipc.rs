@@ -800,6 +800,50 @@ pub struct OpenSftpResult {
     pub reused_connection: Option<bool>,
 }
 
+/// Archive format for `createSftpArchive`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SftpArchiveFormat {
+    #[serde(rename = "tar.gz")]
+    TarGz,
+    #[serde(rename = "zip")]
+    Zip,
+}
+
+impl SftpArchiveFormat {
+    /// File-name suffix without the leading dot (`tar.gz`, `zip`).
+    pub fn extension(self) -> &'static str {
+        match self {
+            Self::TarGz => "tar.gz",
+            Self::Zip => "zip",
+        }
+    }
+}
+
+/// `createSftpArchive` options: archive `paths` (relative to `directory`)
+/// into `directory/archiveName`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SftpArchiveCreateOptions {
+    pub directory: String,
+    pub paths: Vec<String>,
+    pub archive_name: String,
+    pub format: SftpArchiveFormat,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub overwrite: Option<bool>,
+}
+
+/// `createSftpArchive` result. `code` is `EEXIST` when the archive name is
+/// taken and `overwrite` was not set, so the renderer can ask to replace it.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SftpArchiveCreateResult {
+    pub success: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub code: Option<String>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum TransferEventType {

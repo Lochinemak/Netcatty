@@ -276,6 +276,7 @@ pub fn handler<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + 
         sftp::sftp_lstat,
         sftp::sftp_chmod,
         sftp::sftp_extract,
+        sftp::sftp_create_archive,
         sftp::sftp_home_dir,
         sftp::sftp_close,
         sftp::sftp_retain_transfer_session,

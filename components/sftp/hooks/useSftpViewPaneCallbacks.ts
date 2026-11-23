@@ -12,8 +12,8 @@ import { isSessionError } from "../../../application/state/sftp/errors";
 import { filterHiddenFiles } from "../utils";
 import { netcattyBridge } from "../../../infrastructure/services/netcattyBridge";
 
-// A backend without remote archive creation (the Tauri build, for now) gets no
-// "Create archive" entry rather than one that always fails.
+// A backend without remote archive creation gets no "Create archive" entry
+// rather than one that always fails.
 const supportsSftpArchiveCreation = () => typeof netcattyBridge.get()?.createSftpArchive === "function";
 
 interface UseSftpViewPaneCallbacksParams {

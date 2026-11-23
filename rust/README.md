@@ -286,17 +286,17 @@ until the user answers.
 `crates/netcatty-e2e` holds tests that run the SSH, SFTP and port-forwarding
 crates against a real OpenSSH server (password and publickey auth, exec,
 interactive shell with resize and exit codes, host-key prompt / trusted /
-changed flows, SFTP browse and edit with non-ASCII names, a 3 MB upload and
-download with progress and `.part` staging, local / dynamic SOCKS5 / remote
-forwards). They are skipped unless `NETCATTY_E2E_SSH_HOST` is set. With
-Docker installed:
+changed flows, SFTP browse and edit with non-ASCII names, remote tar/zip archive
+creation, a 3 MB upload and download with progress and `.part` staging, local /
+dynamic SOCKS5 / remote forwards). They are skipped unless
+`NETCATTY_E2E_SSH_HOST` is set. With Docker installed:
 
 ```bash
 rust/scripts/e2e-sshd/run.sh
 ```
 
 builds a throwaway Alpine sshd container, runs the suite and removes the
-container again. On 2026-11-03 all 10 tests passed against it.
+container again. On 2026-11-23 all 12 tests passed against it.
 
 ## Conventions
 

@@ -12,12 +12,17 @@
 //! non-UTF-8 names). Raw bytes survive `russh-sftp`'s `String` API thanks to
 //! the byte-preserving transport in [`wire`].
 
+pub mod archive_create;
 pub mod client;
 pub mod error;
 mod pipeline;
 pub mod transfer;
 pub mod wire;
 
+pub use archive_create::{
+    build_create_archive_command, parse_create_archive_result, validate_archive_create_options,
+    ArchiveCreateOutcome, ValidatedArchiveCreate,
+};
 pub use client::{
     archive_kind, build_extract_command, decode_name, encode_path, posix_basename, posix_parent,
     shell_quote, shell_quote_bytes, ArchiveKind, SftpClient, TransferLimits,
