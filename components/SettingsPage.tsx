@@ -566,6 +566,7 @@ const SettingsPageContent: React.FC<{ settings: SettingsState; appLock?: AppLock
                     {mountedTabs.has("appearance") && (
                         <SettingsLazyTab value="appearance">
                             <LazySettingsAppearanceTab
+                                pluginRuntimeAvailable={pluginRuntimeAvailable}
                                 theme={settings.theme}
                                 resolvedTheme={settings.resolvedTheme}
                                 setTheme={settings.setTheme}
