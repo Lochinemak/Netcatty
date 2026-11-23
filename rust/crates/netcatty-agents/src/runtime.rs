@@ -87,9 +87,10 @@ fn s(v: &Value, key: &str) -> Option<String> {
 }
 
 impl AgentsRuntime {
-    /// Build the runtime. `TODO(mcp-injection)`: the host replaces the
-    /// [`NoopMcpInjectionProvider`] with the netcatty MCP provider via
-    /// [`AgentsRuntime::set_mcp_provider`] once `netcatty_mcp` is merged.
+    /// Build the runtime. It starts with [`NoopMcpInjectionProvider`] and
+    /// [`NoopApprovalProvider`]; the host replaces them with the netcatty MCP
+    /// provider through [`AgentsRuntime::set_mcp_provider`] and
+    /// [`AgentsRuntime::set_approval_provider`].
     pub fn new(config: RuntimeConfig, sink: Arc<dyn EventSink>) -> Self {
         let app_server = CodexAppServerRuntime::new(&config.app_version, sink.clone());
         Self {
