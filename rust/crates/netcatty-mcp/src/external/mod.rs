@@ -75,6 +75,15 @@ struct Inner {
     start_generation: u64,
 }
 
+/// Where client setup gets the user's login-shell environment from
+/// (Electron: `ai/shellUtils.cjs getShellEnv`). A GUI-launched app inherits a
+/// stripped PATH, so `codex` / `claude` / `grok` installed through a shell
+/// profile are only found there.
+#[async_trait::async_trait]
+pub trait ShellEnvProvider: Send + Sync {
+    async fn shell_env(&self) -> std::collections::HashMap<String, String>;
+}
+
 /// The External MCP controller. Construct with [`ExternalMcpController::new`];
 /// it registers itself as the host's [`ExternalHooks`].
 pub struct ExternalMcpController {
@@ -83,6 +92,7 @@ pub struct ExternalMcpController {
     discovery_path: PathBuf,
     launcher: PathBuf,
     skill_path: Option<PathBuf>,
+    shell_env: Mutex<Option<Arc<dyn ShellEnvProvider>>>,
     inner: Mutex<Inner>,
     enable_lock: tokio::sync::Mutex<()>,
     http_lock: tokio::sync::Mutex<Option<http::HttpRuntime>>,
@@ -98,6 +108,7 @@ impl ExternalMcpController {
             discovery_path,
             launcher,
             skill_path,
+            shell_env: Mutex::new(None),
             inner: Mutex::new(Inner {
                 enabled: false,
                 state: "disabled",
@@ -534,19 +545,36 @@ impl ExternalMcpController {
         }
     }
 
-    fn client_setup(&self, client: &str) -> Option<setup::ClientSetup> {
+    /// Resolve client CLIs in the user's login-shell environment instead of
+    /// the process environment.
+    pub fn set_shell_env_provider(&self, provider: Arc<dyn ShellEnvProvider>) {
+        *self.shell_env.lock() = Some(provider);
+    }
+
+    async fn client_setup(&self, client: &str) -> Option<setup::ClientSetup> {
         let client: &'static str = match client {
             "codex" => "codex",
             "claude" => "claude",
             "grok" => "grok",
             _ => return None,
         };
-        Some(setup::ClientSetup { client, launcher: self.launcher_path(), discovery_env: self.discovery_env(), skill_source: self.skill_path.clone() })
+        let provider = self.shell_env.lock().clone();
+        let base = match provider {
+            Some(provider) => provider.shell_env().await,
+            None => std::env::vars().collect(),
+        };
+        Some(setup::ClientSetup {
+            client,
+            launcher: self.launcher_path(),
+            discovery_env: self.discovery_env(),
+            skill_source: self.skill_path.clone(),
+            env: setup::with_user_cli_dirs(base),
+        })
     }
 
     /// `externalMcp{Codex,Claude,Grok}GetStatus`.
     pub async fn client_status(&self, client: &str) -> Value {
-        match self.client_setup(client) {
+        match self.client_setup(client).await {
             Some(s) => s.status().await,
             None => json!({ "ok": false, "error": format!("Unknown MCP client: {client}") }),
         }
@@ -554,7 +582,7 @@ impl ExternalMcpController {
 
     /// `externalMcp{Codex,Claude,Grok}Add`.
     pub async fn client_add(&self, client: &str) -> Value {
-        match self.client_setup(client) {
+        match self.client_setup(client).await {
             Some(s) => s.add().await,
             None => json!({ "ok": false, "error": format!("Unknown MCP client: {client}") }),
         }

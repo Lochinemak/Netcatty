@@ -39,6 +39,8 @@
 //! run on the async runtime and may block on main-thread window getters while
 //! holding the lock, which is safe because the main thread never waits on it).
 
+pub mod native;
+
 use super::CmdResult;
 use crate::state::{AppState, Ctx};
 use netcatty_core::CoreError;
@@ -93,6 +95,11 @@ const TAB_PREFIX: &str = "hb-tab-";
 const MAIN_LABEL: &str = "main";
 const ICON_FETCH_TIMEOUT: Duration = Duration::from_secs(5);
 const ICON_FETCH_LIMIT: usize = 64 * 1024;
+/// How often a running download's byte count is read from the engine.
+const DOWNLOAD_PROGRESS_INTERVAL: Duration = Duration::from_millis(500);
+/// How long a cancelled download waits for the engine to confirm before it
+/// is recorded as cancelled anyway.
+const DOWNLOAD_CANCEL_GRACE: Duration = Duration::from_secs(5);
 /// Width of the standalone chrome's bookmark panel.
 const BOOKMARK_PANEL_WIDTH: f64 = 360.0;
 
@@ -365,6 +372,9 @@ struct ActiveDownload {
     url: String,
     path: PathBuf,
     cancelled: bool,
+    /// The engine's download object is known (`native::claim`): byte
+    /// progress is read from it and a cancel stops the transfer.
+    engine: bool,
 }
 
 struct Stores {
@@ -851,7 +861,8 @@ fn create_page<R: Runtime>(
              --force-webrtc-ip-handling-policy=disable_non_proxied_udp --ignore-certificate-errors \
              --proxy-bypass-list=<-loopback>",
         );
-    builder.build().map_err(|e| e.to_string())?;
+    let window = builder.build().map_err(|e| e.to_string())?;
+    native::hook_page(&window);
     let tab = &mut record.tabs[index];
     tab.webview = true;
     tab.shown = false;
@@ -863,6 +874,8 @@ fn destroy_page<R: Runtime>(app: &AppHandle<R>, tab: &mut Tab) {
         if let Some(window) = app.get_webview_window(&tab.label) {
             let _ = window.destroy();
         }
+        let label = tab.label.clone();
+        let _ = app.run_on_main_thread(move || native::unhook_page(&label));
     }
     tab.webview = false;
     tab.shown = false;
@@ -1043,6 +1056,7 @@ fn download_event<R: Runtime>(
     match event {
         DownloadEvent::Requested { url, destination } => {
             if !connected.load(Ordering::SeqCst) {
+                native::discard(tab_label, url.as_str());
                 return false;
             }
             let id = netcatty_core::ids::new_id();
@@ -1071,6 +1085,7 @@ fn download_event<R: Runtime>(
                         false,
                     );
                     spawn_notify_downloads(app, host_id, Some((browser_id, &id)), false);
+                    native::discard(tab_label, url.as_str());
                     return false;
                 }
             };
@@ -1099,6 +1114,7 @@ fn download_event<R: Runtime>(
                 },
                 false,
             );
+            let engine = native::claim(tab_label, url.as_str(), &id);
             state.active.lock().insert(
                 id.clone(),
                 ActiveDownload {
@@ -1108,8 +1124,12 @@ fn download_event<R: Runtime>(
                     url: url.to_string(),
                     path,
                     cancelled: false,
+                    engine,
                 },
             );
+            if engine {
+                spawn_progress_watch(app, &id, host_id);
+            }
             spawn_notify_downloads(app, host_id, Some((browser_id, &id)), true);
             true
         }
@@ -1124,8 +1144,12 @@ fn download_event<R: Runtime>(
                 id.and_then(|id| active.remove(&id).map(|d| (id, d)))
             };
             let Some((id, download)) = finished else {
+                // Ended before it was reported as requested, or already
+                // closed by a cancel.
+                native::discard(tab_label, url.as_str());
                 return true;
             };
+            native::release(&id);
             let final_path = path.unwrap_or_else(|| download.path.clone());
             let size = std::fs::metadata(&final_path).map(|m| m.len()).unwrap_or(0);
             let status = if download.cancelled {
@@ -1169,6 +1193,113 @@ fn remove_partial(path: &Path) {
     }
 }
 
+/// Copy the engine's byte count of a running download into the store until
+/// the download leaves `active` (Electron: the `updated` event of a
+/// `DownloadItem`).
+fn spawn_progress_watch<R: Runtime>(app: &AppHandle<R>, id: &str, host_id: &str) {
+    let (app, id, host_id) = (app.clone(), id.to_string(), host_id.to_string());
+    tauri::async_runtime::spawn(async move {
+        let mut last = None;
+        loop {
+            tokio::time::sleep(DOWNLOAD_PROGRESS_INTERVAL).await;
+            let state = host_state(&app);
+            if !state.active.lock().contains_key(&id) {
+                return;
+            }
+            let (tx, rx) = tokio::sync::oneshot::channel();
+            let engine_id = id.clone();
+            let asked = app.run_on_main_thread(move || {
+                let _ = tx.send(native::progress(&engine_id));
+            });
+            if asked.is_err() {
+                return;
+            }
+            let Ok(Some(progress)) = rx.await else {
+                continue;
+            };
+            if last == Some(progress) {
+                continue;
+            }
+            last = Some(progress);
+            {
+                // Under `active`: the end of a download removes its entry
+                // before it writes the final record, so this cannot land on
+                // top of that record.
+                let active = state.active.lock();
+                if !active.contains_key(&id) {
+                    return;
+                }
+                let store = &stores(&app).downloads;
+                if let Some(previous) = store.get(&host_id, &id) {
+                    let _ = store.upsert(
+                        Download {
+                            received: progress.received,
+                            total: progress.total,
+                            ..previous
+                        },
+                        true,
+                    );
+                }
+            }
+            let inner = state.inner.lock();
+            notify_downloads(&app, &inner, &host_id, None);
+        }
+    });
+}
+
+/// Stop these downloads in the engine. One whose handle is already gone is
+/// ending by itself and is closed by its `Finished` event.
+fn cancel_in_engine<R: Runtime>(app: &AppHandle<R>, ids: Vec<String>) {
+    if ids.is_empty() {
+        return;
+    }
+    let handle = app.clone();
+    let pending = ids.clone();
+    let _ = app.run_on_main_thread(move || {
+        for id in ids {
+            let (app, done) = (handle.clone(), id.clone());
+            native::cancel(&id, move || finish_cancelled(&app, &done));
+        }
+    });
+    // WebKit confirms a cancel through its completion handler only. Should
+    // that never come, the download must not stay "running" for ever.
+    let handle = app.clone();
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(DOWNLOAD_CANCEL_GRACE).await;
+        let app = handle.clone();
+        let _ = handle.run_on_main_thread(move || {
+            for id in &pending {
+                finish_cancelled(&app, id);
+            }
+        });
+    });
+}
+
+/// Record a download the engine stopped on request (main thread). WebKit
+/// reports nothing further for a cancelled download, so no `Finished` event
+/// follows; if one does, it finds the download gone and leaves it alone.
+fn finish_cancelled<R: Runtime>(app: &AppHandle<R>, id: &str) {
+    native::release(id);
+    let Some(download) = host_state(app).active.lock().remove(id) else {
+        return;
+    };
+    let written = std::fs::metadata(&download.path).map(|m| m.len()).unwrap_or(0);
+    remove_partial(&download.path);
+    let store = &stores(app).downloads;
+    if let Some(previous) = store.get(&download.host_id, id) {
+        let _ = store.upsert(
+            Download {
+                status: DownloadStatus::Cancelled,
+                received: written.max(previous.received),
+                ended_at: Some(netcatty_core::ids::now_ms()),
+                ..previous
+            },
+            false,
+        );
+    }
+    spawn_notify_downloads(app, &download.host_id, None, false);
+}
+
 fn spawn_notify_downloads<R: Runtime>(
     app: &AppHandle<R>,
     host_id: &str,
@@ -1200,14 +1331,17 @@ fn spawn_notify_downloads<R: Runtime>(
 
 fn cancel_downloads_of<R: Runtime>(app: &AppHandle<R>, browser_id: &str) {
     let state = host_state(app);
-    for download in state
+    let engine: Vec<String> = state
         .active
         .lock()
-        .values_mut()
-        .filter(|d| d.browser_id == browser_id)
-    {
-        download.cancelled = true;
-    }
+        .iter_mut()
+        .filter(|(_, download)| download.browser_id == browser_id)
+        .filter_map(|(id, download)| {
+            download.cancelled = true;
+            download.engine.then(|| id.clone())
+        })
+        .collect();
+    cancel_in_engine(app, engine);
 }
 
 fn set_downloads_panel<R: Runtime>(app: &AppHandle<R>, record: &mut Record, open: bool) -> CmdResult<()> {
@@ -2499,17 +2633,23 @@ pub async fn hostbrowser_downloads_command<R: Runtime>(
             Ok(true)
         }
         "cancel" => {
-            let mut active = state.active.lock();
-            match item.and_then(|item| active.get_mut(&item.id)) {
-                Some(download) if download.host_id == host_id => {
-                    // The webview engines expose no cancel: the transfer runs
-                    // to its end, then the file is removed and the download
-                    // is recorded as cancelled.
-                    download.cancelled = true;
-                    Ok(true)
+            let engine = {
+                let mut active = state.active.lock();
+                match item.and_then(|item| active.get_mut(&item.id)) {
+                    Some(download) if download.host_id == host_id => {
+                        download.cancelled = true;
+                        download.engine
+                    }
+                    _ => return Err(invalid("Download is no longer active")),
                 }
-                _ => Err(invalid("Download is no longer active")),
+            };
+            // With the engine's download object the transfer stops now.
+            // Without it (Windows, Linux) it runs to its end, then the file
+            // is removed and the download is recorded as cancelled.
+            if engine {
+                cancel_in_engine(&app, vec![download_id]);
             }
+            Ok(true)
         }
         "remove" => {
             if item.is_none() || !store.remove(&host_id, &download_id) {

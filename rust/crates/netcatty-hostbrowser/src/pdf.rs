@@ -67,6 +67,34 @@ pub fn pdf_download_headers(
     Some(result)
 }
 
+/// Should a frame navigation's response be saved instead of shown? This is
+/// the question for a runtime that decides per response rather than by
+/// rewriting headers (WebKit's navigation response policy): the PDFs
+/// [`pdf_download_headers`] would turn into attachments, and the responses
+/// the site already marked `attachment`, which Chromium saves on its own but
+/// WebKit shows whenever it can render the type.
+pub fn navigation_response_downloads(
+    resource_type: &str,
+    status_code: u16,
+    content_type: Option<&str>,
+    content_disposition: Option<&str>,
+) -> bool {
+    if !matches!(resource_type, "mainFrame" | "subFrame") || !(200..300).contains(&status_code) {
+        return false;
+    }
+    if content_disposition.is_some_and(|value| attachment_re().is_match(value)) {
+        return true;
+    }
+    let mut headers: Headers = Vec::new();
+    if let Some(value) = content_type {
+        headers.push(("Content-Type".into(), vec![value.into()]));
+    }
+    if let Some(value) = content_disposition {
+        headers.push(("Content-Disposition".into(), vec![value.into()]));
+    }
+    pdf_download_headers(resource_type, status_code, Some(&headers)).is_some()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -135,5 +163,27 @@ mod tests {
         ]);
         assert!(pdf_download_headers("mainFrame", 200, Some(&explicit)).is_none());
         assert!(pdf_download_headers("mainFrame", 200, None).is_none());
+    }
+
+    #[test]
+    fn response_policy_saves_pdfs_and_attachments_and_shows_the_rest() {
+        for frame in ["mainFrame", "subFrame"] {
+            assert!(navigation_response_downloads(frame, 200, Some("application/pdf"), None));
+            assert!(navigation_response_downloads(frame, 200, Some("Application/PDF; charset=UTF-8"), Some("inline; filename=a.pdf")));
+            assert!(navigation_response_downloads(frame, 200, Some("application/pdf"), Some("attachment; filename=a.pdf")));
+            assert!(navigation_response_downloads(frame, 200, Some("text/plain"), Some("Attachment")));
+            assert!(navigation_response_downloads(frame, 206, Some("image/png"), Some(" attachment; filename=a.png")));
+        }
+        assert!(!navigation_response_downloads("mainFrame", 200, Some("text/html"), None));
+        assert!(!navigation_response_downloads("mainFrame", 200, Some("image/png"), Some("inline")));
+        assert!(!navigation_response_downloads("mainFrame", 200, None, None));
+        // A header that only mentions the word is not an attachment.
+        assert!(!navigation_response_downloads("mainFrame", 200, Some("text/html"), Some("inline; filename=attachment.html")));
+        for status in [302u16, 404, 500] {
+            assert!(!navigation_response_downloads("mainFrame", status, Some("application/pdf"), Some("attachment")));
+        }
+        for resource_type in ["xhr", "object", "image"] {
+            assert!(!navigation_response_downloads(resource_type, 200, Some("application/pdf"), Some("attachment")));
+        }
     }
 }

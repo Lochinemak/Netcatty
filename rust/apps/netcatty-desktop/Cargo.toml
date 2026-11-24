@@ -103,9 +103,13 @@ drag = "2.1"
 # Pause / resume of the local tar of compressed uploads (SIGSTOP / SIGCONT).
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
-# Window opacity / vibrancy on the NSWindow (commands/windows).
+# Window opacity / vibrancy on the NSWindow (commands/windows), and the
+# engine download hook of host browser pages (commands/hostbrowser/native.rs).
 [target.'cfg(target_os = "macos")'.dependencies]
+block2 = "0.6"
 objc2 = "0.6"
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSData", "NSProgress", "NSString", "NSURL", "NSURLRequest", "NSURLResponse"] }
+objc2-web-kit = { version = "0.3", default-features = false, features = ["std", "block2", "objc2-app-kit", "WKDownload", "WKNavigation", "WKNavigationAction", "WKNavigationDelegate", "WKNavigationResponse", "WKWebView"] }
 # TOTP QR screen scan (commands/security/totp_scan.rs). Not on Linux: xcap
 # needs PipeWire / XCB development libraries there.
 [target.'cfg(any(target_os = "macos", windows))'.dependencies]

@@ -24,7 +24,7 @@ pub use icons::{
     image_mime, valid_image_data_url, IconMode, SiteIcon, SiteIconInput, SiteIconStore,
     MAX_ICONS, MAX_ICON_BYTES,
 };
-pub use pdf::pdf_download_headers;
+pub use pdf::{navigation_response_downloads, pdf_download_headers};
 pub use theme::{valid_theme_tokens, THEME_TOKEN_NAMES};
 pub use url::{
     icon_origin, is_allowed_page_url, is_loopback_url, normalize_browser_url, ALLOWED_PAGE_SCHEMES,

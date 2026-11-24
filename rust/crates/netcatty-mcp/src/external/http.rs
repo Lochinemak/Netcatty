@@ -5,11 +5,17 @@
 //! `initialize`, `DELETE` to end a session. A request is answered with plain
 //! JSON (like the SDK's `enableJsonResponse`) unless handling it produced a
 //! notification — `notifications/tools/list_changed` after a toolset load —
-//! in which case the answer is a short `text/event-stream` carrying the
-//! notification and then the response, as the streamable-HTTP transport
-//! allows. Without that the notification had nowhere to go and a client
-//! never learned about the tools it had just loaded. The standalone SSE
-//! stream (`GET`) is not offered (405, which the spec allows).
+//! which goes to the session's standalone stream when the client has one
+//! open, and otherwise turns that answer into a short `text/event-stream`
+//! carrying the notification and then the response, as the streamable-HTTP
+//! transport allows. Without that the notification had nowhere to go and a
+//! client never learned about the tools it had just loaded.
+//!
+//! `GET /mcp` with a session opens that standalone stream (Electron: the
+//! SDK's `StreamableHTTPServerTransport`): one per session (`409` for a
+//! second one), `406` unless the client accepts `text/event-stream`. It ends
+//! when the session does: `DELETE`, idle expiry, or the listener stopping.
+//! Like Electron's, it does not keep an idle session alive.
 //!
 //! `initialize` may carry `?toolsets=sftp_advanced,vault_hosts` (or `all`) to
 //! start the session with those toolsets loaded, for clients that do not
@@ -21,17 +27,41 @@ use crate::host::McpHost;
 use crate::protocol::{McpSession, RpcCaller};
 use crate::redaction::PrivacyBoundary;
 use bytes::Bytes;
+use http_body_util::combinators::BoxBody;
 use http_body_util::{BodyExt, Full, Limited};
-use hyper::body::Incoming;
+use hyper::body::{Frame, Incoming};
 use hyper::{Request, Response, StatusCode};
 use parking_lot::Mutex;
 use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
+use std::convert::Infallible;
 use std::net::IpAddr;
+use std::pin::Pin;
 use std::sync::Arc;
+use std::task::{Context, Poll};
 use std::time::Duration;
+use tokio::sync::mpsc;
 use tokio::time::Instant;
+
+type Body = BoxBody<Bytes, Infallible>;
+
+fn full(bytes: impl Into<Bytes>) -> Body {
+    Full::new(bytes.into()).boxed()
+}
+
+/// Body of a standalone stream: events arrive on a channel, and the response
+/// ends once the session (the only sender) is gone.
+struct StreamBody(mpsc::UnboundedReceiver<Bytes>);
+
+impl hyper::body::Body for StreamBody {
+    type Data = Bytes;
+    type Error = Infallible;
+
+    fn poll_frame(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Result<Frame<Bytes>, Infallible>>> {
+        self.0.poll_recv(cx).map(|event| event.map(|bytes| Ok(Frame::data(bytes))))
+    }
+}
 
 pub const DEFAULT_EXTERNAL_MCP_HTTP_PORT: u16 = 47391;
 pub const DEFAULT_EXTERNAL_MCP_HTTP_HOST: &str = "127.0.0.1";
@@ -203,6 +233,35 @@ struct HttpSession {
     client_id: u64,
     last_activity: Mutex<Instant>,
     in_flight: std::sync::atomic::AtomicUsize,
+    /// Sender of the standalone stream (`GET`), while a client holds one.
+    stream: Mutex<Option<mpsc::UnboundedSender<Bytes>>>,
+}
+
+impl HttpSession {
+    /// Open the standalone stream. `None` while another one is connected.
+    fn open_stream(&self) -> Option<StreamBody> {
+        let mut slot = self.stream.lock();
+        if slot.as_ref().is_some_and(|tx| !tx.is_closed()) {
+            return None;
+        }
+        let (tx, rx) = mpsc::unbounded_channel();
+        *slot = Some(tx);
+        Some(StreamBody(rx))
+    }
+
+    /// Send server-initiated messages on the standalone stream. `false` when
+    /// no client is listening, so the caller can deliver them another way.
+    fn push(&self, messages: &[Value]) -> bool {
+        let mut slot = self.stream.lock();
+        let Some(tx) = slot.as_ref() else {
+            return false;
+        };
+        if tx.send(Bytes::from(sse_events(messages))).is_err() {
+            *slot = None;
+            return false;
+        }
+        true
+    }
 }
 
 struct HttpRpc {
@@ -245,28 +304,33 @@ impl HttpRuntime {
     }
 }
 
-fn json_response(status: u16, body: Value, extra: &[(&str, String)]) -> Response<Full<Bytes>> {
+fn json_response(status: u16, body: Value, extra: &[(&str, String)]) -> Response<Body> {
     let bytes = serde_json::to_vec(&body).unwrap_or_default();
     let mut b = Response::builder().status(status).header("Content-Type", "application/json").header("Cache-Control", "no-store");
     for (k, v) in extra {
         b = b.header(*k, v);
     }
-    b.body(Full::new(Bytes::from(bytes))).unwrap()
+    b.body(full(bytes)).unwrap()
 }
 
-/// The messages of one POST as a finished event stream.
-fn sse_response(messages: &[Value], extra: &[(&str, String)]) -> Response<Full<Bytes>> {
+/// JSON-RPC messages as server-sent events.
+fn sse_events(messages: &[Value]) -> String {
     let mut body = String::new();
     for m in messages {
         body.push_str("event: message\ndata: ");
         body.push_str(&serde_json::to_string(m).unwrap_or_default());
         body.push_str("\n\n");
     }
+    body
+}
+
+/// The messages of one POST as a finished event stream.
+fn sse_response(messages: &[Value], extra: &[(&str, String)]) -> Response<Body> {
     let mut b = Response::builder().status(200).header("Content-Type", "text/event-stream").header("Cache-Control", "no-store");
     for (k, v) in extra {
         b = b.header(*k, v);
     }
-    b.body(Full::new(Bytes::from(body))).unwrap()
+    b.body(full(sse_events(messages))).unwrap()
 }
 
 /// `Accept` lists `text/event-stream` (the transport requires clients to).
@@ -344,7 +408,7 @@ async fn route(
     mcp_host: &Arc<McpHost>,
     listen: &str,
     port: u16,
-) -> Response<Full<Bytes>> {
+) -> Response<Body> {
     if req.uri().path() != EXTERNAL_MCP_HTTP_PATH {
         return json_response(404, rpc_error("Not found", -32000), &[]);
     }
@@ -403,6 +467,7 @@ async fn route(
                         client_id,
                         last_activity: Mutex::new(Instant::now()),
                         in_flight: Default::default(),
+                        stream: Mutex::new(None),
                     });
                     let id = crate::host::vault_agent::uuid_v4();
                     (s, Some(id))
@@ -426,6 +491,11 @@ async fn route(
             }
             session.in_flight.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
             *session.last_activity.lock() = Instant::now();
+            // A client that holds the standalone stream gets notifications
+            // there, as the SDK transport sends them; the answer stays JSON.
+            if !notifications.is_empty() && session.push(&notifications) {
+                notifications.clear();
+            }
             let mut extra = Vec::new();
             if let Some(id) = created {
                 sessions.lock().insert(id.clone(), session);
@@ -436,7 +506,7 @@ async fn route(
                 for (k, v) in &extra {
                     b = b.header(*k, v);
                 }
-                return b.body(Full::new(Bytes::new())).unwrap();
+                return b.body(full(Bytes::new())).unwrap();
             }
             if wants_stream && !notifications.is_empty() {
                 notifications.extend(responses);
@@ -449,16 +519,30 @@ async fn route(
             let Some(id) = session_header else {
                 return json_response(400, rpc_error("Bad Request: missing session", -32000), &[]);
             };
-            if !sessions.lock().contains_key(&id) {
+            let Some(session) = sessions.lock().get(&id).cloned() else {
                 return json_response(404, rpc_error("Session not found", -32000), &[]);
-            }
+            };
             if req.method() == "GET" {
-                return json_response(405, rpc_error("Method not allowed", -32000), &[("Allow", "POST, DELETE".into())]);
+                if !wants_stream {
+                    return json_response(406, rpc_error("Not Acceptable: Client must accept text/event-stream", -32000), &[]);
+                }
+                let Some(stream) = session.open_stream() else {
+                    return json_response(409, rpc_error("Conflict: Only one SSE stream is allowed per session", -32000), &[]);
+                };
+                *session.last_activity.lock() = Instant::now();
+                return Response::builder()
+                    .status(200)
+                    .header("Content-Type", "text/event-stream")
+                    .header("Cache-Control", "no-cache, no-transform")
+                    .header("mcp-session-id", id)
+                    .body(stream.boxed())
+                    .unwrap();
             }
+            drop(session);
             if let Some(s) = sessions.lock().remove(&id) {
                 mcp_host.detach_external_client(s.client_id);
             }
-            Response::builder().status(200).body(Full::new(Bytes::new())).unwrap()
+            Response::builder().status(200).body(full(Bytes::new())).unwrap()
         }
         _ => json_response(405, rpc_error("Method not allowed", -32000), &[("Allow", "GET, POST, DELETE".into())]),
     }
@@ -522,7 +606,7 @@ mod tests {
         assert_eq!(body, format!("event: message\ndata: {note}\n\nevent: message\ndata: {resp}\n\n"));
     }
 
-    fn body_text(r: Response<Full<Bytes>>) -> String {
+    fn body_text(r: Response<Body>) -> String {
         let bytes = tokio::runtime::Builder::new_current_thread().build().unwrap().block_on(async { r.into_body().collect().await.unwrap().to_bytes() });
         String::from_utf8(bytes.to_vec()).unwrap()
     }
