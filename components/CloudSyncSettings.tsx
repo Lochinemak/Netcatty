@@ -11,6 +11,7 @@ import React, { useState, useCallback, useEffect, useRef } from 'react';
 import {
     Key,
     ShieldCheck,
+    Unlock,
 } from 'lucide-react';
 import { useCloudSync } from '../application/state/useCloudSync';
 import {
@@ -869,9 +870,17 @@ const SyncDashboard: React.FC<SyncDashboardProps> = ({
                     <div>
                         <div className="flex items-center gap-2">
                             <span className="font-medium">
-                                {sync.isUnlocked ? t('cloudSync.header.vaultReady') : t('cloudSync.header.preparingVault')}
+                                {sync.isUnlocked
+                                    ? t('cloudSync.header.vaultReady')
+                                    : sync.isAutoUnlockPending
+                                        ? t('cloudSync.header.preparingVault')
+                                        : t('cloudSync.header.vaultLocked')}
                             </span>
-                            <StatusDot status={sync.isUnlocked ? 'connected' : 'connecting'} />
+                            <StatusDot
+                                status={sync.isUnlocked
+                                    ? 'connected'
+                                    : sync.isAutoUnlockPending ? 'connecting' : 'disconnected'}
+                            />
                         </div>
                         <span className="text-xs text-muted-foreground">
                             {t('cloudSync.header.providersConnected', { count: sync.connectedProviderCount })}
@@ -879,6 +888,17 @@ const SyncDashboard: React.FC<SyncDashboardProps> = ({
                     </div>
                 </div>
                 <div className="flex items-center gap-2">
+                    {!sync.isUnlocked && !sync.isAutoUnlockPending && (
+                        <Button
+                            variant="ghost"
+                            size="sm"
+                            className="gap-1"
+                            onClick={() => setShowUnlockDialog(true)}
+                        >
+                            <Unlock size={14} />
+                            {t('cloudSync.unlock.unlockButton')}
+                        </Button>
+                    )}
                     <Button
                         variant="ghost"
                         size="sm"

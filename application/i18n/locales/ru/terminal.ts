@@ -568,6 +568,7 @@ export const ruTerminalMessages: Messages = {
   'cloudSync.unlock.unlockButton': 'Разблокировать',
   'cloudSync.header.vaultReady': 'Хранилище готово',
   'cloudSync.header.preparingVault': 'Подготовка хранилища...',
+  'cloudSync.header.vaultLocked': 'Хранилище заблокировано',
   'cloudSync.header.providersConnected': 'Подключено провайдеров: {count}',
   'cloudSync.githubFlow.title': 'Подключить GitHub',
   'cloudSync.githubFlow.desc': 'Скопируйте код ниже и введите его на GitHub, чтобы авторизовать Netcatty.',

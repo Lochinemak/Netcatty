@@ -959,6 +959,7 @@ export const zhTWVaultMessages: Messages = {
   'cloudSync.unlock.unlockButton': '解鎖',
   'cloudSync.header.vaultReady': 'Vault 已就緒',
   'cloudSync.header.preparingVault': '正在準備 Vault...',
+  'cloudSync.header.vaultLocked': 'Vault 已鎖定',
   'cloudSync.header.providersConnected': '已連線 {count} 個 provider',
   'cloudSync.githubFlow.title': '連線到 GitHub',
   'cloudSync.githubFlow.desc': '複製下面的 code，並在 GitHub 頁面輸入以授權 Netcatty。',

@@ -70,6 +70,8 @@ export interface CloudSyncHook {
   securityState: SecurityState;
   syncState: SyncState;
   isUnlocked: boolean;
+  /** LOCKED, but a saved password may still unlock it on its own. */
+  isAutoUnlockPending: boolean;
   isSyncing: boolean;
   providers: Record<CloudProvider, ProviderConnection>;
   currentConflict: ConflictInfo | null;
@@ -291,7 +293,7 @@ export const useCloudSync = (): CloudSyncHook => {
     getConvergentSyncLocalConfigSnapshot,
   );
 
-  useCloudSyncAutoUnlock({
+  const autoUnlockSettled = useCloudSyncAutoUnlock({
     securityState: state.securityState,
     masterKeyIdentity: state.masterKeyConfig
       ? JSON.stringify(state.masterKeyConfig)
@@ -934,6 +936,7 @@ export const useCloudSync = (): CloudSyncHook => {
     securityState: state.securityState,
     syncState: state.syncState,
     isUnlocked: state.securityState === 'UNLOCKED',
+    isAutoUnlockPending: state.securityState === 'LOCKED' && !autoUnlockSettled,
     isSyncing: state.syncState === 'SYNCING',
     providers: state.providers,
     currentConflict: state.currentConflict,

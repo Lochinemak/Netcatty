@@ -550,6 +550,7 @@ export const esTerminalMessages: Messages = {
   'cloudSync.unlock.unlockButton': 'Desbloquear',
   'cloudSync.header.vaultReady': 'Bóveda lista',
   'cloudSync.header.preparingVault': 'Preparando bóveda...',
+  'cloudSync.header.vaultLocked': 'Bóveda bloqueada',
   'cloudSync.header.providersConnected': '{count} proveedor(es) conectado(s)',
   'cloudSync.githubFlow.title': 'Conectar con GitHub',
   'cloudSync.githubFlow.desc': 'Copia el código de abajo e ingrésalo en GitHub para autorizar a Netcatty.',

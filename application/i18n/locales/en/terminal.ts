@@ -550,6 +550,7 @@ export const enTerminalMessages: Messages = {
   'cloudSync.unlock.unlockButton': 'Unlock',
   'cloudSync.header.vaultReady': 'Vault ready',
   'cloudSync.header.preparingVault': 'Preparing vault...',
+  'cloudSync.header.vaultLocked': 'Vault locked',
   'cloudSync.header.providersConnected': '{count} provider(s) connected',
   'cloudSync.githubFlow.title': 'Connect to GitHub',
   'cloudSync.githubFlow.desc': 'Copy the code below and enter it on GitHub to authorize Netcatty.',

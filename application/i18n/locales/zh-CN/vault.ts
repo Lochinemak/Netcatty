@@ -959,6 +959,7 @@ export const zhCNVaultMessages: Messages = {
   'cloudSync.unlock.unlockButton': '解锁',
   'cloudSync.header.vaultReady': 'Vault 已就绪',
   'cloudSync.header.preparingVault': '正在准备 Vault...',
+  'cloudSync.header.vaultLocked': 'Vault 已锁定',
   'cloudSync.header.providersConnected': '已连接 {count} 个 provider',
   'cloudSync.githubFlow.title': '连接到 GitHub',
   'cloudSync.githubFlow.desc': '复制下面的 code，并在 GitHub 页面输入以授权 Netcatty。',

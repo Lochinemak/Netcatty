@@ -251,3 +251,37 @@ test('password notification and a later peer mount share the same attempt', asyn
     assert.equal(unlocks, 1, 'new consumers share the notification generation');
   } finally { await renderer.unmount(); dom.cleanup(); }
 });
+
+for (const strict of [false, true]) {
+  test(`reports settled once a locked key has no saved password (StrictMode=${strict})`, async () => {
+    const dom = installDomEnvironment();
+    const renderer = await createDomRenderer(dom.document);
+    const pending: Array<(value: string | null) => void> = [];
+    const listeners = new Set<() => void>();
+    const manager = { unlock: async () => false };
+    const bridge = {
+      cloudSyncGetSessionPassword: () => new Promise<string | null>(resolve => { pending.push(resolve); }),
+      onCloudSyncSessionPasswordAvailable: (cb: () => void) => { listeners.add(cb); return () => { listeners.delete(cb); }; },
+    };
+    const seen: boolean[] = [];
+    function Harness() {
+      seen.push(useCloudSyncAutoUnlock({ securityState: 'LOCKED', masterKeyIdentity: 'settled-key', manager, bridge }));
+      return null;
+    }
+    try {
+      await renderer.render(strict ? React.createElement(React.StrictMode, null, React.createElement(Harness)) : React.createElement(Harness));
+      await flushEffects();
+      assert.equal(seen.at(-1), false, 'still pending while the password read is in flight');
+      await runWithAct(async () => { for (const resolve of pending.splice(0)) resolve(null); });
+      await flushEffects();
+      assert.equal(seen.at(-1), true, 'no password: the vault needs a manual unlock');
+      // A peer sharing its password starts a new attempt, so it is pending again.
+      await runWithAct(async () => { for (const cb of listeners) cb(); });
+      await flushEffects();
+      assert.equal(seen.at(-1), false);
+      await runWithAct(async () => { for (const resolve of pending.splice(0)) resolve('fixture-only'); });
+      await flushEffects();
+      assert.equal(seen.at(-1), true, 'a wrong password also settles');
+    } finally { await renderer.unmount(); dom.cleanup(); }
+  });
+}

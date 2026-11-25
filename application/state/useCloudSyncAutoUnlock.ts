@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
 
 interface AutoUnlockManager {
   unlock(password: string): Promise<boolean>;
@@ -20,16 +20,44 @@ const completedAttemptByManager = new WeakMap<AutoUnlockManager, string>();
 // Mounted consumers register a retry trigger here so an attempt can be handed
 // off when its owner unmounts (see the cleanup below).
 const retryListenersByManager = new WeakMap<AutoUnlockManager, Set<() => void>>();
+// The key identity whose auto-unlock has run to completion (or was skipped on
+// purpose). While a key is LOCKED and not settled, an attempt is still on its
+// way; once settled and still LOCKED, nothing more will happen on its own and
+// the UI has to offer a manual unlock instead of a spinner.
+const settledIdentityByManager = new WeakMap<AutoUnlockManager, string>();
+const settledSubscribers = new Set<() => void>();
 
-/** Retry a locked peer window when the setting window finishes sharing its key. */
+function setSettled(manager: AutoUnlockManager, identity: string | null) {
+  const current = settledIdentityByManager.get(manager) ?? null;
+  if (current === identity) return;
+  if (identity === null) settledIdentityByManager.delete(manager);
+  else settledIdentityByManager.set(manager, identity);
+  for (const notify of settledSubscribers) notify();
+}
+
+function subscribeSettled(onChange: () => void) {
+  settledSubscribers.add(onChange);
+  return () => { settledSubscribers.delete(onChange); };
+}
+
+/**
+ * Retry a locked peer window when the setting window finishes sharing its key.
+ * Returns whether auto-unlock has settled for the current key: `false` while an
+ * attempt may still unlock it, `true` once a LOCKED vault needs the user.
+ */
 export function useCloudSyncAutoUnlock(input: {
   securityState: string;
   masterKeyIdentity: string | null;
   manager: AutoUnlockManager;
   bridge: AutoUnlockBridge | null | undefined;
-}) {
+}): boolean {
   const { securityState, masterKeyIdentity, manager, bridge } = input;
   const [retryRevision, setRetryRevision] = useState(0);
+  const getSettled = useCallback(
+    () => masterKeyIdentity !== null && settledIdentityByManager.get(manager) === masterKeyIdentity,
+    [manager, masterKeyIdentity],
+  );
+  const settled = useSyncExternalStore(subscribeSettled, getSettled, getSettled);
 
   useEffect(() => bridge?.onCloudSyncSessionPasswordAvailable?.(() => {
     passwordRevisionByManager.set(manager, (passwordRevisionByManager.get(manager) ?? 0) + 1);
@@ -42,12 +70,16 @@ export function useCloudSyncAutoUnlock(input: {
     if (securityState === 'UNLOCKED') {
       unlockedIdentityByManager.set(manager, masterKeyIdentity);
       attemptedAttemptByManager.set(manager, attempt);
+      setSettled(manager, masterKeyIdentity);
       return;
     }
     if (securityState !== 'LOCKED') return;
     // Once this key has been unlocked, a later lock is intentional. A peer
     // sharing its password must not undo it, regardless of notification order.
-    if (unlockedIdentityByManager.get(manager) === masterKeyIdentity) return;
+    if (unlockedIdentityByManager.get(manager) === masterKeyIdentity) {
+      setSettled(manager, masterKeyIdentity);
+      return;
+    }
     // Register before the dedup check: a consumer that only observes an
     // in-flight attempt must still be reachable for an ownership handoff.
     let listeners = retryListenersByManager.get(manager);
@@ -69,6 +101,7 @@ export function useCloudSyncAutoUnlock(input: {
     }
     attemptedAttemptByManager.set(manager, attempt);
     completedAttemptByManager.delete(manager);
+    setSettled(manager, null);
     let handedOff = false;
     let cancelled = false;
     let awaitingPassword = true;
@@ -89,6 +122,7 @@ export function useCloudSyncAutoUnlock(input: {
       } finally {
         if (!handedOff && attemptedAttemptByManager.get(manager) === attempt) {
           completedAttemptByManager.set(manager, attempt);
+          setSettled(manager, masterKeyIdentity);
           // Availability events can arrive while no consumer is mounted.
           // A future mount must read again after this attempt has settled.
           if (listeners.size === 0) {
@@ -112,4 +146,6 @@ export function useCloudSyncAutoUnlock(input: {
       }
     };
   }, [securityState, masterKeyIdentity, manager, bridge, retryRevision]);
+
+  return settled;
 }
