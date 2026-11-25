@@ -52,21 +52,22 @@ jobs:
         include:
           # `targets` is space-separated; each one is built in turn.
           #
-          # Each macOS architecture builds natively on its own runner, in
-          # parallel. On one shared runner the two release builds ran back
-          # to back for ~70 minutes, so a late hiccup (a failed artifact
-          # upload) threw both away.
+          # Each macOS architecture builds on its own runner, in parallel. On
+          # one shared runner the two release builds ran back to back for
+          # ~70 minutes, so a late hiccup (a failed artifact upload) threw
+          # both away.
           #
-          # macOS runners are the scarce ones: a job can sit in the queue for
-          # 15 minutes and be cancelled without ever getting a machine (the
-          # v1.2.4 arm64 job, three times). That is GitHub's supply, not the
-          # build; `gh run rerun <id> --failed` requeues only the job that
-          # missed out. If the arm64 pool keeps starving, point macos-arm64
-          # at `macos-15-intel` as well: aarch64 cross-compiles there fine.
-          # `macos-15-intel` is the last published x86_64 image (supported
-          # to ~Aug 2027); `macos-13` is retired and queues forever.
+          # Both run on the Intel image, aarch64 cross-compiled. The arm64
+          # pool (`macos-latest` / `macos-15`) is the starved one: the v1.2.4
+          # job was cancelled three times in a row, each after exactly 15
+          # minutes with an empty `runner_name` and no steps, while the same
+          # run's Linux and Windows jobs started in seconds. Far fewer jobs
+          # target `macos-15-intel`, the last published x86_64 image
+          # (supported to ~Aug 2027); `macos-13` is retired and queues
+          # forever. If a job still misses out, `gh run rerun <id> --failed`
+          # requeues only that one.
           - name: macos-arm64
-            os: macos-15
+            os: macos-15-intel
             targets: aarch64-apple-darwin
             bundles: app,dmg
           - name: macos-x64
