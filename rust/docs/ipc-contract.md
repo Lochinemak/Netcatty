@@ -306,7 +306,7 @@ tokens.
 | Command | Args | Returns |
 | --- | --- | --- |
 | `cloudsync_password_set` | `password?` (empty clears) | `true`; emits `netcatty:cloudsync:password-available` |
-| `cloudsync_password_get` | — | `string \| null` (memory, else `cloud-sync-session.enc` decrypted) |
+| `cloudsync_password_get` | — | `string \| null` (memory, else `cloud-sync-session.enc` decrypted; debug builds with the file-backed key use `cloud-sync-session.dev.enc`) |
 | `cloudsync_password_clear` | — | `true` |
 | `oauth_prepare_callback` | — | `{ sessionId, port, redirectUri }` (`127.0.0.1:45678`, OS port if busy) |
 | `oauth_await_callback` | `expectedState?, sessionId?` | `{ code, state? }`; rejects on cancel, CSRF, provider error, 5 min timeout |

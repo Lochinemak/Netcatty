@@ -28,6 +28,8 @@ const B64: base64::engine::GeneralPurpose = base64::engine::general_purpose::STA
 /// the Electron bridge has on Linux without libsecret.
 pub struct CredentialCipher {
     pub(crate) key: Option<[u8; KEY_LEN]>,
+    /// The key came from the debug-build key file, not the OS keychain.
+    file_backed: bool,
 }
 
 impl Drop for CredentialCipher {
@@ -47,10 +49,10 @@ impl CredentialCipher {
     /// replacing the user's key.
     pub fn load_or_create() -> Self {
         match load_or_create_key() {
-            Ok(key) => Self { key: Some(key) },
+            Ok(key) => Self::with_key(key),
             Err(reason) => {
                 tracing::warn!(%reason, "credential master key unavailable; credential encryption disabled");
-                Self { key: None }
+                Self::unavailable()
             }
         }
     }
@@ -80,26 +82,46 @@ impl CredentialCipher {
     /// Load (or generate and persist) a base64 master key stored in `path`.
     pub fn load_or_create_file(path: &std::path::Path) -> Self {
         match load_or_create_file_key(path) {
-            Ok(key) => Self { key: Some(key) },
+            Ok(key) => Self {
+                key: Some(key),
+                file_backed: true,
+            },
             Err(reason) => {
                 tracing::warn!(%reason, path = %path.display(), "file-backed master key unavailable; credential encryption disabled");
-                Self { key: None }
+                Self {
+                    key: None,
+                    file_backed: true,
+                }
             }
         }
     }
 
     /// Construct with an explicit key (tests).
     pub fn with_key(key: [u8; 32]) -> Self {
-        Self { key: Some(key) }
+        Self {
+            key: Some(key),
+            file_backed: false,
+        }
     }
 
     /// A cipher that always passes values through (tests / degraded mode).
     pub fn unavailable() -> Self {
-        Self { key: None }
+        Self {
+            key: None,
+            file_backed: false,
+        }
     }
 
     pub fn available(&self) -> bool {
         self.key.is_some()
+    }
+
+    /// Whether the key is the debug-build key file rather than the OS
+    /// keychain. Values encrypted under one cannot be decrypted under the
+    /// other, so files that both builds would share in the same data
+    /// directory must be kept apart by this.
+    pub fn is_file_backed(&self) -> bool {
+        self.file_backed
     }
 
     /// Encrypt plaintext → `enc:v2:<base64(nonce || ciphertext || tag)>`.
@@ -275,6 +297,15 @@ mod tests {
         }
         std::fs::write(&path, "not base64!").unwrap();
         assert!(!CredentialCipher::load_or_create_file(&path).available());
+    }
+
+    #[test]
+    fn only_the_key_file_cipher_reports_file_backed() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("credential-master-key");
+        assert!(CredentialCipher::load_or_create_file(&path).is_file_backed());
+        assert!(!CredentialCipher::with_key([7u8; 32]).is_file_backed());
+        assert!(!CredentialCipher::unavailable().is_file_backed());
     }
 
     fn cipher() -> CredentialCipher {

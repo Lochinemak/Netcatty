@@ -24,6 +24,11 @@ const GITHUB_CLIENT_ID: Option<&str> = option_env!("VITE_SYNC_GITHUB_CLIENT_ID")
 /// File holding the session master password, encrypted with the credential
 /// cipher (Electron: `safeStorage`).
 const PASSWORD_FILE: &str = "cloud-sync-session.enc";
+/// The same file for a debug build's file-backed cipher. Debug and release
+/// builds share the data directory but not the cipher key, so one shared
+/// file would be overwritten by whichever build saved last and be
+/// undecryptable in the other, leaving its vault locked on every start.
+const DEV_PASSWORD_FILE: &str = "cloud-sync-session.dev.enc";
 
 #[derive(Default)]
 pub struct SyncState {
@@ -50,7 +55,18 @@ fn http() -> CmdResult<netcatty_sync::reqwest::Client> {
 // ---------------------------------------------------------------------------
 
 fn password_path<R: tauri::Runtime>(state: &Ctx<'_, R>) -> PathBuf {
-    state.paths.data_dir.join(PASSWORD_FILE)
+    state
+        .paths
+        .data_dir
+        .join(password_file_name(state.cipher()))
+}
+
+fn password_file_name(cipher: &netcatty_store::CredentialCipher) -> &'static str {
+    if cipher.is_file_backed() {
+        DEV_PASSWORD_FILE
+    } else {
+        PASSWORD_FILE
+    }
 }
 
 fn read_persisted_password<R: tauri::Runtime>(state: &Ctx<'_, R>) -> Option<String> {
@@ -539,4 +555,23 @@ pub async fn s3_delete(config: Option<s3::S3Config>) -> CmdResult<OkResult> {
     s3::delete(&require_config(config, "S3")?)
         .await
         .map(|()| OK)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use netcatty_store::CredentialCipher;
+
+    #[test]
+    fn debug_and_release_ciphers_use_separate_password_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let file_backed =
+            CredentialCipher::load_or_create_file(&dir.path().join("credential-master-key"));
+        assert_eq!(password_file_name(&file_backed), DEV_PASSWORD_FILE);
+        assert_eq!(
+            password_file_name(&CredentialCipher::with_key([7u8; 32])),
+            PASSWORD_FILE
+        );
+        assert_ne!(PASSWORD_FILE, DEV_PASSWORD_FILE);
+    }
 }
