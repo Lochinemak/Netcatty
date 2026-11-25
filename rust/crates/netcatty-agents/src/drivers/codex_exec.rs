@@ -375,7 +375,7 @@ pub async fn run_turn(ctx: &TurnContext, api_key: Option<&str>, base_url: Option
     let code = status.and_then(|s| s.code());
     if code != Some(0) {
         let detail = code.map(|c| format!("code {c}")).unwrap_or_else(|| "signal".into());
-        emitter.emit_error(format!("Codex Exec exited with {detail}: {}", spawned.stderr.text()));
+        emitter.emit_error(format!("Codex Exec exited with {detail}: {}", spawned.stderr.settled_text().await));
         return TurnResult { session_id: thread_id };
     }
     if !has_content {

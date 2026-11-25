@@ -401,13 +401,14 @@ pub async fn run_turn(ctx: &TurnContext) -> TurnResult {
     rpc.close_stdin();
     terminate_child(&mut child, DEFAULT_ABORT_GRACE).await;
     pump.abort();
+    // Read before taking the state lock, which must not be held across an await.
+    let err = if matches!(outcome, Some(Err(_))) { stderr.settled_text().await.trim().to_string() } else { String::new() };
     let mut st = state.lock();
     st.close_reasoning(&emitter);
     match outcome {
         None => {}
         Some(Err(message)) if !st.failed => {
             st.failed = true;
-            let err = stderr.text().trim().to_string();
             let text = if !err.is_empty() && !message.contains(&err) { format!("{message} ({err})") } else { message };
             emitter.emit_error(format_grok_error_for_user(&text));
         }

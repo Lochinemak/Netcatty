@@ -478,7 +478,7 @@ pub async fn run_turn(ctx: &TurnContext) -> TurnResult {
     };
     if let Err(e) = init_result {
         process.terminate().await;
-        let stderr = process.stderr.text().trim().to_string();
+        let stderr = process.stderr.settled_text().await.trim().to_string();
         emitter.emit_error(if stderr.is_empty() { e } else { stderr });
         return TurnResult::default();
     }
@@ -531,7 +531,7 @@ pub async fn run_turn(ctx: &TurnContext) -> TurnResult {
         content = true;
     }
     if !content {
-        let stderr = process.stderr.text().trim().to_string();
+        let stderr = process.stderr.settled_text().await.trim().to_string();
         emitter.emit_error(if code.map(|c| c != 0).unwrap_or(false) && !stderr.is_empty() { stderr } else { EMPTY.to_string() });
         return TurnResult { session_id };
     }

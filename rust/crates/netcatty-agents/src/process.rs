@@ -123,18 +123,25 @@ impl LineReader {
     }
 }
 
+/// How long [`StderrTail::settled_text`] waits for stderr to reach its end.
+/// A grandchild that inherited the pipe can keep it open long after the
+/// child exited; the error message must not wait for it.
+const STDERR_SETTLE: Duration = Duration::from_secs(1);
+
 /// Capped stderr collector (keeps the first `max_chars`).
 pub struct StderrTail {
     text: std::sync::Arc<parking_lot::Mutex<String>>,
+    drain: parking_lot::Mutex<Option<tokio::task::JoinHandle<()>>>,
 }
 
 impl StderrTail {
     /// Spawn a task draining `stderr` into a capped buffer.
     pub fn spawn(stderr: Option<ChildStderr>, max_chars: usize) -> Self {
         let text = std::sync::Arc::new(parking_lot::Mutex::new(String::new()));
+        let mut drain = None;
         if let Some(mut stderr) = stderr {
             let sink = text.clone();
-            tokio::spawn(async move {
+            drain = Some(tokio::spawn(async move {
                 let mut chunk = [0u8; 4096];
                 loop {
                     match stderr.read(&mut chunk).await {
@@ -150,13 +157,28 @@ impl StderrTail {
                         }
                     }
                 }
-            });
+            }));
         }
-        Self { text }
+        Self { text, drain: parking_lot::Mutex::new(drain) }
     }
 
+    /// What has been collected so far. While the child runs, or right after
+    /// it exited, the drain task may not have read everything yet: use
+    /// [`StderrTail::settled_text`] for the error message of a finished child.
     pub fn text(&self) -> String {
         self.text.lock().clone()
+    }
+
+    /// The collected text once stderr has reached its end, waiting at most
+    /// [`STDERR_SETTLE`] for it. Call after the child exited or was killed:
+    /// `wait()` returning does not mean the drain task has read the last
+    /// bytes, and the exit message used to lose the child's actual error.
+    pub async fn settled_text(&self) -> String {
+        let drain = self.drain.lock().take();
+        if let Some(drain) = drain {
+            let _ = tokio::time::timeout(STDERR_SETTLE, drain).await;
+        }
+        self.text()
     }
 }
 
@@ -213,8 +235,28 @@ mod tests {
         assert_eq!(spawned.stdout.next_line().await.unwrap().as_deref(), Some("b"));
         assert!(matches!(spawned.stdout.next_line().await, Err(LineError::TooLong(20))));
         let _ = spawned.child.wait().await;
-        tokio::time::sleep(Duration::from_millis(50)).await;
-        assert_eq!(spawned.stderr.text(), "cccc");
+        assert_eq!(spawned.stderr.settled_text().await, "cccc");
+    }
+
+    #[tokio::test]
+    async fn settled_stderr_includes_what_arrives_after_the_exit() {
+        // The child exits at once; a background writer still holds the pipe
+        // and writes the error afterwards, the way a slow drain task sees it.
+        let mut spawned = spawn_lines(&sh("(sleep 0.2; echo boom 1>&2) & exit 3"), &env(), None, Stdin::Null, 1024, 1024).unwrap();
+        let status = spawned.child.wait().await.unwrap();
+        assert_eq!(status.code(), Some(3));
+        assert_eq!(spawned.stderr.text(), "", "nothing has been written yet");
+        assert_eq!(spawned.stderr.settled_text().await.trim(), "boom");
+    }
+
+    #[tokio::test]
+    async fn settled_stderr_does_not_wait_for_a_pipe_that_stays_open() {
+        let mut spawned = spawn_lines(&sh("echo early 1>&2; sleep 30 & exit 1"), &env(), None, Stdin::Null, 1024, 1024).unwrap();
+        let _ = spawned.child.wait().await;
+        let started = std::time::Instant::now();
+        assert_eq!(spawned.stderr.settled_text().await.trim(), "early");
+        assert!(started.elapsed() < STDERR_SETTLE + Duration::from_millis(500));
+        terminate_child(&mut spawned.child, Duration::from_millis(0)).await;
     }
 
     #[tokio::test]

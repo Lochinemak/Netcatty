@@ -325,7 +325,7 @@ pub async fn run_turn(ctx: &TurnContext) -> TurnResult {
         return TurnResult { session_id };
     }
     if !got_result && code.map(|c| c != 0).unwrap_or(true) {
-        let stderr = process.stderr.text().trim().to_string();
+        let stderr = process.stderr.settled_text().await.trim().to_string();
         let message = if stderr.is_empty() {
             format!("Claude Code process exited with code {}", code.map(|c| c.to_string()).unwrap_or_else(|| "unknown".into()))
         } else {

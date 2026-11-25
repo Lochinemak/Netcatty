@@ -470,7 +470,7 @@ pub async fn run_turn(ctx: &TurnContext) -> TurnResult {
     if st.turn_completed {
         emitter.emit_done();
     } else {
-        let stderr = spawned.stderr.text().trim().to_string();
+        let stderr = spawned.stderr.settled_text().await.trim().to_string();
         let detail = match status.and_then(|s| s.code()) {
             Some(code) if code != 0 => format!("exited with code {code}"),
             Some(_) => "exited before the turn completed".into(),

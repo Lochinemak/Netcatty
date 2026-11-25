@@ -294,7 +294,7 @@ pub async fn run_turn(ctx: &TurnContext) -> TurnResult {
         emitter.reasoning_end();
     }
     if !st.failed && !ctx.aborted() && code.map(|c| c != 0).unwrap_or(false) && !st.streamed_text {
-        let stderr = spawned.stderr.text().trim().to_string();
+        let stderr = spawned.stderr.settled_text().await.trim().to_string();
         st.failed = true;
         emitter.emit_error(format_error_for_user(&if stderr.is_empty() { format!("Cursor CLI exited with code {}", code.unwrap()) } else { stderr }));
     }
