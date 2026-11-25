@@ -139,6 +139,11 @@ Implemented in Rust:
     encodings; pointer, wheel and keyboard input; remote → local clipboard text.
   * RDP: TLS + NLA (CredSSP with NTLM) logon with user name, password and
     optional domain; keyboard (scancodes, Unicode fallback), mouse and wheel.
+    Graphics arrive through the Graphics Pipeline (MS-RDPEGFX 8.0–10.7 with
+    H.264 turned off: Planar, ClearCodec, RemoteFX Progressive), composited
+    by IronRDP; servers without it fall back to legacy bitmap updates, which
+    Windows encodes on a single thread. Only the changed regions are sent to
+    the renderer, not their bounding box.
     The desktop follows the pane size: once a resize settles (400 ms) the
     renderer asks for a matching desktop over the Display Control channel
     (MS-RDPEDISP, Windows 8.1 / Server 2012 R2 and later, recent xrdp); a
@@ -212,7 +217,8 @@ method answers without doing the work):
   CPU / memory sampling, and bundling the `plugin-runtime/` resources into
   release builds (development runs use the source checkout). Node-entry
   plugins need `node` on `PATH` or `NETCATTY_PLUGIN_NODE`.
-* Remote desktop gaps: Kerberos-only RDP accounts, RDP clipboard / audio /
+* Remote desktop gaps: RDP H.264 (AVC420 / AVC444) decoding, Kerberos-only
+  RDP accounts, RDP clipboard / audio /
   drive redirection, VNC Tight/JPEG encoding and
   Apple Remote Desktop authentication, local → remote clipboard, connecting
   through an SSH jump host or proxy

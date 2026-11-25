@@ -1,10 +1,11 @@
 //! RDP sessions on top of IronRDP.
 //!
 //! Scope: TLS + NLA (CredSSP with NTLM) logon with a user name and password,
-//! bitmap graphics decoded into an RGBA framebuffer, keyboard and mouse input,
-//! and dynamic resize through the Display Control virtual channel
-//! (MS-RDPEDISP). Not implemented: Kerberos, clipboard, audio and drive
-//! redirection.
+//! graphics through the Graphics Pipeline (MS-RDPEGFX, without H.264) or,
+//! when the server does not offer it, legacy bitmap updates, both decoded into
+//! an RGBA framebuffer; keyboard and mouse input; dynamic resize through the
+//! Display Control virtual channel (MS-RDPEDISP). Not implemented: H.264,
+//! Kerberos, clipboard, audio and drive redirection.
 
 use crate::net::{connect_tcp, with_handshake_timeout};
 use crate::{clamp_desktop_size, ConnectOptions, EventSink, RemoteEvent, RemoteInput};
@@ -17,6 +18,11 @@ use ironrdp_connector::{
 use ironrdp_displaycontrol::client::DisplayControlClient;
 use ironrdp_displaycontrol::pdu::MonitorLayoutEntry;
 use ironrdp_dvc::DrdynvcClient;
+use ironrdp_egfx::client::{GraphicsPipelineClient, GraphicsPipelineHandler};
+use ironrdp_egfx::pdu::{
+    CapabilitiesV103Flags, CapabilitiesV104Flags, CapabilitiesV107Flags, CapabilitiesV10Flags,
+    CapabilitiesV8Flags, CapabilitySet,
+};
 use ironrdp_graphics::image_processing::PixelFormat;
 use ironrdp_input::{Database, MouseButton, MousePosition, Operation, Scancode, WheelRotations};
 use ironrdp_pdu::gcc::{ConnectionType, KeyboardType};
@@ -138,7 +144,11 @@ fn build_config(options: &ConnectOptions) -> Config {
         enable_server_pointer: true,
         pointer_software_rendering: true,
         multitransport_flags: None,
-        support_dyn_vc_gfx_protocol: false,
+        // Offer the Graphics Pipeline. Its codecs are far cheaper for the
+        // server than legacy bitmap updates, which Windows encodes on a single
+        // thread: a large desktop used to saturate one core while dragging a
+        // window.
+        support_dyn_vc_gfx_protocol: true,
     }
 }
 
@@ -159,13 +169,19 @@ async fn connect(options: &ConnectOptions) -> CoreResult<(ConnectionResult, TlsF
         .map_err(|err| CoreError::network(format!("cannot read local address: {err}")))?;
 
     let mut framed = TokioFramed::new(tcp);
-    // DRDYNVC carries the Display Control channel through which the server
-    // accepts resize requests. A server without it never opens the channel,
-    // and the desktop keeps its connect-time size (the renderer scales it).
+    // DRDYNVC carries two dynamic channels: Display Control, through which
+    // the server accepts resize requests, and the Graphics Pipeline. A server
+    // without either simply never opens it: the desktop then keeps its
+    // connect-time size (scaled by the renderer), or arrives as legacy
+    // bitmap updates.
     let mut connector = ClientConnector::new(build_config(options), client_addr)
         .with_static_channel(
             DrdynvcClient::new()
-                .with_dynamic_channel(DisplayControlClient::new(|_| Ok(Vec::new()))),
+                .with_dynamic_channel(DisplayControlClient::new(|_| Ok(Vec::new())))
+                .with_dynamic_channel(GraphicsPipelineClient::new(
+                    Box::new(GraphicsPipeline),
+                    None,
+                )),
         );
 
     let should_upgrade = ironrdp_tokio::connect_begin(&mut framed, &mut connector)
@@ -232,6 +248,8 @@ async fn session(
         width: image.width(),
         height: image.height(),
     });
+    // Desktop size the renderer last heard about.
+    let mut shown_size = (image.width(), image.height());
 
     let mut input_db = Database::new();
     let mut buttons = 0u8;
@@ -267,13 +285,36 @@ async fn session(
             }
         };
 
+        // The exact regions this step changed. `GraphicsUpdate` only carries
+        // their union, which for a window drag is most of the screen.
+        let mut damage = Some(stage.take_damage_regions());
+
         for output in outputs {
             match output {
                 ActiveStageOutput::ResponseFrame(frame) => writer
                     .write_all(&frame)
                     .await
                     .map_err(|err| CoreError::network(format!("RDP write failed: {err}")))?,
-                ActiveStageOutput::GraphicsUpdate(region) => emit_region(&image, &region, sink),
+                ActiveStageOutput::GraphicsUpdate(union) => {
+                    // Every region is sent with the first update of the step.
+                    let Some(regions) = damage.take() else {
+                        continue;
+                    };
+                    // A Graphics Pipeline `ResetGraphics` (how a GFX server
+                    // answers a resize) reallocates the image in place; the
+                    // renderer must resize its canvas before the repaint.
+                    let size = (image.width(), image.height());
+                    if size != shown_size {
+                        shown_size = size;
+                        sink(RemoteEvent::Resize {
+                            width: size.0,
+                            height: size.1,
+                        });
+                    }
+                    for region in coalesce_regions(regions, &union) {
+                        emit_region(&image, &region, sink);
+                    }
+                }
                 ActiveStageOutput::Terminate(reason) => {
                     tracing::info!(%reason, "RDP session terminated by the server");
                     return Err(CoreError::network(format!(
@@ -323,6 +364,7 @@ async fn session(
                                     "RDP reactivation negotiated an invalid channel chunk size",
                                 ));
                             }
+                            shown_size = (desktop_size.width, desktop_size.height);
                             sink(RemoteEvent::Resize {
                                 width: desktop_size.width,
                                 height: desktop_size.height,
@@ -342,6 +384,96 @@ async fn session(
         if resize.is_pending() {
             send_pending_resize(&mut stage, &mut resize, &mut writer).await?;
         }
+    }
+}
+
+/// Graphics Pipeline handler. `ActiveStage` composites everything the
+/// pipeline decodes into the session image, so all this has to do is choose
+/// the capabilities.
+struct GraphicsPipeline;
+
+impl GraphicsPipelineHandler for GraphicsPipeline {
+    fn capabilities(&self) -> Vec<CapabilitySet> {
+        gfx_capabilities()
+    }
+}
+
+/// Every Graphics Pipeline version up to 10.7, with H.264 turned off: there
+/// is no H.264 decoder yet. Left to its defaults, IronRDP would drop every
+/// version that implies H.264 and fall back to 8.0 alone; with
+/// `AVC_DISABLED` the server can still pick a 10.x version and its codecs
+/// (Planar, ClearCodec, RemoteFX Progressive).
+fn gfx_capabilities() -> Vec<CapabilitySet> {
+    vec![
+        CapabilitySet::V10_7 {
+            flags: CapabilitiesV107Flags::AVC_DISABLED | CapabilitiesV107Flags::SMALL_CACHE,
+        },
+        CapabilitySet::V10_6 {
+            flags: CapabilitiesV104Flags::AVC_DISABLED | CapabilitiesV104Flags::SMALL_CACHE,
+        },
+        CapabilitySet::V10_5 {
+            flags: CapabilitiesV104Flags::AVC_DISABLED | CapabilitiesV104Flags::SMALL_CACHE,
+        },
+        CapabilitySet::V10_4 {
+            flags: CapabilitiesV104Flags::AVC_DISABLED | CapabilitiesV104Flags::SMALL_CACHE,
+        },
+        CapabilitySet::V10_3 {
+            flags: CapabilitiesV103Flags::AVC_DISABLED,
+        },
+        CapabilitySet::V10_2 {
+            flags: CapabilitiesV10Flags::AVC_DISABLED | CapabilitiesV10Flags::SMALL_CACHE,
+        },
+        CapabilitySet::V10 {
+            flags: CapabilitiesV10Flags::AVC_DISABLED | CapabilitiesV10Flags::SMALL_CACHE,
+        },
+        CapabilitySet::V8 {
+            flags: CapabilitiesV8Flags::SMALL_CACHE,
+        },
+    ]
+}
+
+/// Most regions one step sends as separate frames. Each frame is one message
+/// to the renderer, and past a few dozen the per-message cost outweighs the
+/// pixels saved by not sending the union.
+const MAX_FRAMES_PER_UPDATE: usize = 24;
+
+/// Turn the changed regions of one step into the rectangles to send.
+///
+/// Graphics Pipeline codecs report many small regions (RemoteFX tiles are
+/// 64×64), so runs of regions that share their rows and touch horizontally
+/// are joined first. When that still leaves too many, or they cover most of
+/// their union anyway, the union is sent instead.
+fn coalesce_regions(
+    mut regions: Vec<InclusiveRectangle>,
+    union: &InclusiveRectangle,
+) -> Vec<InclusiveRectangle> {
+    if regions.is_empty() {
+        return vec![union.clone()];
+    }
+    regions.sort_by_key(|r| (r.top, r.bottom, r.left));
+    let mut joined: Vec<InclusiveRectangle> = Vec::with_capacity(regions.len());
+    for region in regions {
+        match joined.last_mut() {
+            Some(last)
+                if last.top == region.top
+                    && last.bottom == region.bottom
+                    && u32::from(region.left) <= u32::from(last.right) + 1 =>
+            {
+                last.right = last.right.max(region.right);
+            }
+            _ => joined.push(region),
+        }
+    }
+
+    let area = |r: &InclusiveRectangle| {
+        (u64::from(r.right.saturating_sub(r.left)) + 1)
+            * (u64::from(r.bottom.saturating_sub(r.top)) + 1)
+    };
+    let covered: u64 = joined.iter().map(area).sum();
+    if joined.len() > MAX_FRAMES_PER_UPDATE || covered * 4 >= area(union) * 3 {
+        vec![union.clone()]
+    } else {
+        joined
     }
 }
 
@@ -801,6 +933,104 @@ mod tests {
         );
         assert!(!resize.is_pending());
         assert_eq!(resize.requested, (1280, 800));
+    }
+
+    fn rect(left: u16, top: u16, right: u16, bottom: u16) -> InclusiveRectangle {
+        InclusiveRectangle {
+            left,
+            top,
+            right,
+            bottom,
+        }
+    }
+
+    #[test]
+    fn touching_tiles_in_a_row_are_joined_into_strips() {
+        // Two rows of 64×64 tiles plus a lone tile far away.
+        let regions = vec![
+            rect(64, 0, 127, 63),
+            rect(0, 0, 63, 63),
+            rect(128, 0, 191, 63),
+            rect(0, 64, 63, 127),
+            rect(64, 64, 127, 127),
+            rect(1000, 700, 1063, 763),
+        ];
+        let union = rect(0, 0, 1063, 763);
+        assert_eq!(
+            coalesce_regions(regions, &union),
+            vec![
+                rect(0, 0, 191, 63),
+                rect(0, 64, 127, 127),
+                rect(1000, 700, 1063, 763),
+            ]
+        );
+    }
+
+    #[test]
+    fn regions_that_cover_most_of_their_union_are_sent_as_the_union() {
+        let union = rect(0, 0, 99, 99);
+        // Two halves with a one-row gap: 99% of the union.
+        let regions = vec![rect(0, 0, 99, 48), rect(0, 50, 99, 99)];
+        assert_eq!(coalesce_regions(regions, &union), vec![union.clone()]);
+
+        // Too many separate regions: one message beats dozens.
+        let scattered = (0..30u16)
+            .map(|i| rect(i * 100, i * 10, i * 100 + 9, i * 10 + 9))
+            .collect();
+        let wide = rect(0, 0, 2909, 299);
+        assert_eq!(coalesce_regions(scattered, &wide), vec![wide.clone()]);
+
+        // No damage recorded: fall back to the union.
+        assert_eq!(coalesce_regions(Vec::new(), &union), vec![union]);
+    }
+
+    #[test]
+    fn sparse_regions_are_sent_on_their_own() {
+        // A window drag: two small strips at opposite corners of a big union.
+        let regions = vec![rect(0, 0, 199, 19), rect(1800, 1000, 1999, 1019)];
+        let union = rect(0, 0, 1999, 1019);
+        assert_eq!(coalesce_regions(regions.clone(), &union), regions);
+    }
+
+    #[test]
+    fn the_graphics_pipeline_is_offered_without_h264() {
+        let config = build_config(&ConnectOptions {
+            protocol: crate::RemoteProtocol::Rdp,
+            host: "example.test".into(),
+            port: 3389,
+            username: Some("alice".into()),
+            password: None,
+            domain: None,
+            width: 1280,
+            height: 800,
+        });
+        assert!(config.support_dyn_vc_gfx_protocol);
+
+        let caps = gfx_capabilities();
+        assert!(matches!(caps.first(), Some(CapabilitySet::V10_7 { .. })));
+        assert!(matches!(caps.last(), Some(CapabilitySet::V8 { .. })));
+        for cap in &caps {
+            let avc_disabled = match cap {
+                CapabilitySet::V10_7 { flags } => {
+                    flags.contains(CapabilitiesV107Flags::AVC_DISABLED)
+                }
+                CapabilitySet::V10_4 { flags }
+                | CapabilitySet::V10_5 { flags }
+                | CapabilitySet::V10_6 { flags } => {
+                    flags.contains(CapabilitiesV104Flags::AVC_DISABLED)
+                }
+                CapabilitySet::V10_3 { flags } => {
+                    flags.contains(CapabilitiesV103Flags::AVC_DISABLED)
+                }
+                CapabilitySet::V10 { flags } | CapabilitySet::V10_2 { flags } => {
+                    flags.contains(CapabilitiesV10Flags::AVC_DISABLED)
+                }
+                // 8.0 has no H.264 at all.
+                CapabilitySet::V8 { .. } => true,
+                other => panic!("unexpected capability set {other:?}"),
+            };
+            assert!(avc_disabled, "{cap:?} would let the server send H.264");
+        }
     }
 
     #[test]
