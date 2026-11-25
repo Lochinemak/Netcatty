@@ -114,7 +114,12 @@ export type RemoteDesktopInputEvent =
   | { type: 'wheel'; x: number; y: number; deltaX: number; deltaY: number }
   | { type: 'key'; down: boolean; keysym: number; scancode: number }
   | { type: 'clipboard'; text: string }
-  | { type: 'refresh' };
+  | { type: 'refresh' }
+  /**
+   * Ask an RDP server for a desktop of this size (Display Control). It
+   * answers with a `resize` event once switched; VNC ignores it.
+   */
+  | { type: 'resize'; width: number; height: number };
 
 /**
  * DOM `MouseEvent.buttons` (bit 0 left, bit 1 right, bit 2 middle) → the

@@ -150,6 +150,7 @@ fn to_input(event: RemoteDesktopInputEvent) -> RemoteInput {
         },
         RemoteDesktopInputEvent::Clipboard { text } => RemoteInput::Clipboard(text),
         RemoteDesktopInputEvent::Refresh => RemoteInput::Refresh,
+        RemoteDesktopInputEvent::Resize { width, height } => RemoteInput::Resize { width, height },
     }
 }
 

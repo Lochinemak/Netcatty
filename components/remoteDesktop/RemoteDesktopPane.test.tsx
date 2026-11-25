@@ -6,7 +6,7 @@ import { JSDOM } from 'jsdom';
 
 import type { RemoteDesktopEvent, RemoteDesktopInputEvent } from '../../domain/remoteDesktop';
 import type { Host } from '../../types';
-import { RemoteDesktopPane, resolveRequestedDesktopSize } from './RemoteDesktopPane';
+import { RDP_RESIZE_SETTLE_MS, RemoteDesktopPane, resolveRequestedDesktopSize } from './RemoteDesktopPane';
 
 const rdpHost = {
   id: 'rdp-1',
@@ -382,4 +382,126 @@ test('an RDP pane hides the local cursor once connected, a VNC pane keeps it', a
     assert.equal(env.canvas().classList.contains('cursor-none'), protocol === 'rdp', `${protocol} once connected`);
     await env.unmount();
   }
+});
+
+/** A `ResizeObserver` the test triggers by hand, plus timers it runs by hand. */
+function installResizeHarness(t: TestContext, window: Window) {
+  const observers: Array<{ callback: ResizeObserverCallback; targets: Element[] }> = [];
+  class FakeResizeObserver {
+    private readonly entry: { callback: ResizeObserverCallback; targets: Element[] };
+    constructor(callback: ResizeObserverCallback) {
+      this.entry = { callback, targets: [] };
+      observers.push(this.entry);
+    }
+    observe(target: Element) { this.entry.targets.push(target); }
+    unobserve() {}
+    disconnect() { this.entry.targets = []; }
+  }
+  const previous = Object.getOwnPropertyDescriptor(globalThis, 'ResizeObserver');
+  Object.defineProperty(globalThis, 'ResizeObserver', { configurable: true, value: FakeResizeObserver });
+  t.after(() => {
+    if (previous) Object.defineProperty(globalThis, 'ResizeObserver', previous);
+    else Reflect.deleteProperty(globalThis, 'ResizeObserver');
+  });
+
+  const timers = new Map<number, { callback: () => void; delay: number }>();
+  let nextTimer = 1;
+  window.setTimeout = ((callback: () => void, delay: number) => {
+    timers.set(nextTimer, { callback, delay });
+    return nextTimer++;
+  }) as never;
+  window.clearTimeout = ((id: number) => { timers.delete(id); }) as never;
+
+  /** Give the pane body a size and report it, like a layout change would. */
+  const resize = async (body: HTMLElement, width: number, height: number) => {
+    Object.defineProperty(body, 'clientWidth', { configurable: true, value: width });
+    Object.defineProperty(body, 'clientHeight', { configurable: true, value: height });
+    await act(async () => {
+      for (const observer of observers) {
+        if (observer.targets.includes(body)) observer.callback([], observer as never);
+      }
+    });
+  };
+  const settle = async () => {
+    await act(async () => {
+      for (const [id, timer] of [...timers]) {
+        timers.delete(id);
+        assert.equal(timer.delay, RDP_RESIZE_SETTLE_MS);
+        timer.callback();
+      }
+    });
+  };
+  return { resize, settle, pendingTimers: () => timers.size };
+}
+
+test('an RDP desktop follows the pane size once it settles', async (t) => {
+  const env = mountEnvironment(t);
+  const harness = installResizeHarness(t, env.dom.window as unknown as Window);
+  await act(async () => {
+    env.root.render(
+      <RemoteDesktopPane
+        host={rdpHost}
+        protocol="rdp"
+        sessionId="session-resize"
+        keys={[]}
+        identities={[]}
+        isVisible
+        isFocused
+        inWorkspace={false}
+      />,
+    );
+  });
+  const body = env.canvas().parentElement as HTMLElement;
+
+  // Nothing is requested before the session is up.
+  await harness.resize(body, 1600, 900);
+  assert.equal(harness.pendingTimers(), 0);
+
+  await act(async () => env.backend.starts[0].emit({ type: 'connected', width: 1280, height: 800 }));
+
+  // A drag reports many sizes; only the last one is requested, after it settles.
+  await harness.resize(body, 1500, 850);
+  await harness.resize(body, 1601, 901);
+  assert.equal(harness.pendingTimers(), 1);
+  await harness.settle();
+  await env.runFrames();
+  assert.deepEqual(env.backend.inputs, [{
+    sessionId: 'backend-1',
+    events: [{ type: 'resize', width: 1600, height: 900 }],
+  }]);
+
+  // The server confirms: the canvas takes the new size.
+  await act(async () => env.backend.starts[0].emit({ type: 'resize', width: 1600, height: 900 }));
+  assert.equal(env.canvas().width, 1600);
+  assert.equal(env.canvas().height, 900);
+
+  // The same size again, or a hidden pane with no layout, asks nothing.
+  await harness.resize(body, 1600, 900);
+  await harness.settle();
+  await harness.resize(body, 0, 0);
+  await harness.settle();
+  await env.runFrames();
+  assert.equal(env.backend.inputs.length, 1);
+});
+
+test('a VNC pane never asks the server to resize', async (t) => {
+  const env = mountEnvironment(t);
+  const harness = installResizeHarness(t, env.dom.window as unknown as Window);
+  await act(async () => {
+    env.root.render(
+      <RemoteDesktopPane
+        host={vncHost}
+        protocol="vnc"
+        sessionId="session-vnc-resize"
+        keys={[]}
+        identities={[]}
+        isVisible
+        isFocused
+        inWorkspace={false}
+      />,
+    );
+  });
+  await act(async () => env.backend.starts[0].emit({ type: 'connected', width: 800, height: 600 }));
+  await harness.resize(env.canvas().parentElement as HTMLElement, 1600, 900);
+  assert.equal(harness.pendingTimers(), 0);
 });

@@ -22,6 +22,12 @@ import { Button } from '../ui/button';
 const DEFAULT_DESKTOP_SIZE = { width: 1280, height: 800 };
 const MIN_REQUEST_SIZE = { width: 800, height: 600 };
 const MAX_REQUEST_SIZE = 4096;
+/**
+ * How long the pane size must stay put before an RDP resize is requested.
+ * Every resize makes the server reallocate and repaint the whole desktop, so
+ * a window drag asks once, when it settles, the way the Windows App does.
+ */
+export const RDP_RESIZE_SETTLE_MS = 400;
 
 export interface RemoteDesktopPaneProps {
   host: Host;
@@ -64,6 +70,7 @@ export function resolveRequestedDesktopSize(box: { width: number; height: number
  * A VNC / RDP session rendered in a terminal pane slot. The backend decodes
  * the remote framebuffer and streams RGBA rectangles; this view paints them
  * on a canvas scaled to fit the pane and sends pointer / keyboard input back.
+ * An RDP desktop is also resized to follow the pane.
  */
 export const RemoteDesktopPane: React.FC<RemoteDesktopPaneProps> = ({
   host,
@@ -89,6 +96,8 @@ export const RemoteDesktopPane: React.FC<RemoteDesktopPaneProps> = ({
   // Backend session id of the current attempt, and its remote desktop size.
   const backendIdRef = useRef<string | null>(null);
   const remoteSizeRef = useRef({ width: 0, height: 0 });
+  // RDP desktop size last asked of the server (at connect or by a resize).
+  const requestedSizeRef = useRef<{ width: number; height: number } | null>(null);
   const pendingInputRef = useRef<RemoteDesktopInputEvent[]>([]);
   const flushHandleRef = useRef<number | null>(null);
   const pressedKeysRef = useRef(new Map<string, { key: string; code: string }>());
@@ -215,6 +224,7 @@ export const RemoteDesktopPane: React.FC<RemoteDesktopPaneProps> = ({
     const size = resolveRequestedDesktopSize(
       body ? { width: body.clientWidth, height: body.clientHeight } : null,
     );
+    requestedSizeRef.current = size;
 
     // Dial on the next microtask, not inside the effect. React StrictMode
     // (dev) mounts, unmounts and remounts synchronously; an attempt that is
@@ -264,6 +274,36 @@ export const RemoteDesktopPane: React.FC<RemoteDesktopPaneProps> = ({
     // `t` is intentionally not a dependency: a language switch must not reconnect.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [attempt, backend, handleEvent, sessionId]);
+
+  // An RDP desktop follows the pane size: once the pane has stopped changing
+  // size, ask the server for a matching desktop. It confirms with a `resize`
+  // event; a server without Display Control ignores the request and the
+  // desktop stays scaled to fit. VNC servers dictate their own size.
+  useEffect(() => {
+    if (protocol !== 'rdp' || state.status !== 'connected') return undefined;
+    const body = bodyRef.current;
+    if (!body || typeof ResizeObserver === 'undefined') return undefined;
+    let timer: number | null = null;
+    const request = () => {
+      timer = null;
+      // A pane in a background tab has no layout; keep the current desktop.
+      if (body.clientWidth < 1 || body.clientHeight < 1) return;
+      const size = resolveRequestedDesktopSize({ width: body.clientWidth, height: body.clientHeight });
+      const last = requestedSizeRef.current;
+      if (last && last.width === size.width && last.height === size.height) return;
+      requestedSizeRef.current = size;
+      queueInput({ type: 'resize', ...size });
+    };
+    const observer = new ResizeObserver(() => {
+      if (timer !== null) window.clearTimeout(timer);
+      timer = window.setTimeout(request, RDP_RESIZE_SETTLE_MS);
+    });
+    observer.observe(body);
+    return () => {
+      observer.disconnect();
+      if (timer !== null) window.clearTimeout(timer);
+    };
+  }, [protocol, queueInput, state.status]);
 
   // Keyboard focus follows the pane focus, like a terminal.
   useEffect(() => {

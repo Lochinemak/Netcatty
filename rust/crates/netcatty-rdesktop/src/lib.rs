@@ -145,6 +145,12 @@ pub enum RemoteInput {
     Clipboard(String),
     /// Ask the server to resend the whole desktop.
     Refresh,
+    /// The viewer's size changed: ask the server for a desktop of this size
+    /// (RDP Display Control). The server answers with
+    /// [`RemoteEvent::Resize`] once it has switched, or not at all when it
+    /// does not support resizing; the renderer keeps scaling either way. VNC
+    /// ignores it.
+    Resize { width: u16, height: u16 },
 }
 
 /// Receives the events of one session. Called from the session task.

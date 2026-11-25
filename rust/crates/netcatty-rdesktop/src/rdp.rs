@@ -1,10 +1,10 @@
 //! RDP sessions on top of IronRDP.
 //!
-//! Scope of this first version: TLS + NLA (CredSSP with NTLM) logon with a
-//! user name and password, bitmap graphics decoded into an RGBA framebuffer,
-//! keyboard and mouse input. Not implemented: Kerberos, clipboard, audio,
-//! drive redirection and dynamic resize (the desktop keeps the size requested
-//! at connect time; the renderer scales it).
+//! Scope: TLS + NLA (CredSSP with NTLM) logon with a user name and password,
+//! bitmap graphics decoded into an RGBA framebuffer, keyboard and mouse input,
+//! and dynamic resize through the Display Control virtual channel
+//! (MS-RDPEDISP). Not implemented: Kerberos, clipboard, audio and drive
+//! redirection.
 
 use crate::net::{connect_tcp, with_handshake_timeout};
 use crate::{clamp_desktop_size, ConnectOptions, EventSink, RemoteEvent, RemoteInput};
@@ -14,6 +14,9 @@ use ironrdp_connector::{
     ClientConnector, Config, ConnectionResult, ConnectorError, ConnectorErrorExt as _,
     ConnectorResult, Credentials, DesktopSize, ServerName,
 };
+use ironrdp_displaycontrol::client::DisplayControlClient;
+use ironrdp_displaycontrol::pdu::MonitorLayoutEntry;
+use ironrdp_dvc::DrdynvcClient;
 use ironrdp_graphics::image_processing::PixelFormat;
 use ironrdp_input::{Database, MouseButton, MousePosition, Operation, Scancode, WheelRotations};
 use ironrdp_pdu::gcc::{ConnectionType, KeyboardType};
@@ -24,7 +27,7 @@ use ironrdp_pdu::WriteBuf;
 use ironrdp_session::image::DecodedImage;
 use ironrdp_session::{ActiveStage, ActiveStageBuilder, ActiveStageOutput};
 use ironrdp_tokio::{
-    single_sequence_step_read, split_tokio_framed, FramedWrite as _, NetworkClient, TokioFramed,
+    single_sequence_step_read, split_tokio_framed, FramedWrite, NetworkClient, TokioFramed,
 };
 use netcatty_core::{CoreError, CoreResult};
 use tokio::net::TcpStream;
@@ -156,7 +159,14 @@ async fn connect(options: &ConnectOptions) -> CoreResult<(ConnectionResult, TlsF
         .map_err(|err| CoreError::network(format!("cannot read local address: {err}")))?;
 
     let mut framed = TokioFramed::new(tcp);
-    let mut connector = ClientConnector::new(build_config(options), client_addr);
+    // DRDYNVC carries the Display Control channel through which the server
+    // accepts resize requests. A server without it never opens the channel,
+    // and the desktop keeps its connect-time size (the renderer scales it).
+    let mut connector = ClientConnector::new(build_config(options), client_addr)
+        .with_static_channel(
+            DrdynvcClient::new()
+                .with_dynamic_channel(DisplayControlClient::new(|_| Ok(Vec::new()))),
+        );
 
     let should_upgrade = ironrdp_tokio::connect_begin(&mut framed, &mut connector)
         .await
@@ -225,6 +235,7 @@ async fn session(
 
     let mut input_db = Database::new();
     let mut buttons = 0u8;
+    let mut resize = ResizeRequest::new(image.width(), image.height());
 
     loop {
         let outputs = tokio::select! {
@@ -241,6 +252,11 @@ async fn session(
                     // Repaint from the local framebuffer copy.
                     RemoteInput::Refresh => {
                         emit_full_frame(&image, sink);
+                        continue;
+                    }
+                    RemoteInput::Resize { width, height } => {
+                        resize.want(width, height);
+                        send_pending_resize(&mut stage, &mut resize, &mut writer).await?;
                         continue;
                     }
                     other => input_db.apply(operations(other, &mut buttons)),
@@ -320,7 +336,81 @@ async fn session(
                 _ => {}
             }
         }
+
+        // A resize asked for before the Display Control channel was ready
+        // (the server opens it after logon) goes out as soon as it is.
+        if resize.is_pending() {
+            send_pending_resize(&mut stage, &mut resize, &mut writer).await?;
+        }
     }
+}
+
+/// The desktop size the renderer wants, and what was last asked of the server.
+///
+/// Requests are deduplicated against the last *requested* size rather than the
+/// current desktop size: resizing to A, then B, then back to A before the
+/// server has switched must still end at A.
+#[derive(Debug)]
+struct ResizeRequest {
+    wanted: Option<(u32, u32)>,
+    requested: (u32, u32),
+}
+
+impl ResizeRequest {
+    fn new(width: u16, height: u16) -> Self {
+        Self {
+            wanted: None,
+            requested: MonitorLayoutEntry::adjust_display_size(width.into(), height.into()),
+        }
+    }
+
+    /// Record a new wanted size, normalized to what MS-RDPEDISP accepts
+    /// (200–8192 pixels, even width).
+    fn want(&mut self, width: u16, height: u16) {
+        let size = MonitorLayoutEntry::adjust_display_size(width.into(), height.into());
+        self.wanted = (size != self.requested).then_some(size);
+    }
+
+    fn is_pending(&self) -> bool {
+        self.wanted.is_some()
+    }
+
+    /// Encode the pending request with `encode`, which answers `None` while
+    /// the channel is not ready; the request then stays pending.
+    fn take_frame<E: std::fmt::Display>(
+        &mut self,
+        encode: impl FnOnce(u32, u32) -> Option<Result<Vec<u8>, E>>,
+    ) -> Option<Vec<u8>> {
+        let (width, height) = self.wanted?;
+        match encode(width, height)? {
+            Ok(frame) => {
+                self.wanted = None;
+                self.requested = (width, height);
+                Some(frame)
+            }
+            Err(err) => {
+                // Not worth ending the session over; the desktop stays scaled.
+                tracing::warn!(%err, width, height, "RDP resize request could not be encoded");
+                self.wanted = None;
+                None
+            }
+        }
+    }
+}
+
+async fn send_pending_resize<W: FramedWrite>(
+    stage: &mut ActiveStage,
+    resize: &mut ResizeRequest,
+    writer: &mut W,
+) -> CoreResult<()> {
+    let frame = resize.take_frame(|width, height| stage.encode_resize(width, height, None, None));
+    if let Some(frame) = frame {
+        writer
+            .write_all(&frame)
+            .await
+            .map_err(|err| CoreError::network(format!("RDP write failed: {err}")))?;
+    }
+    Ok(())
 }
 
 /// Translate one renderer input into IronRDP input operations. Button state
@@ -389,9 +479,9 @@ fn operations(input: RemoteInput, buttons: &mut u8) -> Vec<Operation> {
                 Vec::new()
             }
         }
-        // Clipboard redirection is not implemented for RDP; `Refresh` is
-        // handled by the caller.
-        RemoteInput::Clipboard(_) | RemoteInput::Refresh => Vec::new(),
+        // Clipboard redirection is not implemented for RDP; `Refresh` and
+        // `Resize` are handled by the caller.
+        RemoteInput::Clipboard(_) | RemoteInput::Refresh | RemoteInput::Resize { .. } => Vec::new(),
     }
 }
 
@@ -652,6 +742,65 @@ mod tests {
                 rotation_units: -960,
             })
         ));
+    }
+
+    fn encoded(width: u32, height: u32) -> Option<Result<Vec<u8>, String>> {
+        Some(Ok(vec![width as u8, height as u8]))
+    }
+
+    #[test]
+    fn resize_requests_are_normalized_and_deduplicated() {
+        let mut resize = ResizeRequest::new(1280, 800);
+
+        // The connect-time size is not requested again.
+        resize.want(1280, 800);
+        assert!(!resize.is_pending());
+
+        // Odd widths are made even, sizes clamped to 200..=8192.
+        resize.want(1001, 50);
+        assert_eq!(resize.wanted, Some((1000, 200)));
+        assert_eq!(resize.take_frame(encoded), Some(vec![1000u32 as u8, 200]));
+        assert!(!resize.is_pending());
+        assert_eq!(resize.requested, (1000, 200));
+
+        // Back to the original size before the server switched: still sent.
+        resize.want(1280, 800);
+        assert_eq!(resize.wanted, Some((1280, 800)));
+    }
+
+    #[test]
+    fn a_resize_waits_for_the_display_control_channel() {
+        let mut resize = ResizeRequest::new(1280, 800);
+        resize.want(1600, 900);
+
+        // Channel not ready: nothing is sent and the request stays pending.
+        assert_eq!(
+            resize.take_frame(|_, _| None::<Result<Vec<u8>, String>>),
+            None
+        );
+        assert!(resize.is_pending());
+
+        // A newer size replaces the pending one.
+        resize.want(1700, 1000);
+        let mut sent = None;
+        resize.take_frame(|width, height| {
+            sent = Some((width, height));
+            encoded(width, height)
+        });
+        assert_eq!(sent, Some((1700, 1000)));
+        assert!(!resize.is_pending());
+    }
+
+    #[test]
+    fn a_resize_that_cannot_be_encoded_is_dropped() {
+        let mut resize = ResizeRequest::new(1280, 800);
+        resize.want(1600, 900);
+        assert_eq!(
+            resize.take_frame(|_, _| Some(Err::<Vec<u8>, _>("bad layout".to_owned()))),
+            None
+        );
+        assert!(!resize.is_pending());
+        assert_eq!(resize.requested, (1280, 800));
     }
 
     #[test]

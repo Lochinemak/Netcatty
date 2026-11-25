@@ -128,6 +128,7 @@ terminal sessions: none of the `session_*` commands apply to them.
 | `key` | `down, keysym, scancode` — `keysym` is the X11 keysym (used by VNC); `scancode` the PC set-1 scancode with `0xE000` or-ed in for extended keys (used by RDP, which falls back to the Unicode character of `keysym` when it is 0) |
 | `clipboard` | `text` — offered to the remote side (VNC only) |
 | `refresh` | — full repaint |
+| `resize` | `width, height` — ask for a desktop of this size (RDP Display Control, MS-RDPEDISP; normalized to 200–8192 with an even width). The server confirms with a `resize` message, or ignores it when it cannot resize. Sent before the channel is ready, it waits for it. VNC ignores it |
 
 Output does not use the global event bus. Everything a session emits arrives,
 in order, on the `tauri::ipc::Channel` passed as `onEvent`:

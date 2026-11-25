@@ -1148,6 +1148,13 @@ pub enum RemoteDesktopInputEvent {
     },
     /// Ask for a full repaint.
     Refresh,
+    /// The viewer's size changed; ask the server for a desktop of this size.
+    /// RDP only (Display Control). The server confirms with a `resize`
+    /// control event, or ignores it when it cannot resize.
+    Resize {
+        width: u16,
+        height: u16,
+    },
 }
 
 /// `sendRemoteDesktopInput` payload: a batch, applied in order.
@@ -1195,7 +1202,8 @@ mod remote_desktop_tests {
                 {"type":"wheel","x":3,"y":4,"deltaY":-2},
                 {"type":"key","down":true,"keysym":97,"scancode":30},
                 {"type":"clipboard","text":"hi"},
-                {"type":"refresh"}
+                {"type":"refresh"},
+                {"type":"resize","width":1600,"height":900}
             ]}"#,
         )
         .unwrap();
@@ -1221,6 +1229,10 @@ mod remote_desktop_tests {
                 },
                 RemoteDesktopInputEvent::Clipboard { text: "hi".into() },
                 RemoteDesktopInputEvent::Refresh,
+                RemoteDesktopInputEvent::Resize {
+                    width: 1600,
+                    height: 900
+                },
             ]
         );
     }

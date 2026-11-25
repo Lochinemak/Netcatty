@@ -24,6 +24,9 @@ ironrdp-graphics = "0.11"
 ironrdp-input = "0.9"
 ironrdp-pdu = "0.11"
 ironrdp-tokio = "0.12"
+# Dynamic resize: the Display Control channel (MS-RDPEDISP) rides on DRDYNVC.
+ironrdp-dvc = "0.10"
+ironrdp-displaycontrol = "0.10"
 # The TLS backend must enable exactly one rustls crypto provider. `reqwest`
 # (cloud sync) already pulls in `aws-lc-rs`; enabling `ring` here as well made
 # `rustls::ClientConfig::builder()` panic in the full application build.

@@ -190,6 +190,8 @@ async fn send_input(client: &VncClient, input: RemoteInput, buttons: &mut u8) ->
             Ok(())
         }
         RemoteInput::Refresh => client.input(X11Event::FullRefresh).await.map_err(vnc_error),
+        // The VNC server dictates its framebuffer size; the renderer scales.
+        RemoteInput::Resize { .. } => Ok(()),
     }
 }
 

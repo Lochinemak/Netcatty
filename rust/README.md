@@ -139,6 +139,10 @@ Implemented in Rust:
     encodings; pointer, wheel and keyboard input; remote → local clipboard text.
   * RDP: TLS + NLA (CredSSP with NTLM) logon with user name, password and
     optional domain; keyboard (scancodes, Unicode fallback), mouse and wheel.
+    The desktop follows the pane size: once a resize settles (400 ms) the
+    renderer asks for a matching desktop over the Display Control channel
+    (MS-RDPEDISP, Windows 8.1 / Server 2012 R2 and later, recent xrdp); a
+    server without it keeps the connect-time size, scaled to the pane.
     The server certificate is not validated (RDP hosts are normally
     self-signed), matching mstsc's "connect anyway".
   * A connect attempt is bounded (15 s TCP, 45 s handshake) and every outcome,
@@ -209,8 +213,7 @@ method answers without doing the work):
   release builds (development runs use the source checkout). Node-entry
   plugins need `node` on `PATH` or `NETCATTY_PLUGIN_NODE`.
 * Remote desktop gaps: Kerberos-only RDP accounts, RDP clipboard / audio /
-  drive redirection, dynamic RDP resize (the desktop keeps the size requested
-  at connect time and is scaled to the pane), VNC Tight/JPEG encoding and
+  drive redirection, VNC Tight/JPEG encoding and
   Apple Remote Desktop authentication, local → remote clipboard, connecting
   through an SSH jump host or proxy
 * Cursor API-key mode for managed agents (needs the Node-only `@cursor/sdk`)
