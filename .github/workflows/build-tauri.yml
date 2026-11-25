@@ -50,22 +50,28 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # `targets` is space-separated; each one is built in turn. Both
-          # macOS architectures share one runner: macOS runners are the
-          # scarce ones, and a second queued macOS job was twice cancelled
-          # before it got a machine.
+          # `targets` is space-separated; each one is built in turn.
           #
-          # The Intel image rather than `macos-latest`: on the arm64 pool the
-          # v1.2.4 job was cancelled three times in a row, each after exactly
-          # 15 minutes with an empty `runner_name` and no steps — it never got
-          # a machine, while the same run's Linux and Windows jobs started in
-          # seconds. `macos-15-intel` is the last published x86_64 image
-          # (supported to ~Aug 2027) and far fewer jobs target it;
-          # `macos-13` is retired and now queues forever. Either way one
-          # architecture is cross-compiled, so only the host swaps.
-          - name: macos
+          # Each macOS architecture builds natively on its own runner, in
+          # parallel. On one shared runner the two release builds ran back
+          # to back for ~70 minutes, so a late hiccup (a failed artifact
+          # upload) threw both away.
+          #
+          # macOS runners are the scarce ones: a job can sit in the queue for
+          # 15 minutes and be cancelled without ever getting a machine (the
+          # v1.2.4 arm64 job, three times). That is GitHub's supply, not the
+          # build; `gh run rerun <id> --failed` requeues only the job that
+          # missed out. If the arm64 pool keeps starving, point macos-arm64
+          # at `macos-15-intel` as well: aarch64 cross-compiles there fine.
+          # `macos-15-intel` is the last published x86_64 image (supported
+          # to ~Aug 2027); `macos-13` is retired and queues forever.
+          - name: macos-arm64
+            os: macos-15
+            targets: aarch64-apple-darwin
+            bundles: app,dmg
+          - name: macos-x64
             os: macos-15-intel
-            targets: aarch64-apple-darwin x86_64-apple-darwin
+            targets: x86_64-apple-darwin
             bundles: app,dmg
           - name: windows-x64
             os: windows-latest
@@ -186,7 +192,7 @@ jobs:
           # Upstream's binary repo, also when this workflow runs in a fork.
           ET_BIN_OWNER: binaricat
         run: |
-          # The macOS entry lists both architectures; its clients are universal.
+          # The macOS clients are universal binaries, bundled for either architecture.
           case "${{ matrix.targets }}" in
             *-apple-darwin) platform=darwin; arch=universal ;;
             x86_64-pc-windows-msvc) platform=win32; arch=x64 ;;
@@ -398,12 +404,34 @@ jobs:
           fi
           ls -la out
 
+      # The upload is the only step after a long release build that talks to
+      # the network, and a runner DNS blip there (ENOTFOUND on CreateArtifact)
+      # used to discard the whole build. Retry it once after a pause;
+      # `overwrite` replaces whatever a half-finished first attempt left.
       - name: Upload bundles
+        id: upload
+        continue-on-error: true
         uses: actions/upload-artifact@v7
         with:
           name: netcatty-tauri-${{ matrix.name }}
           path: out/*
           if-no-files-found: error
+
+      - name: Wait before retrying the upload
+        if: steps.upload.outcome == 'failure'
+        shell: bash
+        run: |
+          echo "::warning::artifact upload failed; retrying in 60s"
+          sleep 60
+
+      - name: Upload bundles (retry)
+        if: steps.upload.outcome == 'failure'
+        uses: actions/upload-artifact@v7
+        with:
+          name: netcatty-tauri-${{ matrix.name }}
+          path: out/*
+          if-no-files-found: error
+          overwrite: true
 
       - name: Remove the signing keychain
         if: always() && runner.os == 'macOS'
