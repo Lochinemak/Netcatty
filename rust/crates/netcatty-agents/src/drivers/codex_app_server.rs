@@ -502,6 +502,9 @@ struct Inner {
     interaction_counter: AtomicU64,
     event_counter: AtomicU64,
     connecting: tokio::sync::Mutex<()>,
+    /// Receiver of every connection's notifications, held until the pump that
+    /// drains it starts (see `ensure_event_pump`).
+    events_rx: Mutex<Option<mpsc::UnboundedReceiver<ConnEvent>>>,
 }
 
 /// The App Server runtime shared by every chat.
@@ -516,7 +519,7 @@ fn scoped(key: &str, id: &str) -> String {
 
 impl CodexAppServerRuntime {
     pub fn new(app_version: &str, sink: Arc<dyn EventSink>) -> Self {
-        let (events_tx, mut events_rx) = mpsc::unbounded_channel();
+        let (events_tx, events_rx) = mpsc::unbounded_channel();
         let inner = Arc::new(Inner {
             app_version: app_version.to_string(),
             sink,
@@ -530,23 +533,36 @@ impl CodexAppServerRuntime {
             interaction_counter: AtomicU64::new(0),
             event_counter: AtomicU64::new(0),
             connecting: tokio::sync::Mutex::new(()),
+            events_rx: Mutex::new(Some(events_rx)),
         });
-        let weak = Arc::downgrade(&inner);
-        let spawn = || -> bool { tokio::runtime::Handle::try_current().is_ok() };
-        if spawn() {
-            tokio::spawn(async move {
-                while let Some(event) = events_rx.recv().await {
-                    let Some(inner) = weak.upgrade() else { break };
-                    let rt = CodexAppServerRuntime { inner };
-                    match event {
-                        ConnEvent::Notification(key, msg) => rt.handle_notification(&key, &msg),
-                        ConnEvent::ServerRequest(key, msg) => rt.handle_server_request(&key, msg),
-                        ConnEvent::Fatal(key, message) => rt.handle_fatal(&key, &message),
-                    }
-                }
-            });
+        let rt = Self { inner };
+        if tokio::runtime::Handle::try_current().is_ok() {
+            rt.ensure_event_pump();
         }
-        Self { inner }
+        rt
+    }
+
+    /// Start draining connection notifications, once. The desktop app builds
+    /// this runtime in Tauri's `setup`, on the main thread, where no tokio
+    /// runtime is current — so the pump cannot start there, and without it
+    /// every text delta, reasoning delta and `turn/completed` is queued and
+    /// never read (the turn shows nothing and never ends). It is started from
+    /// `get_connection` instead, which always runs inside the async runtime
+    /// and before any connection can produce a notification.
+    fn ensure_event_pump(&self) {
+        let Some(mut events_rx) = self.inner.events_rx.lock().take() else { return };
+        let weak = Arc::downgrade(&self.inner);
+        tokio::spawn(async move {
+            while let Some(event) = events_rx.recv().await {
+                let Some(inner) = weak.upgrade() else { break };
+                let rt = CodexAppServerRuntime { inner };
+                match event {
+                    ConnEvent::Notification(key, msg) => rt.handle_notification(&key, &msg),
+                    ConnEvent::ServerRequest(key, msg) => rt.handle_server_request(&key, msg),
+                    ConnEvent::Fatal(key, message) => rt.handle_fatal(&key, &message),
+                }
+            }
+        });
     }
 
     fn close_idle_connections(&self, keep: Option<&str>) {
@@ -561,6 +577,7 @@ impl CodexAppServerRuntime {
     }
 
     async fn get_connection(&self, bin: &str, env: &EnvMap) -> Result<Arc<Connection>, String> {
+        self.ensure_event_pump();
         let key = connection_key(bin, env);
         let _guard = self.inner.connecting.lock().await;
         *self.inner.preferred.lock() = Some(key.clone());
@@ -1351,5 +1368,50 @@ for line in sys.stdin:
         assert_eq!(sink.done_count(), 1);
         assert!(sink.events.lock().iter().any(|(c, _)| c == events::CODEX_APP_SERVER_INTERACTION_CLEARED));
         rt.close();
+    }
+
+    /// The desktop app builds the runtime in Tauri's `setup`, where no tokio
+    /// runtime is current. Notifications must still reach the renderer.
+    #[cfg(unix)]
+    #[test]
+    fn streams_when_built_outside_a_tokio_runtime() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let script = dir.path().join("codex");
+        std::fs::write(&script, r#"#!/usr/bin/env python3
+import sys, json
+def send(o):
+    sys.stdout.write(json.dumps(o) + "\n"); sys.stdout.flush()
+for line in sys.stdin:
+    m = json.loads(line)
+    method = m.get("method")
+    if method == "initialize":
+        send({"id": m["id"], "result": {}})
+    elif method == "thread/start":
+        send({"id": m["id"], "result": {"thread": {"id": "th-1"}}})
+    elif method == "turn/start":
+        send({"id": m["id"], "result": {"turn": {"id": "tu-1"}}})
+        send({"method": "item/reasoning/summaryTextDelta", "params": {"threadId": "th-1", "turnId": "tu-1", "itemId": "r1", "delta": "Plan"}})
+        send({"method": "item/agentMessage/delta", "params": {"threadId": "th-1", "turnId": "tu-1", "itemId": "a1", "delta": "hi"}})
+        send({"method": "item/completed", "params": {"threadId": "th-1", "turnId": "tu-1", "item": {"id": "a1", "type": "agentMessage", "text": "hi"}}})
+        send({"method": "turn/completed", "params": {"threadId": "th-1", "turnId": "tu-1", "turn": {"status": "completed"}}})
+"#).unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(tokio::runtime::Handle::try_current().is_err());
+        let sink = Arc::new(RecordingSink::default());
+        let rt = CodexAppServerRuntime::new("1.0.0", sink.clone());
+        let tokio_rt = tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap();
+        tokio_rt.block_on(async {
+            let env: EnvMap = [("PATH".to_string(), "/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin".to_string())].into_iter().collect();
+            let emitter = Emitter::new(sink.clone(), "req-1");
+            let ctx = crate::drivers::test_turn_context(emitter, Some(script.to_string_lossy().into_owned()), env);
+            let result = tokio::time::timeout(Duration::from_secs(10), rt.run_turn(&ctx)).await.expect("turn never completed").unwrap();
+            assert_eq!(result.session_id.as_deref(), Some("th-1"));
+            rt.close();
+        });
+        let ev = sink.stream_events();
+        assert!(ev.iter().any(|e| e["type"] == "reasoning-delta" && e["delta"] == "Plan"));
+        assert!(ev.iter().any(|e| e["type"] == "text-delta" && e["textDelta"] == "hi"));
+        assert_eq!(sink.done_count(), 1);
     }
 }
