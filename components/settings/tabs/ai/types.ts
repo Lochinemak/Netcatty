@@ -128,6 +128,8 @@ export interface ProviderFormState {
   apiKey: string;
   baseURL: string;
   defaultModel: string;
+  /** User-added models offered in the composer switcher besides the default. */
+  models: string[];
   contextWindow: string;
   modelContextWindows: Record<string, number>;
   skipTLSVerify: boolean;

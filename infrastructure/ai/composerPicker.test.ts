@@ -9,6 +9,7 @@ import {
   mergeComposerModels,
   modelPresetsContainId,
   normalizeCattyReasoningLevel,
+  normalizeProviderModelIds,
   parseComposerModelPrefs,
   resolveComposerCustomModelIds,
   resolveComposerEnterModelId,
@@ -89,6 +90,41 @@ test('buildProviderSeedModels includes default plus preset ids', () => {
   const ids = buildProviderSeedModels(provider).map((model) => model.id);
   assert.ok(ids.includes('deepseek-chat'));
   assert.ok(ids.includes('deepseek-v4-pro'));
+});
+
+test('buildProviderSeedModels puts user-added models after the default and before presets', () => {
+  const provider: ProviderConfig = {
+    id: 'p1',
+    providerId: 'deepseek',
+    name: 'DeepSeek',
+    defaultModel: 'deepseek-chat',
+    models: [' my-finetune ', 'deepseek-chat', '', 'my-finetune', 'deepseek-v4-pro'],
+    enabled: true,
+  };
+  const ids = buildProviderSeedModels(provider).map((model) => model.id);
+  assert.deepEqual(ids.slice(0, 3), ['deepseek-chat', 'my-finetune', 'deepseek-v4-pro']);
+  assert.equal(new Set(ids).size, ids.length);
+});
+
+test('buildProviderSeedModels lists every user model for a provider without presets', () => {
+  const provider: ProviderConfig = {
+    id: 'p2',
+    providerId: 'custom',
+    name: 'Gateway',
+    defaultModel: 'model-a',
+    models: ['model-b', 'model-c'],
+    enabled: true,
+  };
+  assert.deepEqual(
+    buildProviderSeedModels(provider).map((model) => model.id),
+    ['model-a', 'model-b', 'model-c'],
+  );
+});
+
+test('normalizeProviderModelIds tolerates malformed values', () => {
+  assert.deepEqual(normalizeProviderModelIds(undefined), []);
+  assert.deepEqual(normalizeProviderModelIds('gpt-5'), []);
+  assert.deepEqual(normalizeProviderModelIds(['a', 1, null, ' a ', 'b']), ['a', 'b']);
 });
 
 test('mergeComposerModels prefers a human name over a raw id', () => {

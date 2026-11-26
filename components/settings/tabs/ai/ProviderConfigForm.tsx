@@ -23,6 +23,8 @@ import type { BuiltinProviderIcon } from "./types";
 import { BUILTIN_PROVIDER_ICONS, getFetchBridge } from "./types";
 import type { ProviderFormState } from "./types";
 import { ModelSelector } from "./ModelSelector";
+import { ProviderModelListEditor } from "./ProviderModelListEditor";
+import { normalizeProviderModelIds } from "../../../../infrastructure/ai/composerPicker";
 import { mergeModelContextWindow } from "./modelMetadata";
 import { ProviderIconBadge } from "./ProviderIconBadge";
 
@@ -89,6 +91,7 @@ export const ProviderConfigForm: React.FC<{
     apiKey: "",
     baseURL: provider.baseURL ?? PROVIDER_PRESETS[provider.providerId]?.defaultBaseURL ?? "",
     defaultModel: provider.defaultModel ?? "",
+    models: normalizeProviderModelIds(provider.models),
     contextWindow: provider.contextWindow != null ? String(provider.contextWindow) : "",
     modelContextWindows: provider.modelContextWindows ?? {},
     skipTLSVerify: provider.skipTLSVerify ?? false,
@@ -401,6 +404,11 @@ export const ProviderConfigForm: React.FC<{
         ? resolvedBaseURL
         : (form.baseURL || undefined),
       defaultModel: form.defaultModel || undefined,
+      models: (() => {
+        const models = normalizeProviderModelIds(form.models)
+          .filter((id) => id !== form.defaultModel.trim());
+        return models.length > 0 ? models : undefined;
+      })(),
       contextWindow: manualContextWindow,
       modelContextWindows: Object.keys(form.modelContextWindows).length > 0 ? form.modelContextWindows : undefined,
       skipTLSVerify: form.skipTLSVerify || undefined,
@@ -657,6 +665,31 @@ export const ProviderConfigForm: React.FC<{
           style={resolvedStyle}
           skipTLSVerify={form.skipTLSVerify}
         />
+      </div>
+
+      {/* More models for the composer's switcher */}
+      <div className="space-y-1.5">
+        <label className="text-xs font-medium text-muted-foreground">{t('ai.providers.models')}</label>
+        <ProviderModelListEditor
+          models={form.models}
+          defaultModel={form.defaultModel}
+          onModelsChange={(models) => setForm((prev) => ({ ...prev, models }))}
+          onModelMetadata={(model) => {
+            setForm((prev) => ({
+              ...prev,
+              modelContextWindows: mergeModelContextWindow(prev.modelContextWindows, model.id, model.contextWindow) ?? prev.modelContextWindows,
+            }));
+          }}
+          baseURL={resolvedBaseURL}
+          modelsEndpoint={preset?.modelsEndpoint}
+          presetModels={preset?.defaultModels}
+          apiKey={headersLoading || headersLoadError || !parsedHeaders.valid ? undefined : form.apiKey}
+          customHeaders={headersLoading || headersLoadError || !parsedHeaders.valid ? undefined : customHeaders}
+          providerId={provider.providerId}
+          style={resolvedStyle}
+          skipTLSVerify={form.skipTLSVerify}
+        />
+        <p className="text-[11px] text-muted-foreground/70">{t('ai.providers.models.help')}</p>
       </div>
 
       {/* Context window */}

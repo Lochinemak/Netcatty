@@ -142,18 +142,40 @@ export function filterComposerModels(
   ));
 }
 
+/**
+ * Trim, drop blanks and de-duplicate a provider's user-added model ids,
+ * keeping their order. Tolerates a malformed (synced or hand-edited) value.
+ */
+export function normalizeProviderModelIds(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set<string>();
+  const ids: string[] = [];
+  for (const item of value) {
+    if (typeof item !== 'string') continue;
+    const id = item.trim();
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    ids.push(id);
+  }
+  return ids;
+}
+
+/**
+ * Models a provider offers before (or without) `/models` discovery: the
+ * default model, then the models the user added, then the preset's curated
+ * list. The user's own entries come first so they lead the switcher even when
+ * discovery returns hundreds of ids.
+ */
 export function buildProviderSeedModels(provider: ProviderConfig): ComposerPickerModel[] {
   const byId = new Map<string, ComposerPickerModel>();
-  const defaultModel = provider.defaultModel?.trim();
-  if (defaultModel) {
-    byId.set(defaultModel, { id: defaultModel, name: defaultModel });
-  }
-  const presetModels = PROVIDER_PRESETS[provider.providerId]?.defaultModels ?? [];
-  for (const modelId of presetModels) {
-    const id = modelId.trim();
-    if (!id || byId.has(id)) continue;
+  const add = (raw: string | undefined) => {
+    const id = raw?.trim();
+    if (!id || byId.has(id)) return;
     byId.set(id, { id, name: id });
-  }
+  };
+  add(provider.defaultModel);
+  for (const modelId of normalizeProviderModelIds(provider.models)) add(modelId);
+  for (const modelId of PROVIDER_PRESETS[provider.providerId]?.defaultModels ?? []) add(modelId);
   return Array.from(byId.values());
 }
 
