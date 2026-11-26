@@ -63,6 +63,12 @@ export interface ProviderConfig {
   apiKey?: string;           // encrypted via credentialBridge (enc:v1: prefix)
   baseURL?: string;          // custom endpoint URL
   defaultModel?: string;
+  /**
+   * Extra model ids the user added for this provider. They always show in the
+   * composer's model switcher, next to `defaultModel`, whether or not the
+   * provider's `/models` discovery works (Google, gateways without a listing).
+   */
+  models?: string[];
   customHeaders?: Record<string, string>; // values encrypted via credentialBridge; decrypted at request boundary
   enabled: boolean;
   skipTLSVerify?: boolean;   // skip TLS certificate verification (for self-signed certs)

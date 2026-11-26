@@ -76,6 +76,33 @@ test('Catty picker keeps a single model list and hides other providers until the
   assert.doesNotMatch(html, /w-\[128px\]/);
 });
 
+test('Catty picker lists the models the user added to a provider without discovery', () => {
+  const html = renderToStaticMarkup(
+    <ComposerModelPicker
+      providers={[
+        {
+          id: 'gw',
+          providerId: 'custom',
+          name: 'Gateway',
+          defaultModel: 'model-a',
+          models: ['model-b', 'model-c'],
+          enabled: true,
+        },
+      ]}
+      selectedProviderId="gw"
+      selectedModelId="model-b"
+      prefs={{ recent: [], pinned: [] }}
+      onSelectProviderModel={() => {}}
+      onTogglePinned={() => {}}
+    />,
+  );
+
+  for (const id of ['model-a', 'model-b', 'model-c']) {
+    assert.match(html, new RegExp(`title="${id}"`));
+  }
+  assert.match(html, /aria-selected="true"[^>]*>.*?model-b/);
+});
+
 test('external agent picker lists presets without a provider column', () => {
   const html = renderToStaticMarkup(
     <ComposerModelPicker

@@ -101,7 +101,11 @@ export const ModelSelector: React.FC<{
   style?: ProviderStyle;
   skipTLSVerify?: boolean;
   onModelMetadata?: (model: FetchedModel) => void;
-}> = ({ value, onChange, baseURL, modelsEndpoint, presetModels, placeholder, apiKey, customHeaders, providerId, style, skipTLSVerify, onModelMetadata }) => {
+  /** Enter in the input (e.g. to add the typed id to a list). */
+  onEnter?: () => void;
+  /** Ids to mark as already chosen in the suggestion list. */
+  selectedIds?: readonly string[];
+}> = ({ value, onChange, baseURL, modelsEndpoint, presetModels, placeholder, apiKey, customHeaders, providerId, style, skipTLSVerify, onModelMetadata, onEnter, selectedIds }) => {
   const { t } = useI18n();
   const [models, setModels] = useState<FetchedModel[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -212,6 +216,13 @@ export const ModelSelector: React.FC<{
               onChange(e.target.value);
               if (canSuggest && !isOpen) setIsOpen(true);
             }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && onEnter && !e.nativeEvent.isComposing) {
+                e.preventDefault();
+                onEnter();
+                setIsOpen(false);
+              }
+            }}
             onFocus={() => { if (canSuggest) setIsOpen(true); }}
             onBlur={() => { setIsOpen(false); }}
             placeholder={placeholder ?? (canSuggest ? t('ai.providers.searchModel') : t('ai.providers.defaultModel.placeholder'))}
@@ -268,7 +279,9 @@ export const ModelSelector: React.FC<{
                 )}
               </div>
             ) : (
-              suggestions.slice(0, 100).map((m) => (
+              suggestions.slice(0, 100).map((m) => {
+                const isSelected = m.id === value || (selectedIds?.includes(m.id) ?? false);
+                return (
                 <button
                   key={m.id}
                   onMouseDown={(e) => {
@@ -277,12 +290,13 @@ export const ModelSelector: React.FC<{
                     onModelMetadata?.(m);
                     setIsOpen(false);
                   }}
-                  className={getModelSuggestionClassName(m.id === value)}
+                  className={getModelSuggestionClassName(isSelected)}
                 >
                   <span className="font-mono truncate">{m.id}</span>
-                  {m.id === value && <Check size={12} className="text-accent-foreground shrink-0" />}
+                  {isSelected && <Check size={12} className="text-accent-foreground shrink-0" />}
                 </button>
-              ))
+                );
+              })
             )}
             {presentation.footerState && (
               <div className={cn(

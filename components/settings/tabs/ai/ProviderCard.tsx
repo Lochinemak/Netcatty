@@ -7,6 +7,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "../../../ui/tooltip";
 import { cn } from "../../../../lib/utils";
 import { ProviderIconBadge } from "./ProviderIconBadge";
 import { ProviderConfigForm } from "./ProviderConfigForm";
+import { normalizeProviderModelIds } from "../../../../infrastructure/ai/composerPicker";
 
 export const ProviderCard: React.FC<{
   provider: ProviderConfig;
@@ -20,6 +21,8 @@ export const ProviderCard: React.FC<{
 }> = ({ provider, isActive, onToggleEnabled, onEdit, onRemove, onUpdate, isEditing, onCancelEdit }) => {
   const { t } = useI18n();
   const hasApiKey = !!provider.apiKey;
+  const extraModelCount = normalizeProviderModelIds(provider.models)
+    .filter((id) => id !== provider.defaultModel?.trim()).length;
 
   return (
     <div
@@ -56,6 +59,9 @@ export const ProviderCard: React.FC<{
                 <span className="text-muted-foreground text-xs">|</span>
                 <span className="text-xs text-muted-foreground truncate">{provider.defaultModel}</span>
               </>
+            )}
+            {extraModelCount > 0 && (
+              <span className="text-xs text-muted-foreground shrink-0">+{extraModelCount}</span>
             )}
           </div>
         </div>
